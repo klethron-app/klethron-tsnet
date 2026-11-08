@@ -30,7 +30,8 @@ func klethron_startup_probe(path *C.char, length C.int) *C.char {
 	return C.CString(probeStartup(C.GoStringN(path, length)))
 }
 
-func probeStartup(dir string) string {
+// checkProbeEnvironment returns a fixed diagnostic, or "" if a probe may start nodes in dir.
+func checkProbeEnvironment(dir string) string {
 	if !utf8.ValidString(dir) || strings.ContainsRune(dir, 0) || !filepath.IsAbs(dir) {
 		return "invalid directory"
 	}
@@ -42,6 +43,13 @@ func probeStartup(dir string) string {
 		if os.Getenv(name) != "" {
 			return "unexpected authentication environment"
 		}
+	}
+	return ""
+}
+
+func probeStartup(dir string) string {
+	if problem := checkProbeEnvironment(dir); problem != "" {
+		return problem
 	}
 	listener, err := net.Listen("tcp4", "127.0.0.1:0")
 	if err != nil {

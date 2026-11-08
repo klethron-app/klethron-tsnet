@@ -27,9 +27,10 @@ Go 1.27.3, NDK 30.0.16248370, AGP 9.5.1 and Gradle 9.9.0 are pinned.
 - Native builds are incremental and configuration-cache compatible. Shared build caching is deliberately
   disabled until toolchains are provisioned hermetically. Only one installed Go version is accepted.
 - Release libraries use Go `-trimpath`, stripped symbols/DWARF and 16 KiB linker alignment.
-- Both variants use `ts_omit_ssh`, `ts_omit_webclient` and `ts_omit_logtail`. These disable out-of-scope
-  features and remove logtail uploads/buffering. Two local patches now skip log configuration and
-  socket-log directory initialization; both user/backend loggers discard output.
+- Both variants use `ts_omit_ssh`, `ts_omit_webclient`, `ts_omit_logtail` and `ts_omit_cachenetmap`.
+  These disable out-of-scope features, logtail uploads/buffering and the on-disk netmap (peer) cache.
+  Two local patches skip log configuration and socket-log directory initialization; both user/backend
+  loggers discard output.
 - `check` checks Android lint, native AAR architecture/alignment and both variants' Go module notices,
   and compiles JNI instrumentation.
 - `:demo` is a platform-only Java Activity with an explicit offline native-load/lifecycle button.
@@ -48,6 +49,9 @@ Go 1.27.3, NDK 30.0.16248370, AGP 9.5.1 and Gradle 9.9.0 are pinned.
 - A second debug-only probe now starts and closes a node with in-memory identity and a rejecting
   loopback control stub. It verifies `NeedsLogin`, no assigned IP, and no files in its caller-owned
   no-backup directory. This does not establish live-tailnet networking or a public startup API.
+- A third debug-only probe joins two in-process nodes to upstream's test control server and a loopback
+  DERP/STUN server, then exchanges TCP data over a verified direct UDP path and over DERP only. This is
+  a hermetic two-node tailnet, not a real tailnet, DNS/TLS bootstrap or public dial API.
 
 Initial scaffold verification on 2026-11-08:
 
@@ -357,16 +361,85 @@ its state directory; this is not a syscall-level audit of all upstream filesyste
 Persistent node identity remains a future explicit choice using caller-owned no-backup storage; the
 patches suppress logging files, not intentional future state persistence.
 
+## Loopback tailnet iteration (2026-11-08)
+
+- Added a debug-only JNI probe that runs a credential-free two-node tailnet inside the test process.
+  Upstream `tstest/integration/testcontrol` serves control over loopback HTTP; `derp/derpserver` serves
+  one DERP region over loopback TLS; a small responder built on `net/stun` serves STUN. Both nodes use
+  the public node constructor (discarding loggers), ephemeral in-memory state, explicit hostnames and
+  one shared temporary no-backup directory. `Server.Up` reaches Running and assigns tailnet IPv4.
+- The dialer node sends 256 KiB of random data to an echo listener on the other node with `Server.Dial`
+  and requires an exact echo. It then waits for an in-process disco ping result and exchanges again:
+  - **Direct:** requires a UDP endpoint and no DERP region. The observed endpoint was the
+    STUN-reported `127.0.0.1` address, reached in about 32 ms; this is loopback, not cross-device UDP.
+  - **Relay only:** sets upstream's `TS_DEBUG_ALWAYS_USE_DERP` envknob before creating nodes, so neither
+    node binds UDP. Requires DERP region 1 and no UDP endpoint. The knob is process-global, so the
+    probe serializes runs and restores it afterwards. First DERP ping success takes about 6 s.
+  DERP's self-signed certificate is skipped through the test-only `InsecureForTests` map flag: this
+  exercises DERP framing and relaying, not certificate verification or DNS/TLS bootstrap.
+- **The first run found a persistence path.** After nodes reached Running and closed, the node directory
+  still contained `profile-data/<id>/netmap-cache/` directories for both nodes (no files remained; whether
+  any were written and removed was not established). Upstream writes cached netmaps there whenever
+  control grants the `CacheNetworkMaps` capability, and capability version 149 asks control to enable it.
+  With a real control server, that would persist peer names, addresses and keys even for ephemeral,
+  in-memory nodes. Adopted upstream's
+  `ts_omit_cachenetmap` tag in both variants instead of patching; the directory now remains empty.
+  The Android import graph is unchanged, because the tag removes code behind a compile-time constant.
+  Revisit only if a future persistent-node API has a concrete need for faster cached startup.
+- Upstream test servers add five modules to debug libraries only (`axiomhq/hyperloglog`,
+  `coder/websocket`, `dgryski/go-metro`, `go4org/hashtriemap`, `kamstrup/intmap`). A debug-only inventory and
+  verbatim notices in `src/debug/assets` keep the debug notice check exact at 32 modules. The release
+  AAR, its 27-module inventory and its notices are unchanged. `go.mod` gained the corresponding indirect
+  requirements; dependency versions in release libraries did not change.
+- The release check now rejects any `klethron_*_probe` export or `*Test.nativeProbe` JNI binding. Startup
+  and tailnet JNI wrappers share one UTF-8 directory conversion in `node_probes.c`.
+
+Verification:
+
+- `./gradlew build :tsnet:publishReleasePublicationToLocalBuildRepository` passes. Repeating it reuses the
+  configuration cache with all four Go builds and both notice checks up to date. `go version -m` shows
+  all four tags in all four libraries, and `klethron_test` only in debug. Release libraries pass
+  architecture/16 KiB alignment checks and contain no test bridge.
+- Instrumentation JUnit XML records **ten passed tests, zero failures/errors/skips per device**: nine
+  library tests (two new) plus the R8-minified demo test. Devices: dedicated emulators at API 34 / x86_64 /
+  4,096-byte pages and API 37.2 / x86_64 / 16,384-byte pages, both SELinux Enforcing. Reports are under
+  each module's `build/reports/device-verification/tailnet-api34/` and `tailnet-api37/`.
+  The two tailnet tests then passed five further runs per device (20 additional passes, no failures).
+- Negative controls: without `ts_omit_cachenetmap`, both tailnet tests failed because the directory
+  contained the netmap-cache directories. Leaving the DERP-only knob unset made the relay test fail with
+  `unexpected direct path` while the direct test passed (`tailnet-negative-api37/`). Removing one debug
+  inventory row made the debug notice check fail with the missing module.
+
+Release sizes with `ts_omit_cachenetmap`, compared with the same sources built without it:
+
+| Entry | Before raw | After raw | Before ZIP | After ZIP |
+|---|---:|---:|---:|---:|
+| arm64-v8a library | 17,098,608 | 17,048,976 | 6,646,303 | 6,625,669 |
+| x86_64 library | 18,546,352 | 18,491,504 | 7,309,376 | 7,287,697 |
+
+Complete release AAR: **13,990,889 bytes**, down **42,313 bytes (0.30%)**. The rebuilt baseline matched the
+previous iteration byte-for-byte, so the `go.mod` additions do not affect release. Debug libraries
+include both test servers and the tailnet probe. They are **19,920,656 raw / 7,750,665 ZIP bytes**
+(arm64) and **21,601,072 / 8,516,871** (x86_64); the debug AAR is **16,351,956 bytes**. Release still
+cannot start a node, so do not use these sizes to predict a public networking API.
+
+This proves Android in-process registration, netmap delivery, WireGuard/netstack TCP and DERP relay
+between two nodes without credentials. It does not prove a real control plane, DNS/TLS bootstrap,
+cross-device or NAT traversal, network changes, arm64 runtime, or a cancellable public lifecycle.
+
 ## Next increments
 
-1. **Prove a real Android node.** Interface discovery and monitor initialization are addressed above.
-   Local unauthenticated startup with controlled storage/logging is now proven above. Next prove
-   DNS/TLS bootstrap, then direct and relayed TCP dialing on Android 14 and the current 16 KiB emulator,
-   including network changes. Keep tests credential-free until an explicit live-tailnet proof.
+1. **Prove a real Android node.** Interface discovery, monitor initialization, file-free startup and
+   loopback two-node direct/DERP dialing are proven above. Remaining: DNS/TLS bootstrap with real
+   certificate verification, a host notification seam for network changes (with a test that changes
+   the default network), and cross-device or NAT-traversing paths. Keep tests credential-free until an
+   explicit live-tailnet proof; the loopback harness can host the network-change test.
 2. **Add only the lifecycle/configuration needed by that proof.** Explicit no-backup state directory and
    hostname; cancellable start/login/status; deliberate logout. No credential-bearing default log sinks
-   or login URLs in logs. Logging-file creation is patched above; continue auditing upstream package
-   initialization, remaining filesystem/process behavior and state permissions. Use
+   or login URLs in logs. Logging files and the netmap cache are removed above; continue auditing
+   upstream package initialization, remaining filesystem/process behavior and state permissions.
+   `Server.Up` already blocks until Running in the loopback probe; a public start still needs
+   cancellation and Close-during-start semantics. Use
    bounded typed events, not log parsing, to deliver the browser login URL after user action.
 3. **Design the connection boundary with a real caller.** Opaque connection handles; bounded read/write;
    backpressure, deadlines, cancellation and exactly-once close. Resolve concurrent close/start/dial
@@ -376,7 +449,8 @@ patches suppress logging files, not intentional future state persistence.
    browser authorization, one selected destination and a simple exchange. Keep all network work off the
    UI thread. No auth keys checked into tests or supplied to pull requests from forks.
 5. **Revalidate feature exclusions with working networking.** Initial individual/combined measurements
-   for `ts_omit_ssh`, `ts_omit_webclient` and `ts_omit_logtail` are recorded above. Once Start/Dial are
+   for `ts_omit_ssh`, `ts_omit_webclient`, `ts_omit_logtail` and `ts_omit_cachenetmap` are recorded above.
+   The loopback tailnet test now exercises all four in debug. Once Start/Dial are
    reachable, repeat both ABI libraries' raw/ZIP sizes and the complete AAR comparison against the
    same dependency/toolchain baseline. Verify startup, login, DNS and direct/relayed dialing on API 34
    and 16 KiB devices. Scaffold-only savings and lifecycle tests do not establish the production

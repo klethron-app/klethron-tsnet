@@ -1,0 +1,6 @@
+module	version	sum	notices
+github.com/axiomhq/hyperloglog	v0.2.6	h1:sRhvvF3RIXWQgAXaTphLp4yJiX4S0IN3MWTaAgZoRJw=	go/github.com/axiomhq/hyperloglog/LICENSE
+github.com/coder/websocket	v1.8.15	h1:6B2JPeOGlpff2Uz6vOEH1Vzpi0iUz20A+lPVhPHtNUA=	go/github.com/coder/websocket/LICENSE.txt
+github.com/dgryski/go-metro	v0.0.0-20250106013310-edb8663e5e33	h1:ucRHb6/lvW/+mTEIGbvhcYU3S8+uSNkuMjx/qZFfhtM=	go/github.com/dgryski/go-metro/LICENSE
+github.com/go4org/hashtriemap	v0.0.0-20260925222741-44e5305f85d9	h1:J8S+Ms89nvHX1F9Ma2m3KhdTl41ZhbFKMyAJqvDA+iE=	go/github.com/go4org/hashtriemap/LICENSE
+github.com/kamstrup/intmap	v0.5.2	h1:qnwBm1mh4XAnW9W9Ue9tZtTff8pS6+s6iKF6JRIV2Dk=	go/github.com/kamstrup/intmap/LICENSE

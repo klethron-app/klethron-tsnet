@@ -5,9 +5,10 @@ Java package: `com.klethron.tsnet`. Maven coordinates: `com.klethron:tsnet:0.1.0
 
 **Initial scaffold:** native loading, linked-version reporting, and creating/closing an unstarted node.
 Android interface discovery and network-monitor initialization are now verified under app restrictions.
-A debug-only test also starts a node against a rejecting loopback control endpoint, checks its
-unauthenticated status, and closes it without writing files. Public startup, login, peer discovery
-and dialing are not implemented. No package registry release exists yet.
+Debug-only tests also start a node against a rejecting loopback control endpoint, and connect two
+in-process nodes through a loopback test control and DERP server to exchange TCP data over direct
+and relay-only paths. These nodes write no files. Public startup, login, peer discovery and dialing
+are not implemented, and no real tailnet has been used. No package registry release exists yet.
 See [PLAN.md](PLAN.md) for the next implementation steps and verification status.
 
 ## Build
@@ -39,8 +40,9 @@ AndroidX threading and permission annotations are deferred until the correspondi
 exist. The current unstarted-node API needs no INTERNET permission. Callers must close nodes explicitly;
 `close()` is idempotent and synchronized. Nullness annotations do not enforce resource ownership.
 
-Both build variants disable Tailscale SSH, the embedded web client, and logtail using upstream build
-tags. Two small patches also skip upstream log-configuration creation and socket-log directory lookup
+Both build variants disable Tailscale SSH, the embedded web client, logtail and the on-disk netmap
+cache using upstream build tags. The netmap cache would otherwise persist peer names, addresses and
+keys in the node directory whenever the control server enables it. Two small patches also skip upstream log-configuration creation and socket-log directory lookup
 when logtail is disabled. Both user and backend loggers discard output. Patches are applied to an
 isolated, verified build copy; the shared module cache is untouched. The AAR ships the patch notice.
 The patch implementation is part of Gradle's task fingerprint, so edits invalidate native builds;
@@ -56,9 +58,15 @@ stores no identity and does not authenticate to Tailscale. JNI instrumentation t
 network monitors and unauthenticated startup, using INTERNET permission only in the test APK. The
 startup test uses an in-memory identity store and a temporary no-backup directory, requires that the
 directory remain empty, and contacts its own loopback control stub, which refuses key exchange.
+The tailnet test runs Tailscale's own test control server and a DERP/STUN server in the test process on
+127.0.0.1. Two ephemeral in-memory nodes register without credentials, then exchange 256 KiB of TCP
+data twice: once over a verified direct UDP path, and once with UDP disabled so DERP is the only path.
+DERP uses a self-signed certificate that clients are told not to verify. These test servers link five
+more Go modules into debug libraries only; their notices ship in the debug AAR.
 It requires a device with SELinux **Enforcing** (`adb shell getenforce`) to verify the standard Go
 discovery failure. Native test bridges are present only in debug builds; the release AAR check rejects
-them. Neither the demo nor these tests proves tailnet connectivity, DNS/TLS bootstrap or dial support.
+them. Neither the demo nor these tests proves connectivity to a real tailnet, DNS/TLS bootstrap, or a
+public dial API.
 
 The release demo enables R8 and resource shrinking and uses the local debug signing key solely for
 installation/testing. `build` assembles it and its instrumentation APK; `:demo:connectedReleaseAndroidTest`

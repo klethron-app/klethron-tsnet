@@ -1,4 +1,4 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <!-- Interface queries open sockets; the startup probe contacts only its loopback control stub. -->
+    <!-- Interface queries open sockets; node probes contact only their own loopback test servers. -->
     <uses-permission android:name="android.permission.INTERNET" />
 </manifest>

@@ -1,4 +1,5 @@
 import java.io.ByteArrayOutputStream
+import java.io.File
 import java.util.zip.ZipFile
 import javax.inject.Inject
 import org.gradle.api.DefaultTask
@@ -9,6 +10,7 @@ import org.gradle.api.provider.Property
 import org.gradle.api.tasks.Input
 import org.gradle.api.tasks.InputDirectory
 import org.gradle.api.tasks.InputFile
+import org.gradle.api.tasks.Optional
 import org.gradle.api.tasks.OutputFile
 import org.gradle.api.tasks.PathSensitive
 import org.gradle.api.tasks.PathSensitivity
@@ -26,6 +28,12 @@ abstract class VerifyNativeNotices @Inject constructor(private val exec: ExecOpe
     @get:PathSensitive(PathSensitivity.RELATIVE)
     abstract val notices: DirectoryProperty
 
+    // Modules linked only into debug libraries by instrumentation test servers, with their notices.
+    @get:Optional
+    @get:InputDirectory
+    @get:PathSensitive(PathSensitivity.RELATIVE)
+    abstract val debugNotices: DirectoryProperty
+
     @get:Input abstract val goVersion: Property<String>
     @get:OutputFile abstract val report: RegularFileProperty
 
@@ -35,31 +43,38 @@ abstract class VerifyNativeNotices @Inject constructor(private val exec: ExecOpe
             if (!condition) throw GradleException("$message. Review THIRD-PARTY-NOTICES.md and the checked-in notices")
         }
         val directory = notices.get().asFile
-        val inventory = directory.resolve("GO-MODULES.tsv").readLines()
-        requireNotice(inventory.firstOrNull() == "module\tversion\tsum\tnotices", "Malformed Go module inventory header")
         for (path in listOf("GO-LICENSE", "GO-PATENTS", "JSPECIFY-LICENSE")) {
             requireNotice(directory.resolve(path).isFile && directory.resolve(path).length() > 0, "Missing notice $path")
         }
-        val modules = inventory.drop(1).map { line ->
-            val fields = line.split('\t')
-            requireNotice(fields.size == 4 && fields.all { it.isNotBlank() }, "Malformed Go module inventory row")
-            fields
-        }
-        requireNotice(modules.isNotEmpty() && modules.map { it[0] }.distinct().size == modules.size,
-            "Go module inventory must be nonempty with unique module paths")
-        val expected = modules.map { it.take(3) }.toSet()
-        for (module in modules) {
-            for (path in module[3].split(',')) {
-                requireNotice(!path.startsWith('/') && path.split('/').none { it == ".." }, "Invalid notice path $path")
-                requireNotice(directory.resolve(path).isFile && directory.resolve(path).length() > 0,
-                    "Missing notice $path for ${module[0]}")
+        fun inventory(directory: File, name: String): List<List<String>> {
+            val lines = directory.resolve(name).readLines()
+            requireNotice(lines.firstOrNull() == "module\tversion\tsum\tnotices", "Malformed inventory header in $name")
+            val modules = lines.drop(1).map { line ->
+                val fields = line.split('\t')
+                requireNotice(fields.size == 4 && fields.all { it.isNotBlank() }, "Malformed inventory row in $name")
+                fields
             }
+            requireNotice(modules.isNotEmpty(), "Go module inventory $name must be nonempty")
+            for (module in modules) {
+                for (path in module[3].split(',')) {
+                    requireNotice(!path.startsWith('/') && path.split('/').none { it == ".." }, "Invalid notice path $path")
+                    requireNotice(directory.resolve(path).isFile && directory.resolve(path).length() > 0,
+                        "Missing notice $path for ${module[0]}")
+                }
+            }
+            return modules
         }
+        val debugDirectory = debugNotices.orNull?.asFile
+        val directories = listOfNotNull(directory, debugDirectory)
+        val modules = inventory(directory, "GO-MODULES.tsv") +
+            (debugDirectory?.let { inventory(it, "GO-MODULES-DEBUG.tsv") } ?: emptyList())
+        requireNotice(modules.map { it[0] }.distinct().size == modules.size, "Go module inventories must have unique module paths")
+        val expected = modules.map { it.take(3) }.toSet()
         val results = StringBuilder("entry\tgo_version\tmodule_count\n")
         ZipFile(aar.get().asFile).use { zip ->
             // Compare all checked-in notices, including Go, JSpecify, and the inventory itself.
-            for (file in directory.walkTopDown().filter { it.isFile }) {
-                val path = "assets/klethron-tsnet/licenses/" + file.relativeTo(directory).invariantSeparatorsPath
+            for ((root, file) in directories.flatMap { root -> root.walkTopDown().filter { it.isFile }.map { root to it } }) {
+                val path = "assets/klethron-tsnet/licenses/" + file.relativeTo(root).invariantSeparatorsPath
                 val entry = zip.getEntry(path)
                 requireNotice(entry != null, "AAR is missing $path")
                 val packaged = zip.getInputStream(entry).use { it.readBytes() }

@@ -15,6 +15,11 @@ modules reported by `go version -m` for both Android ABIs in both build variants
 version, Go module checksum, and paths to the included notices. Paths are relative to the inventory.
 The inventory and full notice texts ship in the AAR under `assets/klethron-tsnet/licenses/`.
 
+Debug libraries also link an in-process test control server and DERP/STUN server for instrumentation.
+[`GO-MODULES-DEBUG.tsv`](tsnet/src/debug/assets/klethron-tsnet/licenses/GO-MODULES-DEBUG.tsv) records the
+five modules these add (32 in total), with notices copied verbatim from the verified module cache. They are
+packaged only in the debug AAR. The release AAR and its 27-module inventory are unchanged.
+
 `TAILSCALE-MODIFICATIONS` records two local patches that make `ts_omit_logtail` skip log configuration
 and socket-log directory initialization. `BuildGoLibrary` verifies the upstream modules and both
 original source-file hashes, then patches an isolated copy using a temporary `./tailscale` module
@@ -29,7 +34,8 @@ licence also contains notices for code outside that graph; those upstream notice
 The existing Go and Tailscale notices are retained, including Go notices for Tailscale's Go-derived
 `tempfork/heap`, `tempfork/acme`, and `tempfork/httprec` sources.
 
-`./gradlew build` runs `:tsnet:verifyReleaseNativeNotices` and `:tsnet:verifyDebugNativeNotices`.
+`./gradlew build` runs `:tsnet:verifyReleaseNativeNotices` and `:tsnet:verifyDebugNativeNotices`;
+the debug check expects the union of both inventories.
 These inspect each AAR's actual libraries, reject missing/stale modules, version/checksum drift and
 unexpected module replacements, check the pinned Go runtime version, and compare every packaged notice with
 its checked-in source. Reports are in `tsnet/build/reports/native/notices-{release,debug}.tsv`.

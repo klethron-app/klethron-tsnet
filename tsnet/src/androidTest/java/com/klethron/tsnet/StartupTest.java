@@ -48,7 +48,7 @@ public final class StartupTest {
         }
     }
 
-    private static Path temporaryDirectory(String prefix) throws Exception {
+    static Path temporaryDirectory(String prefix) throws Exception {
         return Files.createTempDirectory(InstrumentationRegistry.getInstrumentation()
                 .getTargetContext().getNoBackupFilesDir().toPath(), prefix);
     }
@@ -57,7 +57,7 @@ public final class StartupTest {
         return nativeProbe(directory.toString().getBytes(StandardCharsets.UTF_8));
     }
 
-    private static void deleteDirectory(Path directory) throws Exception {
+    static void deleteDirectory(Path directory) throws Exception {
         // Delete only this test's private temporary directory; never read or report its contents.
         try (var paths = Files.walk(directory)) {
             for (Path path : paths.sorted(Comparator.reverseOrder()).toList()) {

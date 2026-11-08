@@ -41,8 +41,8 @@ val nativeTasks = listOf("release", "debug").associateWith { buildType ->
             goVersion.set(libs.versions.go)
             api.set(libs.versions.minSdk.get().toInt())
             this.abi.set(abi)
-            // No embedded SSH server, web UI, or log upload/buffering in this library.
-            buildTags.set(listOf("ts_omit_ssh", "ts_omit_webclient", "ts_omit_logtail") +
+            // No embedded SSH server, web UI, log upload/buffering, or on-disk netmap (peer) cache.
+            buildTags.set(listOf("ts_omit_ssh", "ts_omit_webclient", "ts_omit_logtail", "ts_omit_cachenetmap") +
                 if (buildType == "debug") listOf("klethron_test") else emptyList())
             outputDirectory.set(layout.buildDirectory.dir("generated/jniLibs/$buildType/$abi"))
         }
@@ -67,6 +67,7 @@ for (buildType in listOf("release", "debug")) {
         dependsOn("bundle" + buildType.replaceFirstChar { it.uppercase() } + "Aar")
         aar.set(layout.buildDirectory.file("outputs/aar/tsnet-$buildType.aar"))
         notices.set(layout.projectDirectory.dir("src/main/assets/klethron-tsnet/licenses"))
+        if (buildType == "debug") debugNotices.set(layout.projectDirectory.dir("src/debug/assets/klethron-tsnet/licenses"))
         goVersion.set(libs.versions.go)
         report.set(layout.buildDirectory.file("reports/native/notices-$buildType.tsv"))
     }
