@@ -130,7 +130,7 @@ Complete release AAR: 14,472,683 bytes. Debug AAR: 15,442,185 bytes. Notices add
    re-authentication, real DERP, fallback DNS when system DNS fails, and cross-device/NAT paths including
    recovery after a network change.
 2. **Finish the lifecycle.** Surface backend errors (`Notify.ErrMessage`) and control's node-removed state
-   as typed status. Report the upstream bugs marked in UPSTREAM.md. Decide whether an ephemeral mode is
+   as typed status. Decide whether an ephemeral mode is
    needed before adding one. Keep auditing upstream initialization, filesystem/process behaviour and
    state permissions; retest the state format on every upstream update. Verify `@RequiresPermission` in
    a scratch consumer. Possibly let callers supply `hostinfo` OS version/device model.
