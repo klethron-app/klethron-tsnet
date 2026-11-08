@@ -39,7 +39,8 @@ public final class TsnetNode implements AutoCloseable {
     /// The node's identity, including its private keys, persists in `stateDirectory`, which is
     /// created if missing. Use a directory that only this node uses, under the app's no-backup
     /// storage (`Context.getNoBackupFilesDir()`), and delete it to forget the node. Logs and network
-    /// maps are not written there. Starting again with the same directory resumes without logging in.
+    /// maps are not written there. Starting again with the same directory resumes without logging in,
+    /// unless the node logged out or its key expired.
     ///
     /// @param hostname the requested tailnet machine name; control may adjust it
     /// @throws IllegalArgumentException if the directory is relative or the hostname is empty
@@ -120,8 +121,8 @@ public final class TsnetNode implements AutoCloseable {
     /// soon reports [TsnetStatus.State#NEEDS_LOGIN] without a login URL; its connections stop
     /// working. Has no effect if the node is not logged in.
     ///
-    /// To log in again, close this node and start a new one with the same directory. To also
-    /// forget the device key that remains there, close this node and delete the directory.
+    /// To log in again, call [#login]. To also forget the device key that remains in the state
+    /// directory, close this node and delete the directory.
     ///
     /// If the logout fails, the node is [TsnetStatus.State#STOPPED] but remains registered, and its
     /// login persists until a logout succeeds: retry, possibly from a new node started with the same
@@ -135,6 +136,23 @@ public final class TsnetNode implements AutoCloseable {
     @WorkerThread
     public void logout(Duration timeout) throws IOException {
         check(nativeLogout(handle, millis(timeout)));
+    }
+
+    /// Starts a new interactive login. Call it when the node reports [TsnetStatus.State#NEEDS_LOGIN]
+    /// without a login URL: after [#logout], or once control expired the node's key, which happens
+    /// periodically unless a tailnet administrator disabled key expiry. [#start] needs no call: it
+    /// logs in by itself if necessary.
+    ///
+    /// Returns without waiting for the network; the node then reports a new
+    /// [TsnetStatus#loginUrl()]. On a logged-in node, this re-authenticates it, for example to renew
+    /// its key before it expires: the node keeps working, reporting a login URL until the user has
+    /// logged in.
+    ///
+    /// @throws IllegalStateException if this node is not started, failed to start, or is closed
+    /// @throws IOException if the login cannot be started
+    @WorkerThread
+    public void login() throws IOException {
+        check(nativeLogin(handle));
     }
 
     /// Returns the exact Go module version linked into this binary.
@@ -183,6 +201,7 @@ public final class TsnetNode implements AutoCloseable {
             case -6 -> throw new SocketTimeoutException("Timed out");
             case -7 -> throw new ConnectException("Tailnet connection failed");
             case -8 -> throw new IOException("Logout failed");
+            case -9 -> throw new IOException("Login failed");
             default -> { }
         }
     }
@@ -202,6 +221,8 @@ public final class TsnetNode implements AutoCloseable {
     private static native int nativeDial(long handle, byte[] host, int port, long timeoutMillis);
 
     private static native int nativeLogout(long handle, long timeoutMillis);
+
+    private static native int nativeLogin(long handle);
 
     private static native void nativeClose(long handle);
 

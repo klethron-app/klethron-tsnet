@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"math"
 	"net"
 	"net/netip"
 	"net/url"
@@ -19,6 +20,7 @@ import (
 	"tailscale.com/client/local"
 	"tailscale.com/ipn"
 	"tailscale.com/tsnet"
+	"tailscale.com/types/key"
 )
 
 // node serializes upstream Start and Close, which must not run concurrently, publishes the
@@ -35,6 +37,7 @@ type node struct {
 	cancel context.CancelFunc
 
 	mu      sync.Mutex
+	selfKey key.NodePublic // Of the latest network map.
 	status  nodeStatus
 	version uint64
 	changed chan struct{} // Closed and replaced on every status change.
@@ -139,12 +142,16 @@ func (n *node) publish(notify ipn.Notify) {
 	status.ip4, status.ip6 = ip4, ip6
 	if notify.State != nil {
 		status.state = *notify.State
-		if status.state != ipn.NoState && status.state != ipn.NeedsLogin {
-			status.loginURL = "" // Used or no longer needed.
-		}
 	}
 	if notify.BrowseToURL != nil {
 		status.loginURL = loginURL(*notify.BrowseToURL)
+	}
+	// Every interactive login creates a new node key, which upstream saves before announcing the
+	// first network map with it. Closing the node at LoginFinished, which comes first, would lose the
+	// login. A re-authenticating node stays Running, so the state does not tell either.
+	if self := notify.SelfChange; self != nil && self.Key != n.selfKey {
+		n.selfKey = self.Key
+		status.loginURL = ""
 	}
 	if status != n.status {
 		n.status = status
@@ -204,6 +211,7 @@ const (
 	resultTimeout
 	resultDialFailed
 	resultLogoutFailed
+	resultLoginFailed
 )
 
 // whenStarted returns a context for a call on a started node, ending at the timeout or when the node
@@ -286,6 +294,31 @@ func (n *node) logout(timeout time.Duration) int {
 	}
 	if err := client.Logout(ctx); err != nil {
 		return n.failed(ctx, resultLogoutFailed)
+	}
+	return 0
+}
+
+// login starts an interactive login, also after a logout or key expiry, and also when logged in, to
+// re-authenticate. The new login URL is published with the status. It returns 0 or a failure.
+func (n *node) login() int {
+	ctx, cancel, result := n.whenStarted(math.MaxInt64) // Neither call waits for the network.
+	if result != 0 {
+		return result
+	}
+	defer cancel()
+	client, err := n.server.LocalClient()
+	if err != nil {
+		return n.failed(ctx, resultLoginFailed)
+	}
+	// As upstream Server.Start. A logout replaced the prefs with defaults, including Tailscale's
+	// control URL and the device's hostname, and the control client keeps the URL it started with.
+	prefs := ipn.NewPrefs()
+	prefs.Hostname, prefs.ControlURL, prefs.WantRunning = n.server.Hostname, n.server.ControlURL, true
+	if err := client.Start(ctx, ipn.Options{UpdatePrefs: prefs}); err != nil {
+		return n.failed(ctx, resultLoginFailed)
+	}
+	if err := client.StartLoginInteractive(ctx); err != nil {
+		return n.failed(ctx, resultLoginFailed)
 	}
 	return 0
 }

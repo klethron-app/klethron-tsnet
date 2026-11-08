@@ -67,3 +67,8 @@ JNIEXPORT jint JNICALL
 Java_com_klethron_tsnet_TsnetNode_nativeLogout(JNIEnv *env, jclass type, jlong handle, jlong timeoutMillis) {
     return klethron_node_logout(handle, timeoutMillis);
 }
+
+JNIEXPORT jint JNICALL
+Java_com_klethron_tsnet_TsnetNode_nativeLogin(JNIEnv *env, jclass type, jlong handle) {
+    return klethron_node_login(handle);
+}

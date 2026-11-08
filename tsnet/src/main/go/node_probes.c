@@ -100,3 +100,26 @@ JNIEXPORT void JNICALL
 Java_com_klethron_tsnet_LoginTest_nativeProbeRejectRegistrations(JNIEnv *env, jclass type, jboolean reject) {
     klethron_login_probe_reject_registrations(reject == JNI_TRUE);
 }
+
+JNIEXPORT jint JNICALL
+Java_com_klethron_tsnet_LoginTest_nativeProbeExpire(JNIEnv *env, jclass type) {
+    return klethron_login_probe_expire();
+}
+
+JNIEXPORT void JNICALL
+Java_com_klethron_tsnet_LoginTest_nativeProbeRequireMachineAuth(JNIEnv *env, jclass type) {
+    klethron_login_probe_require_machine_auth();
+}
+
+JNIEXPORT jint JNICALL
+Java_com_klethron_tsnet_LoginTest_nativeProbeApproveMachines(JNIEnv *env, jclass type) {
+    return klethron_login_probe_approve_machines();
+}
+
+JNIEXPORT jstring JNICALL
+Java_com_klethron_tsnet_LoginTest_nativeProbeHostnames(JNIEnv *env, jclass type) {
+    char *names = klethron_login_probe_hostnames(); // Test hostnames are ASCII.
+    jstring result = (*env)->NewStringUTF(env, names);
+    free(names);
+    return result;
+}

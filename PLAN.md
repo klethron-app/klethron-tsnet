@@ -28,6 +28,8 @@ Go 1.27.3, NDK 30.0.16248370, AGP 9.5.1 and Gradle 9.9.0 are pinned.
   `dial(host, port, timeout)` returns a socket-pair `ParcelFileDescriptor` relaying a netstack TCP
   connection, refusing addresses outside the network map instead of using the device's network.
   `logout(timeout)` expires the node key at control and deletes the login from the state directory.
+  `login()` starts a new interactive login on the same node after a logout or key expiry, or
+  re-authenticates a logged-in one; a login URL stays in the status until the new key is saved.
   Verified against a loopback test control server and peer only.
 - Native builds are incremental and configuration-cache compatible. Shared build caching is deliberately
   disabled until toolchains are provisioned hermetically. Only one installed Go version is accepted.
@@ -960,21 +962,108 @@ This proves logout's local effects and failure handling against an in-process te
 needs a real control plane with an authorized node (the live-tailnet proof). Key expiry by an
 administrator, `NEEDS_MACHINE_AUTH` and backend error reporting remain open.
 
+## Re-login iteration (2026-11-08)
+
+Key expiry and re-login, the next lifecycle item. Tailscale node keys expire periodically by default, so
+Klethron's persistent node needs a way back in without discarding the node.
+
+- **Found: an expired key left a running node stuck.** Once control expires the key, upstream reports
+  `NeedsLogin` but keeps its network map (so the old addresses remain in the status) and never requests
+  a login URL. Only a user-initiated interactive login does that. The `NEEDS_LOGIN` documentation
+  ("`loginUrl()` is set once control provides a URL") was wrong for this case. A node restarted from
+  the same directory does get a URL, because upstream `Server.Start` logs in interactively when it
+  finds `NeedsLogin`.
+- `TsnetNode.login()` (`@WorkerThread`) starts an interactive login on a started node, as upstream
+  `Server.Start` and `tailscale login` do: LocalAPI `Start` with tsnet's prefs (hostname, control URL,
+  `WantRunning`), then `StartLoginInteractive`. It returns without waiting for the network. It covers key
+  expiry, re-login after `logout` (which no longer needs a new node), and re-authenticating a logged-in
+  node to renew its key. Errors reuse the shared mapping (`IllegalStateException`; fixed-message
+  `IOException` for result `-9`). No timeout parameter, since neither call waits for control.
+- **Found: logout resets the prefs.** Upstream's logout deletes the login profile, and the fresh profile
+  has default prefs: Tailscale's control URL and the device's hostname. An `EditPrefs` that set
+  `WantRunning` sent the re-login to `login.tailscale.com` instead of the configured control server
+  (seen in the test, which never opens it). Setting the control URL with `EditPrefs` would not help
+  either, because the control client keeps the URL it was created with. Hence LocalAPI `Start`.
+- **Found: `LoginFinished` comes before the new key is saved.** Every interactive login generates a new
+  node key. Upstream `controlclient.Auto` reports `Persist` only together with a network map, so
+  LocalBackend saves the key when the first map arrives, not at `LoginFinished` (`authRoutine-success`
+  has no `Persist`). A re-authenticating node stays `Running`, so the state does not show completion.
+  Clearing the URL at `LoginFinished` and closing the node promptly lost the new key in 2 of 2 runs:
+  the restarted node registered with a retired key and got new addresses. The status now clears the
+  login URL once a `SelfChange` notification brings a different node key. Upstream sends that after
+  saving the key and under the same lock as the save. The URL no longer clears on any state other than
+  `NeedsLogin`, which could have hidden a re-authentication URL while `Running`. The contract is
+  documented on `loginUrl()`: close only after it is cleared. A missed `SelfChange` (only possible
+  when the bus watch falls behind) leaves a stale URL until the next network map; accepted. Embedders
+  of upstream tsnet face the same race, which may be worth reporting upstream.
+- Device approval needed no code: `NEEDS_MACHINE_AUTH` is reported after login with the addresses and
+  no URL, and the node runs once an administrator approves it.
+- Debug-only probes: `klethron_login_probe_expire` sets every registered node's key expiry in the past
+  (as time or an administrator would). `complete` gives a re-login's staged new key a fresh expiry (as
+  real control does; testcontrol copies the expired node). `require_machine_auth`/`approve_machines`
+  wrap testcontrol's device approval, and `hostnames` reports what devices registered as.
+
+New tests (public API only, off the UI thread):
+
+- `LoginTest.expiredKeyRequiresANewLogin`: after expiry, `NEEDS_LOGIN` without a URL for 2 s and a
+  500 ms dial times out. `login()` yields a URL for this control server; after approval, `RUNNING` with
+  the same addresses. A second `login()` while running yields a URL while staying `RUNNING`. Once that
+  URL clears, the node closes at once, and a new node with the same directory resumes `RUNNING` with the
+  same addresses and never asks to log in. Only `tailscaled.state` remains.
+- `LoginTest.deviceApprovalFollowsLogin`: with device approval required, login reaches
+  `NEEDS_MACHINE_AUTH` without a URL, then `RUNNING` after approval.
+- `LoginTest.logoutRequiresANewLogin` now logs the same node in again after logout: a new URL for this
+  control server, `RUNNING`, and both registrations named `klethron-logout-test` (testcontrol keeps the
+  logged-out one). It also refuses `login()` before start and after close.
+
+Verification:
+
+- `./gradlew build :tsnet:publishReleasePublicationToLocalBuildRepository` passes, including lint (library:
+  only the existing Error Prone version notice; the unchanged demo's `DataExtractionRules` and
+  `MissingApplicationIcon` warnings remain), notice checks (26 release modules, unchanged) and release
+  alignment/probe checks. Repeating `build` reuses the configuration cache with all four Go builds up to
+  date. `zipalign -c -P 16 4` passes for the release demo APK.
+- Instrumentation JUnit XML records **26 passed tests, zero failures/errors/skips per device**: 25 library
+  tests (two new) plus the R8-minified demo test, on dedicated emulators at API 34 / x86_64 / 4,096-byte
+  pages and API 37.2 / x86_64 / 16,384-byte pages, both SELinux Enforcing (`relogin-api34/`,
+  `relogin-api37/` under each module's `build/reports/device-verification/`). `LoginTest` then passed
+  five further runs per device (`relogin-repeat-*`, 70 passes).
+- Negative controls on API 34 failed as expected (`relogin-negative-*-api34/`). Clearing the URL at
+  `LoginFinished` or any state other than `NeedsLogin` failed the expiry test: the restarted node got
+  new addresses. Using `EditPrefs` instead of `Start` failed the logout test with a URL outside this
+  control server.
+
+Release sizes (no dependency or toolchain changes):
+
+| Entry | Before raw | After raw | Before ZIP | After ZIP |
+|---|---:|---:|---:|---:|
+| arm64-v8a library | 17,560,784 | 17,565,008 | 6,853,762 | 6,854,761 |
+| x86_64 library | 19,066,352 | 19,071,024 | 7,534,375 | 7,536,474 |
+
+Complete release AAR: **14,472,683 bytes**, up **3,167 bytes (0.02%)**. Debug libraries are **18,719,056
+raw / 7,315,068 ZIP bytes** (arm64) and **20,303,920 / 8,038,672** (x86_64); the debug AAR is **15,442,185
+bytes**.
+
+This proves expiry, re-login, re-authentication and device approval against an in-process test control
+server. Real control's expiry, its key rotation on re-login, and whether addresses survive there are
+not verified. Backend errors (`Notify.ErrMessage`) are still not surfaced.
+
 ## Next increments
 
 1. **Prove a real Android node.** Interface discovery, monitor initialization, file-free startup,
    loopback two-node direct/DERP dialing, platform TLS roots, the default-network seam, real
    control-plane DNS/TLS/registration up to `NeedsLogin`, and the public start/login/status/dial
-   lifecycle (including logout) against loopback control are proven above. Remaining: real interactive
-   login, logout deregistering the node at real control, real DERP, fallback DNS when system DNS fails,
+   lifecycle (including logout, key expiry, re-login and device approval) against loopback control are
+   proven above. Remaining: real interactive login, logout deregistering the node at real control, real
+   key expiry and re-authentication, real DERP, fallback DNS when system DNS fails,
    and cross-device or NAT-traversing paths, including recovery after a real network change. Design the explicit live-tailnet proof (browser login on a test device through the
    public API, never a checked-in or CI auth key) before adding it.
 2. **Complete the lifecycle needed by that proof.** Start, interactive login URL delivery, status,
-   persistent state, logout and close are public. Remaining: key expiry and re-login (testcontrol can
-   expire keys with `SetExpireAllNodes`; check for a new `BrowseToURL` while `NeedsLogin`), report the
-   failed-logout key loss upstream, `NEEDS_MACHINE_AUTH` handling, and surfacing backend errors
-   (`Notify.ErrMessage`) as typed status. Decide whether an ephemeral, in-memory mode is needed before
-   adding one. Continue auditing upstream package initialization,
+   persistent state, logout, re-login after logout or key expiry, re-authentication, device approval and
+   close are public. Remaining: surface backend errors (`Notify.ErrMessage`) and control's
+   node-removed state as typed status. Report upstream the failed-logout key loss, logout resetting
+   tsnet's prefs, and `LoginFinished` preceding the saved key (see the re-login iteration). Decide
+   whether an ephemeral, in-memory mode is needed before adding one. Continue auditing upstream package initialization,
    remaining filesystem/process behavior and state permissions; the state file format is upstream's
    and must be retested on every upstream update. Verify the `@RequiresPermission` contract in a
    scratch consumer as was done for the threading annotations.

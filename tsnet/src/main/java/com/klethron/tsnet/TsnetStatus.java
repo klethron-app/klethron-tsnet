@@ -16,7 +16,8 @@ public final class TsnetStatus {
     public enum State {
         /// Not started, or starting up locally.
         NO_STATE,
-        /// The user must log in; [#loginUrl()] is set once control provides a URL.
+        /// The user must log in. [#loginUrl()] is set once control provides a URL after
+        /// [TsnetNode#start] or [TsnetNode#login]; after a logout or key expiry, call `login`.
         NEEDS_LOGIN,
         /// Logged in, waiting for a tailnet administrator to approve the device.
         NEEDS_MACHINE_AUTH,
@@ -60,7 +61,11 @@ public final class TsnetStatus {
         return state;
     }
 
-    /// The HTTP(S) URL at which the user can log in, while [State#NEEDS_LOGIN].
+    /// The HTTP(S) URL at which the user can log in, from when control provides it until the login
+    /// completes. It is cleared once the login is saved in the state directory: close the node only
+    /// after that, or a restarted node asks for another login. Usually the state is then
+    /// [State#NEEDS_LOGIN]; while a logged-in node re-authenticates after [TsnetNode#login], it may
+    /// be any logged-in state.
     public @Nullable String loginUrl() {
         return loginUrl;
     }

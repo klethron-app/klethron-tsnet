@@ -115,6 +115,17 @@ func klethron_node_logout(id C.longlong, timeoutMillis C.longlong) C.int {
 	return C.int(n.logout(milliseconds(timeoutMillis)))
 }
 
+// klethron_node_login returns 0 or a negative failure result.
+//
+//export klethron_node_login
+func klethron_node_login(id C.longlong) C.int {
+	n := lookupNode(id)
+	if n == nil {
+		return resultClosed
+	}
+	return C.int(n.login())
+}
+
 // milliseconds converts a non-negative Java timeout, saturating rather than overflowing.
 func milliseconds(millis C.longlong) time.Duration {
 	if millis >= C.longlong(math.MaxInt64/time.Millisecond) {

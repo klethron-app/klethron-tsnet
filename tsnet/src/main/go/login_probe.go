@@ -13,12 +13,16 @@ import (
 	"log"
 	"net/http/httptest"
 	"os"
+	"slices"
+	"strings"
 	"sync"
 	"time"
 
 	"tailscale.com/tailcfg"
 	"tailscale.com/tstest/integration/testcontrol"
+	"tailscale.com/types/key"
 	"tailscale.com/types/logger"
+	"tailscale.com/util/set"
 )
 
 // A loopback test control server for tests of the public Java API, which start nodes. With
@@ -29,6 +33,7 @@ var loginProbe struct {
 	control *testcontrol.Server
 	stop    func()
 	greeted chan int64 // Bytes the peer's greeting port received before the dialer closed.
+	expired set.Set[key.NodePublic]
 }
 
 // klethron_login_probe_start returns the control URL, or "" on failure.
@@ -137,16 +142,47 @@ func klethron_login_probe_await_greeted(timeoutMillis C.longlong) C.longlong {
 	}
 }
 
-// klethron_login_probe_complete acts as the user's browser, approving a login URL.
+// klethron_login_probe_complete acts as the user's browser, approving a login URL. Like real
+// control, the approval gives a re-login's new node key a fresh expiry.
 //
 //export klethron_login_probe_complete
 func klethron_login_probe_complete(loginURL *C.char, length C.int) C.int {
 	loginProbe.Lock()
 	defer loginProbe.Unlock()
-	if loginProbe.control == nil || !loginProbe.control.CompleteAuth(C.GoStringN(loginURL, length)) {
+	if loginProbe.control == nil {
+		return 0
+	}
+	// testcontrol stages a re-login's new key as a copy of the expired node.
+	for _, node := range loginProbe.control.AllNodes() {
+		if !node.KeyExpiry.IsZero() && !loginProbe.expired.Contains(node.Key) {
+			node.KeyExpiry = time.Now().Add(24 * time.Hour)
+			loginProbe.control.UpdateNode(node)
+		}
+	}
+	if !loginProbe.control.CompleteAuth(C.GoStringN(loginURL, length)) {
 		return 0
 	}
 	return 1
+}
+
+// klethron_login_probe_expire expires the node keys of all registered nodes, as when their key
+// expiry passes or an administrator expires them. It returns the number of nodes.
+//
+//export klethron_login_probe_expire
+func klethron_login_probe_expire() C.int {
+	loginProbe.Lock()
+	defer loginProbe.Unlock()
+	if loginProbe.control == nil {
+		return 0
+	}
+	nodes := loginProbe.control.AllNodes()
+	loginProbe.expired.Make()
+	for _, node := range nodes {
+		node.KeyExpiry = time.Now().Add(-time.Minute)
+		loginProbe.expired.Add(node.Key)
+		loginProbe.control.UpdateNode(node)
+	}
+	return C.int(len(nodes))
 }
 
 // klethron_login_probe_reject_registrations makes control reject every registration request,
@@ -165,6 +201,55 @@ func klethron_login_probe_reject_registrations(reject C.int) {
 	}
 }
 
+// klethron_login_probe_require_machine_auth makes control require an administrator to approve
+// new devices. testcontrol reads the field without locking; set it before nodes register.
+//
+//export klethron_login_probe_require_machine_auth
+func klethron_login_probe_require_machine_auth() {
+	loginProbe.Lock()
+	defer loginProbe.Unlock()
+	if loginProbe.control != nil {
+		loginProbe.control.RequireMachineAuth = true
+	}
+}
+
+// klethron_login_probe_approve_machines acts as a tailnet administrator, approving all registered
+// devices. It returns the number approved.
+//
+//export klethron_login_probe_approve_machines
+func klethron_login_probe_approve_machines() C.int {
+	loginProbe.Lock()
+	defer loginProbe.Unlock()
+	if loginProbe.control == nil {
+		return 0
+	}
+	approved := 0
+	url := loginProbe.control.HTTPTestServer.URL
+	for _, node := range loginProbe.control.AllNodes() {
+		if loginProbe.control.CompleteDeviceApproval(url, url+"/admin", &node.Key) {
+			approved++
+		}
+	}
+	return C.int(approved)
+}
+
+// klethron_login_probe_hostnames returns the sorted hostnames that registered devices last
+// reported to control, separated by newlines.
+//
+//export klethron_login_probe_hostnames
+func klethron_login_probe_hostnames() *C.char {
+	loginProbe.Lock()
+	defer loginProbe.Unlock()
+	var names []string
+	if loginProbe.control != nil {
+		for _, node := range loginProbe.control.AllNodes() {
+			names = append(names, node.Hostinfo.Hostname())
+		}
+	}
+	slices.Sort(names)
+	return C.CString(strings.Join(names, "\n"))
+}
+
 //export klethron_login_probe_stop
 func klethron_login_probe_stop() {
 	loginProbe.Lock()
@@ -173,6 +258,7 @@ func klethron_login_probe_stop() {
 		loginProbe.stop()
 		loginProbe.control = nil
 		loginProbe.greeted = nil
+		loginProbe.expired = nil
 	}
 }
 

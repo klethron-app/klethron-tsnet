@@ -4,9 +4,10 @@ An Android AAR containing a precompiled Tailscale tsnet engine and a small Java/
 Java package: `com.klethron.tsnet`. Maven coordinates: `com.klethron:tsnet:0.1.0-SNAPSHOT`.
 
 **Early development:** a public API starts a node with persistent state in a caller-owned directory,
-reports its login URL and backend status, opens TCP connections to tailnet peers, and closes it. It is
-verified against an in-process loopback test control server and peer, including interactive login,
-resuming from saved state and dialing by address or MagicDNS name, but not yet against a real tailnet.
+reports its login URL and backend status, opens TCP connections to tailnet peers, logs out or in again,
+and closes it. It is verified against an in-process loopback test control server and peer, including
+interactive login, key expiry, device approval, resuming from saved state and dialing by address or
+MagicDNS name, but not yet against a real tailnet.
 Debug-only tests also start nodes against
 a rejecting loopback control endpoint, connect two in-process nodes through a loopback test control
 and DERP server to exchange TCP data over direct and relay-only paths, and rebind when the device's
@@ -42,7 +43,7 @@ See [JSpecify's dependency guidance](https://jspecify.dev/docs/using/).
 
 The package is also Error Prone `@CheckReturnValue`: an ignored `new TsnetNode()` can never be closed.
 Construction is `@WorkerThread`, because the first node in a process reads Android's CA store from disk;
-so are `start`, `awaitStatus`, `dial`, `logout` and `close`. `tailscaleVersion` and `setDefaultNetwork` are `@AnyThread`. Android lint (`ThreadConstraint`, `CheckResult`), Error Prone and
+so are `start`, `awaitStatus`, `dial`, `logout`, `login` and `close`. `tailscaleVersion` and `setDefaultNetwork` are `@AnyThread`. Android lint (`ThreadConstraint`, `CheckResult`), Error Prone and
 Kotlin's opt-in `-Xreturn-value-checker` report misuse from Java and Kotlin. They read these annotations
 by name, so the AAR does not export `androidx.annotation` (which would add the Kotlin stdlib) or
 `error_prone_annotations`. `start` is `@RequiresPermission(INTERNET)`. Callers must close nodes
@@ -76,9 +77,14 @@ Closing the descriptor, or shutting down its output, closes the connection. Clos
 of its connections.
 
 `logout` asks control to expire the node's key and deletes the login from the state directory; the node
-stays in `NEEDS_LOGIN`, and a new node started with the same directory offers a new login URL. To also
-forget the device key, close the node and delete the directory. A failed logout leaves the node
-`STOPPED` with its login intact, so it can be retried.
+stays in `NEEDS_LOGIN` without a login URL. To also forget the device key, close the node and delete the
+directory. A failed logout leaves the node `STOPPED` with its login intact, so it can be retried.
+
+`login` starts a new interactive login on a started node. Call it when the node reports `NEEDS_LOGIN`
+without a login URL: after a logout, or when control expired the node key (by default, Tailscale node
+keys expire periodically). Starting a node logs in by itself when needed. On a logged-in node, `login`
+re-authenticates it, renewing its key while it keeps running. A login URL stays in the status until the
+new login is saved; close the node only after that, or the next start asks to log in again.
 
 `start` returns once the node is initialized locally; `awaitStatus` returns the latest status after it
 changes, waking when the node is closed. Status records keep only the latest state, so intermediate
@@ -129,7 +135,8 @@ more Go modules into debug libraries only; their notices ship in the debug AAR.
 It requires a device with SELinux **Enforcing** (`adb shell getenforce`) to verify the standard Go
 discovery failure. Native test bridges are present only in debug builds; the release AAR check rejects
 them. `LoginTest` starts nodes through the public API against a loopback test control server that requires
-interactive login, completes the login in place of a browser, and restarts from the saved state.
+interactive login, completes the login in place of a browser, and restarts from the saved state. It also
+expires node keys, requires device approval and rejects registrations at that control server.
 `DialTest` dials an in-memory peer on a loopback test tailnet through the public API: a 1 MiB echo by
 address and MagicDNS name, peer end of stream, closing, refused, unroutable and timed-out dials.
 Neither the demo nor these tests proves connectivity to a real tailnet or DNS/TLS bootstrap. `ControlPlaneTest` needs internet access: it resolves and verifies
