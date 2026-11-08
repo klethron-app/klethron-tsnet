@@ -3,12 +3,16 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
+	"net"
 	"net/netip"
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 	"unicode/utf8"
 
@@ -17,16 +21,18 @@ import (
 	"tailscale.com/tsnet"
 )
 
-// node serializes upstream Start and Close, which must not run concurrently, and publishes the
-// latest backend status to waiting callers. Start does not wait for the network, so Close waits
-// at most for local initialization.
+// node serializes upstream Start and Close, which must not run concurrently, publishes the
+// latest backend status to waiting callers and dials through the tailnet. Start does not wait
+// for the network, so Close waits at most for local initialization.
 type node struct {
 	server *tsnet.Server
 
-	lifecycle       sync.Mutex
-	started, closed bool
-	stop            func() // Stops status watching and default-network reports once started.
-	done            chan struct{}
+	lifecycle sync.Mutex
+	started   bool
+	stop      func() // Stops status watching and default-network reports once started successfully.
+
+	ctx    context.Context // Cancelled when the node closes.
+	cancel context.CancelFunc
 
 	mu      sync.Mutex
 	status  nodeStatus
@@ -41,7 +47,8 @@ type nodeStatus struct {
 }
 
 func newNode(server *tsnet.Server) *node {
-	return &node{server: server, done: make(chan struct{}), changed: make(chan struct{})}
+	ctx, cancel := context.WithCancel(context.Background())
+	return &node{server: server, ctx: ctx, cancel: cancel, changed: make(chan struct{})}
 }
 
 // start configures every connection-relevant field explicitly, so the host process environment
@@ -50,7 +57,7 @@ func newNode(server *tsnet.Server) *node {
 func (n *node) start(config string) int {
 	n.lifecycle.Lock()
 	defer n.lifecycle.Unlock()
-	if n.closed {
+	if n.ctx.Err() != nil {
 		return startClosed
 	}
 	if n.started {
@@ -77,7 +84,7 @@ func (n *node) start(config string) int {
 	if err != nil {
 		return startFailed
 	}
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(n.ctx)
 	watching := make(chan struct{})
 	go func() {
 		defer close(watching)
@@ -92,11 +99,11 @@ func (n *node) start(config string) int {
 	return startOK
 }
 
+// close wakes waiters and cancels dials. Closing the server ends relayed connections.
 func (n *node) close() {
+	n.cancel()
 	n.lifecycle.Lock()
 	defer n.lifecycle.Unlock()
-	n.closed = true
-	close(n.done)
 	if n.stop != nil {
 		n.stop()
 	}
@@ -170,22 +177,134 @@ func (n *node) await(after uint64, timeout time.Duration) (string, bool) {
 		n.mu.Lock()
 		status, version, changed := n.status, n.version, n.changed
 		n.mu.Unlock()
-		select {
-		case <-n.done:
+		if n.ctx.Err() != nil {
 			return "", false
-		default:
 		}
 		if version != after {
 			return status.record(version), true
 		}
 		select {
 		case <-changed:
-		case <-n.done:
+		case <-n.ctx.Done():
 			return "", false
 		case <-timer.C:
 			return status.record(version), true
 		}
 	}
+}
+
+// Results of dial, which otherwise returns a file descriptor; TsnetNode.dial maps them to exceptions.
+const (
+	dialClosed = -1 - iota
+	dialNotStarted
+	dialInvalid
+	dialUnknownHost
+	dialNoRoute
+	dialTimeout
+	dialFailed
+)
+
+// dial connects to host:port through the tailnet and returns one end of a Unix socket pair that
+// relays the connection, owned by the caller, or a dial result. It waits up to timeout for the
+// node to run. Unlike upstream Server.Dial, it never connects through the device's own network
+// and never starts an unstarted node with ambient configuration.
+func (n *node) dial(host string, port uint16, timeout time.Duration) int {
+	if host == "" || !utf8.ValidString(host) || strings.ContainsRune(host, 0) || port == 0 {
+		return dialInvalid
+	}
+	n.lifecycle.Lock() // Waits for a concurrent start.
+	started := n.stop != nil
+	n.lifecycle.Unlock()
+	if n.ctx.Err() != nil {
+		return dialClosed
+	}
+	if !started {
+		return dialNotStarted
+	}
+	ctx, cancel := context.WithTimeout(n.ctx, timeout)
+	defer cancel()
+	failed := func(result int) int {
+		if n.ctx.Err() != nil {
+			return dialClosed
+		}
+		if ctx.Err() != nil {
+			return dialTimeout
+		}
+		return result
+	}
+	if !n.awaitRunning(ctx) {
+		return failed(dialTimeout)
+	}
+	// Resolves MagicDNS names through the tailnet's DNS configuration.
+	dialer := n.server.Sys().Dialer.Get()
+	target, _, err := dialer.UserDialPlan(ctx, "tcp", net.JoinHostPort(host, strconv.Itoa(int(port))))
+	if err != nil {
+		return failed(dialUnknownHost)
+	}
+	// Netstack reaches exactly the peers and subnet routes in the network map. Upstream would dial
+	// other addresses, including Tailscale IPs of unknown nodes, through the device's network.
+	if !dialer.UseNetstackForIP(target.Addr()) {
+		return dialNoRoute
+	}
+	conn, err := dialer.NetstackDialTCP(ctx, target)
+	if err != nil {
+		return failed(dialFailed)
+	}
+	fd, err := relay(conn)
+	if err != nil {
+		_ = conn.Close()
+		return failed(dialFailed)
+	}
+	return fd
+}
+
+// awaitRunning waits until the node runs, returning false when ctx ends first.
+func (n *node) awaitRunning(ctx context.Context) bool {
+	for {
+		n.mu.Lock()
+		state, changed := n.status.state, n.changed
+		n.mu.Unlock()
+		if state == ipn.Running {
+			return true
+		}
+		select {
+		case <-changed:
+		case <-ctx.Done():
+			return false
+		}
+	}
+}
+
+// relay copies between conn and one end of a new socket pair, returning the other end's
+// descriptor. The peer's EOF reaches the app as end of stream while the app may keep writing.
+// The app's EOF (closing the descriptor or shutting down its output) ends the connection, so
+// connections never outlive the app's descriptor; half-closing towards the peer is not supported.
+func relay(conn net.Conn) (int, error) {
+	fds, err := syscall.Socketpair(syscall.AF_UNIX, syscall.SOCK_STREAM|syscall.SOCK_CLOEXEC, 0)
+	if err != nil {
+		return -1, err
+	}
+	file := os.NewFile(uintptr(fds[0]), "relay")
+	local, err := net.FileConn(file) // A duplicate descriptor.
+	_ = file.Close()
+	if err != nil {
+		_ = syscall.Close(fds[1])
+		return -1, err
+	}
+	end := sync.OnceFunc(func() {
+		_ = conn.Close() // Also unblocks the other copy.
+		_ = local.Close()
+	})
+	go func() {
+		if _, err := io.Copy(local, conn); err != nil || local.(*net.UnixConn).CloseWrite() != nil {
+			end()
+		}
+	}()
+	go func() {
+		_, _ = io.Copy(conn, local)
+		end()
+	}()
+	return fds[1], nil
 }
 
 // Java enum names, in TsnetStatus.State. InUseOtherUser is Windows-only.

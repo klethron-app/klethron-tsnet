@@ -42,7 +42,7 @@ public final class LoginTest {
     @Before
     public void startControl() throws Exception {
         assertTrue("Nodes must start off the UI thread", Looper.myLooper() != Looper.getMainLooper());
-        controlUrl = nativeProbeStart();
+        controlUrl = nativeProbeStart(true);
         assertTrue(controlUrl.startsWith("http://127.0.0.1:"));
         directory = StartupTest.temporaryDirectory("login-🔒-").resolve("node");
     }
@@ -146,11 +146,18 @@ public final class LoginTest {
         assertEquals("rwx------", PosixFilePermissions.toString(Files.getPosixFilePermissions(directory)));
     }
 
-    private static native String nativeProbeStart();
+    /// Without interactive login, nodes join at once and MagicDNS serves `tail-scale.ts.net`.
+    static native String nativeProbeStart(boolean interactive);
+
+    /// Returns the IPv4 address of a peer that echoes on port 7070 and greets on port 7071.
+    static native String nativeProbeStartPeer(byte[] directory);
+
+    /// Bytes the greeting port received before the dialer closed, -1 on error, -2 on timeout.
+    static native long nativeProbeAwaitGreeted(long timeoutMillis);
 
     private static native boolean nativeProbeComplete(byte[] loginUrl);
 
-    private static native void nativeProbeStop();
+    static native void nativeProbeStop();
 
     private static native void nativeProbeSetAuthKeyEnvironment(boolean set);
 }

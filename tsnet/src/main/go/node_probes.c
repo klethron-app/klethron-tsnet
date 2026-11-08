@@ -4,7 +4,7 @@
 #include <stdlib.h>
 #include "_cgo_export.h"
 
-enum probe { STARTUP, CONTROL, TAILNET, TAILNET_RELAY_ONLY, NETCHANGE_START, NETCHANGE_AWAIT };
+enum probe { STARTUP, CONTROL, TAILNET, TAILNET_RELAY_ONLY, NETCHANGE_START, NETCHANGE_AWAIT, LOGIN_PEER };
 
 // Java supplies standard UTF-8, including supplementary characters in paths.
 // Probes return fixed ASCII diagnostics (and hex hashes), so JNI modified UTF-8 is sufficient for results.
@@ -20,6 +20,7 @@ static jstring probe_bytes(JNIEnv *env, jbyteArray argument, enum probe probe) {
         case TAILNET_RELAY_ONLY: report = klethron_tailnet_probe(chars, length, 1); break;
         case NETCHANGE_START: report = klethron_netchange_probe_start(chars, length); break;
         case NETCHANGE_AWAIT: report = klethron_netchange_probe_await(chars, length); break;
+        case LOGIN_PEER: report = klethron_login_probe_start_peer(chars, length); break;
     }
     (*env)->ReleaseByteArrayElements(env, argument, bytes, JNI_ABORT);
     jstring result = (*env)->NewStringUTF(env, report);
@@ -58,11 +59,21 @@ Java_com_klethron_tsnet_NetworkChangeTest_nativeProbeStop(JNIEnv *env, jclass ty
 }
 
 JNIEXPORT jstring JNICALL
-Java_com_klethron_tsnet_LoginTest_nativeProbeStart(JNIEnv *env, jclass type) {
-    char *url = klethron_login_probe_start(); // ASCII loopback URL, or empty.
+Java_com_klethron_tsnet_LoginTest_nativeProbeStart(JNIEnv *env, jclass type, jboolean interactive) {
+    char *url = klethron_login_probe_start(interactive == JNI_TRUE); // ASCII loopback URL, or empty.
     jstring result = (*env)->NewStringUTF(env, url);
     free(url);
     return result;
+}
+
+JNIEXPORT jstring JNICALL
+Java_com_klethron_tsnet_LoginTest_nativeProbeStartPeer(JNIEnv *env, jclass type, jbyteArray directory) {
+    return probe_bytes(env, directory, LOGIN_PEER);
+}
+
+JNIEXPORT jlong JNICALL
+Java_com_klethron_tsnet_LoginTest_nativeProbeAwaitGreeted(JNIEnv *env, jclass type, jlong timeoutMillis) {
+    return klethron_login_probe_await_greeted(timeoutMillis);
 }
 
 JNIEXPORT jboolean JNICALL

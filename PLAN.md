@@ -25,7 +25,9 @@ Go 1.27.3, NDK 30.0.16248370, AGP 9.5.1 and Gradle 9.9.0 are pinned.
   Public `start(stateDirectory, hostname)` persists identity in the caller's directory and begins
   interactive login; `awaitStatus` reports state, login URL and Tailscale addresses; `close` stops it.
   Go serializes start/close and wakes waiters. There is no finalizer: callers must close explicitly.
-  Verified against a loopback test control server only. There is no public dial or logout API yet.
+  `dial(host, port, timeout)` returns a socket-pair `ParcelFileDescriptor` relaying a netstack TCP
+  connection, refusing addresses outside the network map instead of using the device's network.
+  Verified against a loopback test control server and peer only. There is no logout API yet.
 - Native builds are incremental and configuration-cache compatible. Shared build caching is deliberately
   disabled until toolchains are provisioned hermetically. Only one installed Go version is accepted.
 - Release libraries use Go `-trimpath`, stripped symbols/DWARF and 16 KiB linker alignment.
@@ -791,12 +793,94 @@ This proves the public start/login/status/close lifecycle and state persistence 
 in-process test control server. It does not prove a real tailnet login, real DERP, dialing, logout,
 arm64 runtime, or how state behaves across upstream version changes.
 
+## Public dial iteration (2026-11-08)
+
+First public connection API, shaped by Klethron's SSH transport seam (`SessionTransport`: non-blocking,
+owner-loop callbacks, bounded buffering and exactly-once close) without depending on it.
+
+- `TsnetNode.dial(String host, int port, Duration timeout)` (`@WorkerThread`) returns a
+  `ParcelFileDescriptor`: one end of an `AF_UNIX` stream socket pair. Two goroutines copy between the
+  other end and the netstack TCP connection. Callers get ordinary blocking streams, or a descriptor they
+  can make non-blocking and poll with public `android.system.Os`/`MessageQueue` APIs. Kernel socket
+  buffers bound memory and give backpressure (a full buffer stops reading from the tailnet connection).
+  No connection handles, per-read JNI copies, Java callbacks, listening sockets or local proxy exist;
+  an unnamed socket pair is reachable only through the returned descriptor. The descriptor crosses JNI
+  as an int, and the host as exact UTF-8 bytes (at most 255, copied into a fixed buffer).
+- Close semantics: the peer's EOF becomes end of stream (`CloseWrite` on the Go end) and the app can keep
+  writing. The app's EOF, from closing the descriptor or shutting down output, closes the tailnet
+  connection: Go cannot distinguish the two through a socket pair, and treating both as close means a
+  connection never outlives the app's descriptor. Half-close towards the peer is unsupported; SSH does
+  not need it. Closing the node closes every relayed connection.
+- **Found: upstream `Server.Dial` falls back to the device's network.** `tsdial.UserDial` uses netstack
+  only for addresses the network map routes to a peer, then the routing table, then a plain
+  `net.Dialer`. A typo, a stale peer address or a public DNS name would connect directly, which
+  Klethron's plan forbids. `dial` instead resolves with `UserDialPlan` (MagicDNS via the tailnet's DNS
+  policy), requires `UseNetstackForIP` (peers and subnet routes in the map), and connects with
+  `NetstackDialTCP`, so no kernel socket is ever opened for a dial; there is no time-of-check gap.
+  Resolving a non-tailnet name may still send a DNS query wherever the tailnet's DNS policy forwards it.
+- **Found: upstream `Server.Dial` starts an unstarted server** with whatever configuration it has, which
+  would bypass the explicit control URL and environment auth-key refusal. `dial` requires a successful
+  public `start` (`IllegalStateException` otherwise), then waits for `RUNNING` up to the timeout.
+- Errors map to fixed-message exceptions: `UnknownHostException`, `NoRouteToHostException`,
+  `SocketTimeoutException`, `ConnectException`, and `IllegalStateException` once the node is or becomes
+  closed. Close cancels a node-scoped context that wakes blocked dials and status waiters, replacing the
+  previous `done` channel and `closed` flag.
+- Boy scout: Java timeouts now saturate instead of throwing `ArithmeticException` from
+  `Duration.toMillis` for huge durations; Go shares one saturating millisecond conversion.
+- The loopback control probe gained a no-login mode with MagicDNS (`tail-scale.ts.net`, as upstream's
+  tsnet tests) and an in-memory peer reusing `loopbackTailnet.startNode`: an echo port, and a port that
+  greets, closes its side and reports what it received until the dialer closed. `DialTest` reuses
+  `LoginTest`'s probe bindings, so no new probe exports are needed beyond the peer helpers.
+
+New `DialTest` (five tests, public API only, off the UI thread):
+
+- 1 MiB random echo by tailnet IPv4 and by MagicDNS FQDN; the first dial waits for the node to join.
+- The greeting reads as `klethron\n` then end of stream; writing afterwards succeeds, and closing the
+  descriptor delivers exactly those 5 bytes and EOF to the peer.
+- `127.0.0.1:<control port>` and an unassigned `100.64.0.99` fail with `NoRouteToHostException`, an unknown
+  MagicDNS name with `UnknownHostException`, and an unlistened peer port with `ConnectException`.
+- Dialing an unstarted node, empty/oversized/NUL hosts and ports 0/65536 are refused; closing the node
+  ends an open connection (read returns -1); dialing afterwards throws.
+- With an unreachable control server, a 200 ms dial times out, and closing wakes a five-minute dial.
+
+Verification:
+
+- `./gradlew build :tsnet:publishReleasePublicationToLocalBuildRepository` passes, including lint (only
+  the existing Error Prone version and demo manifest notices), notice checks (26 release modules,
+  unchanged) and release alignment/probe checks. `zipalign -c -P 16 4` passes for the release demo APK.
+- Instrumentation JUnit XML records **21 passed tests, zero failures/errors/skips per device**: twenty
+  library tests (five new) plus the R8-minified demo test, on dedicated emulators at API 34 / x86_64 /
+  4,096-byte pages and API 37.2 / x86_64 / 16,384-byte pages, both SELinux Enforcing (`dial-final-api34/`,
+  `dial-final-api37/` under each module's `build/reports/device-verification/`). `DialTest` then passed
+  five further runs per device (`dial-repeat-*`, 50 passes, 6–22 s per run).
+- Negative controls on API 34: dialing through upstream `Server.Dial` first made `reachesOnlyTheTailnet`
+  fail, because `127.0.0.1:<control port>` connected through the device's network
+  (`dial-negative-upstreamdial-api34/`). Skipping an explicit registry that closed relayed connections
+  on node close still passed (`dial-negative-noclose-api34/`): upstream `Server.Close` already ends
+  netstack connections, so the registry was removed before the final runs.
+
+Release sizes (no dependency or toolchain changes; netstack dialing was already linked by `Start`):
+
+| Entry | Before raw | After raw | Before ZIP | After ZIP |
+|---|---:|---:|---:|---:|
+| arm64-v8a library | 17,548,816 | 17,558,832 | 6,848,483 | 6,852,437 |
+| x86_64 library | 19,053,776 | 19,064,272 | 7,529,304 | 7,533,369 |
+
+Complete release AAR: **14,466,762 bytes**, up **8,687 bytes (0.06%)**. Debug libraries are **18,701,488
+raw / 7,308,028 ZIP bytes** (arm64) and **20,286,384 / 8,031,605** (x86_64); the debug AAR is
+**15,427,597 bytes**.
+
+This proves public dialing, relaying, close and tailnet-only routing on Android against an in-process
+test control server and peer, whose path is loopback. It does not prove a real tailnet, real DERP,
+cross-device or NAT traversal, subnet routes, IPv6 peers, throughput, or a non-blocking consumer such as
+Klethron's selector loop.
+
 ## Next increments
 
 1. **Prove a real Android node.** Interface discovery, monitor initialization, file-free startup,
    loopback two-node direct/DERP dialing, platform TLS roots, the default-network seam, real
-   control-plane DNS/TLS/registration up to `NeedsLogin`, and the public start/login/status lifecycle
-   against loopback control are proven above. Remaining: real interactive login, real DERP, fallback
+   control-plane DNS/TLS/registration up to `NeedsLogin`, and the public start/login/status/dial
+   lifecycle against loopback control are proven above. Remaining: real interactive login, real DERP, fallback
    DNS when system DNS fails, and cross-device or NAT-traversing paths, including recovery after a real
    network change. Design the explicit live-tailnet proof (browser login on a test device through the
    public API, never a checked-in or CI auth key) before adding it.
@@ -808,21 +892,22 @@ arm64 runtime, or how state behaves across upstream version changes.
    remaining filesystem/process behavior and state permissions; the state file format is upstream's
    and must be retested on every upstream update. Verify the `@RequiresPermission` contract in a
    scratch consumer as was done for the threading annotations.
-3. **Design the connection boundary with a real caller.** Opaque connection handles; bounded read/write;
-   backpressure, deadlines, cancellation and exactly-once close. Resolve concurrent close/start/dial
-   before exposing those APIs. JNI strings need deliberate UTF-8 conversion; current version reporting
-   is ASCII only. Keep JNI references, allocation failure and Go panic handling explicit.
+3. **Validate the connection boundary with its real caller.** `dial` returns a relayed socket descriptor
+   (see the public dial iteration). Prove it in Klethron's feature with its non-blocking session loop
+   (an `Os.poll`/`MessageQueue` adapter rather than `SocketChannel`), including backpressure under a slow
+   reader and interactive latency. Add peer listing with stable node IDs for its saved-route reference
+   (Klethron increment 3) only with that caller. Keep Go panic handling and allocation failure explicit.
 4. **Turn the demo into a network proof.** Add INTERNET permission only with networking. Explicit setup,
    browser authorization, one selected destination and a simple exchange. Keep all network work off the
    UI thread. No auth keys checked into tests or supplied to pull requests from forks.
 5. **Revalidate feature exclusions with working networking.** Individual and combined measurements for
    all 18 omitted features are recorded above, and the debug device tests exercise them. Reconsider
    `useexitnode` or `useproxy` only if a real caller needs exit nodes or proxies; `acme` cannot be omitted
-   until upstream fixes the tsnet build. Confirm MagicDNS peer names still resolve. Once Start/Dial are
-   reachable, repeat both ABI libraries' raw/ZIP sizes and the complete AAR comparison against the
-   same dependency/toolchain baseline. Verify startup, login, DNS and direct/relayed dialing on API 34
-   and 16 KiB devices. Scaffold-only savings and lifecycle tests do not establish the production
-   result. Update the licence inventory for the final linked feature set.
+   until upstream fixes the tsnet build. MagicDNS peer names resolve on the loopback tailnet. Start and
+   Dial are now reachable in release, so re-measure each omitted tag's saving against that baseline
+   (the recorded savings used debug libraries). Verify startup, login, DNS and direct/relayed dialing on
+   a real tailnet, on API 34 and 16 KiB devices. Update the licence inventory for the final linked
+   feature set.
 6. **Release readiness.** Extend the checked Go module inventory into a complete Android-linked
    dependency/licence review, including per-file attributions, generated data, non-Go embedded resources
    and C/NDK runtime code. Module/root notices and Go runtime notices now ship in both AARs. Test R8-minified
@@ -853,4 +938,4 @@ emulator hides the interface-discovery regression and deliberately fails its neg
 For an intentional upstream update, resolve `tailscale/tailscale` main to a full SHA first, update the
 Go requirement and sums, update the version assertion and documented SHA, then rebuild both ABIs and
 repeat the device checks. Do not equate an imported `tsnet` package or a successful Close with a
-successfully running tailnet node. Current release size measurements omit future Dial reachable code.
+successfully running tailnet node.

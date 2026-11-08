@@ -1,19 +1,25 @@
 package com.klethron.tsnet;
 
 import android.Manifest;
+import android.os.ParcelFileDescriptor;
 import androidx.annotation.AnyThread;
 import androidx.annotation.RequiresPermission;
 import androidx.annotation.WorkerThread;
 import java.io.File;
 import java.io.IOException;
+import java.net.ConnectException;
 import java.net.Inet4Address;
+import java.net.NoRouteToHostException;
+import java.net.SocketTimeoutException;
+import java.net.UnknownHostException;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import org.jspecify.annotations.Nullable;
 
 /// Owns a native tsnet node. Construction does not create credentials, access storage or join a
-/// tailnet; [#start] does. Close explicitly: there is no finalizer. Dialing is not implemented yet.
+/// tailnet; [#start] does, and [#dial] then connects to its peers. Close explicitly: there is no
+/// finalizer.
 public final class TsnetNode implements AutoCloseable {
     static {
         System.loadLibrary("klethron_tsnet");
@@ -70,12 +76,51 @@ public final class TsnetNode implements AutoCloseable {
     /// @throws IllegalStateException if the node is or becomes closed
     @WorkerThread
     public TsnetStatus awaitStatus(@Nullable TsnetStatus previous, Duration timeout) {
-        long millis = timeout.isNegative() ? 0 : timeout.toMillis();
-        String record = nativeAwaitStatus(handle, previous == null ? -1 : previous.version, millis);
+        String record = nativeAwaitStatus(handle, previous == null ? -1 : previous.version, millis(timeout));
         if (record == null) {
             throw new IllegalStateException("Node is closed");
         }
         return TsnetStatus.parse(record);
+    }
+
+    /// Opens a TCP connection to `host` through the tailnet, waiting up to `timeout` for this node
+    /// to be [TsnetStatus.State#RUNNING] and the connection to be established.
+    ///
+    /// Only peers and subnet routes in this node's network map are reachable: the connection never
+    /// uses the device's own network, and other addresses fail with [NoRouteToHostException].
+    ///
+    /// The result is a connected Unix stream socket relaying the connection. Read and write it as a
+    /// blocking stream, or make it non-blocking and poll it with [android.system.Os]. End of stream
+    /// means the peer closed its side; the connection stays writable. Closing the descriptor or
+    /// shutting down its output closes the connection: half-closing towards the peer is not
+    /// supported. Closing the node closes all of its connections.
+    ///
+    /// @param host a tailnet IP address literal or MagicDNS name, at most 255 UTF-8 bytes
+    /// @return the connection, which the caller must close
+    /// @throws IllegalArgumentException if the host is empty or too long, or the port is not 1–65535
+    /// @throws IllegalStateException if this node is not started, failed to start, or is or becomes
+    ///     closed
+    /// @throws UnknownHostException if the tailnet's DNS cannot resolve `host`
+    /// @throws NoRouteToHostException if the address is not reachable through the tailnet
+    /// @throws SocketTimeoutException if the timeout elapses first
+    /// @throws ConnectException if the connection fails, for example because it was refused
+    @WorkerThread
+    public ParcelFileDescriptor dial(String host, int port, Duration timeout) throws IOException {
+        byte[] name = host.getBytes(StandardCharsets.UTF_8);
+        if (name.length == 0 || name.length > 255 || port < 1 || port > 65535) {
+            throw new IllegalArgumentException("Host must have 1–255 bytes and port must be 1–65535");
+        }
+        int result = nativeDial(handle, name, port, millis(timeout));
+        return switch (result) {
+            case -1 -> throw new IllegalStateException("Node is closed");
+            case -2 -> throw new IllegalStateException("Node is not started");
+            case -3 -> throw new IllegalArgumentException("Invalid host");
+            case -4 -> throw new UnknownHostException("Tailnet DNS cannot resolve the host");
+            case -5 -> throw new NoRouteToHostException("Address is not reachable through the tailnet");
+            case -6 -> throw new SocketTimeoutException("Tailnet connection timed out");
+            case -7 -> throw new ConnectException("Tailnet connection failed");
+            default -> ParcelFileDescriptor.adoptFd(result);
+        };
     }
 
     /// Returns the exact Go module version linked into this binary.
@@ -105,11 +150,18 @@ public final class TsnetNode implements AutoCloseable {
     }
 
     /// Stops and releases this node, waiting for a concurrent [#start] and shutdown to finish.
-    /// Persistent state remains. Repeated or concurrent calls are safe and have no additional effect.
+    /// Waiting [#awaitStatus] and [#dial] calls throw, and dialed connections close. Persistent
+    /// state remains. Repeated or concurrent calls are safe and have no additional effect.
     @WorkerThread
     @Override
     public void close() {
         nativeClose(handle);
+    }
+
+    /// Clamps to 0–`Long.MAX_VALUE` milliseconds; [Duration#toMillis] would throw on overflow.
+    private static long millis(Duration timeout) {
+        if (timeout.isNegative()) return 0;
+        return timeout.compareTo(Duration.ofMillis(Long.MAX_VALUE)) >= 0 ? Long.MAX_VALUE : timeout.toMillis();
     }
 
     private static native long nativeCreate();
@@ -117,6 +169,8 @@ public final class TsnetNode implements AutoCloseable {
     private static native int nativeStart(long handle, byte[] config);
 
     private static native @Nullable String nativeAwaitStatus(long handle, long afterVersion, long timeoutMillis);
+
+    private static native int nativeDial(long handle, byte[] host, int port, long timeoutMillis);
 
     private static native void nativeClose(long handle);
 

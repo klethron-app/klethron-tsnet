@@ -82,15 +82,34 @@ func klethron_node_await_status(id C.longlong, after C.longlong, timeoutMillis C
 	if n == nil {
 		return nil
 	}
-	timeout := time.Duration(math.MaxInt64)
-	if timeoutMillis < C.longlong(timeout/time.Millisecond) {
-		timeout = time.Duration(timeoutMillis) * time.Millisecond
-	}
-	record, open := n.await(uint64(after), timeout)
+	record, open := n.await(uint64(after), milliseconds(timeoutMillis))
 	if !open {
 		return nil
 	}
 	return C.CString(record)
+}
+
+// klethron_node_dial returns a connected socket descriptor owned by the caller, or a negative
+// dial result.
+//
+//export klethron_node_dial
+func klethron_node_dial(id C.longlong, host *C.char, length C.int, port C.int, timeoutMillis C.longlong) C.int {
+	n := lookupNode(id)
+	if n == nil {
+		return dialClosed
+	}
+	if port < 0 || port > math.MaxUint16 {
+		return dialInvalid
+	}
+	return C.int(n.dial(C.GoStringN(host, length), uint16(port), milliseconds(timeoutMillis)))
+}
+
+// milliseconds converts a non-negative Java timeout, saturating rather than overflowing.
+func milliseconds(millis C.longlong) time.Duration {
+	if millis >= C.longlong(math.MaxInt64/time.Millisecond) {
+		return math.MaxInt64
+	}
+	return time.Duration(millis) * time.Millisecond
 }
 
 //export klethron_node_close

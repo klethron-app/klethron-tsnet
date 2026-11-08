@@ -4,9 +4,10 @@ An Android AAR containing a precompiled Tailscale tsnet engine and a small Java/
 Java package: `com.klethron.tsnet`. Maven coordinates: `com.klethron:tsnet:0.1.0-SNAPSHOT`.
 
 **Early development:** a public API starts a node with persistent state in a caller-owned directory,
-reports its login URL and backend status, and closes it. It is verified against an in-process
-loopback test control server, including interactive login and resuming from saved state, but not yet
-against a real tailnet. Dialing peers is not public yet. Debug-only tests also start nodes against
+reports its login URL and backend status, opens TCP connections to tailnet peers, and closes it. It is
+verified against an in-process loopback test control server and peer, including interactive login,
+resuming from saved state and dialing by address or MagicDNS name, but not yet against a real tailnet.
+Debug-only tests also start nodes against
 a rejecting loopback control endpoint, connect two in-process nodes through a loopback test control
 and DERP server to exchange TCP data over direct and relay-only paths, and rebind when the device's
 default network changes. Another contacts Tailscale's real control plane without credentials,
@@ -41,7 +42,7 @@ See [JSpecify's dependency guidance](https://jspecify.dev/docs/using/).
 
 The package is also Error Prone `@CheckReturnValue`: an ignored `new TsnetNode()` can never be closed.
 Construction is `@WorkerThread`, because the first node in a process reads Android's CA store from disk;
-so are `start`, `awaitStatus` and `close`. `tailscaleVersion` and `setDefaultNetwork` are `@AnyThread`. Android lint (`ThreadConstraint`, `CheckResult`), Error Prone and
+so are `start`, `awaitStatus`, `dial` and `close`. `tailscaleVersion` and `setDefaultNetwork` are `@AnyThread`. Android lint (`ThreadConstraint`, `CheckResult`), Error Prone and
 Kotlin's opt-in `-Xreturn-value-checker` report misuse from Java and Kotlin. They read these annotations
 by name, so the AAR does not export `androidx.annotation` (which would add the Kotlin stdlib) or
 `error_prone_annotations`. `start` is `@RequiresPermission(INTERNET)`. Callers must close nodes
@@ -59,8 +60,20 @@ try (TsnetNode node = new TsnetNode()) {
         }
     } while (status.state() != TsnetStatus.State.RUNNING);
     // Connected. Closing the node disconnects it; its state remains for the next start.
+    try (ParcelFileDescriptor connection = node.dial("my-server", 22, Duration.ofSeconds(30))) {
+        // A connected stream socket: use FileInputStream/FileOutputStream, or android.system.Os.
+    }
 }
 ```
+
+`dial` accepts a tailnet address or MagicDNS name and waits for the node to be running. It reaches only
+peers and subnet routes in the node's network map, through the in-process network stack: unlike
+upstream `tsnet.Server.Dial`, it never falls back to the device's own network for other addresses
+(`NoRouteToHostException`). The result is one end of a Unix socket pair that the library relays to the
+tailnet connection, so callers can block on it, or make it non-blocking and poll it with
+`android.system.Os`. End of stream means the peer closed its side; the connection remains writable.
+Closing the descriptor, or shutting down its output, closes the connection. Closing the node closes all
+of its connections.
 
 `start` returns once the node is initialized locally; `awaitStatus` returns the latest status after it
 changes, waking when the node is closed. Status records keep only the latest state, so intermediate
@@ -111,8 +124,9 @@ It requires a device with SELinux **Enforcing** (`adb shell getenforce`) to veri
 discovery failure. Native test bridges are present only in debug builds; the release AAR check rejects
 them. `LoginTest` starts nodes through the public API against a loopback test control server that requires
 interactive login, completes the login in place of a browser, and restarts from the saved state.
-Neither the demo nor these tests proves connectivity to a real tailnet, DNS/TLS bootstrap, or a
-public dial API. `ControlPlaneTest` needs internet access: it resolves and verifies
+`DialTest` dials an in-memory peer on a loopback test tailnet through the public API: a 1 MiB echo by
+address and MagicDNS name, peer end of stream, closing, refused, unroutable and timed-out dials.
+Neither the demo nor these tests proves connectivity to a real tailnet or DNS/TLS bootstrap. `ControlPlaneTest` needs internet access: it resolves and verifies
 `controlplane.tailscale.com` through the platform, then starts an ephemeral in-memory node until control
 returns a `login.tailscale.com` URL. The URL is validated in Go and never returned, logged or opened.
 

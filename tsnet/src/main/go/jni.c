@@ -52,3 +52,13 @@ Java_com_klethron_tsnet_TsnetNode_nativeSetDefaultNetwork(JNIEnv *env, jclass ty
     (*env)->GetByteArrayRegion(env, name, 0, length, (jbyte *) bytes);
     klethron_set_default_network(bytes, length, (uint32_t) gateway);
 }
+
+JNIEXPORT jint JNICALL
+Java_com_klethron_tsnet_TsnetNode_nativeDial(JNIEnv *env, jclass type, jlong handle, jbyteArray host, jint port, jlong timeoutMillis) {
+    // Java limits hosts to 255 UTF-8 bytes; copy exact bytes rather than modified UTF-8.
+    char bytes[256];
+    jsize length = (*env)->GetArrayLength(env, host);
+    if (length >= (jsize) sizeof bytes) return -3; // Invalid; Java checks first.
+    (*env)->GetByteArrayRegion(env, host, 0, length, (jbyte *) bytes);
+    return klethron_node_dial(handle, bytes, length, port, timeoutMillis);
+}
