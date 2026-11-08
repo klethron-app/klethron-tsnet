@@ -62,6 +62,7 @@ val verifyNativeAar = tasks.register<VerifyNativeAar>("verifyNativeAar") {
 tasks.named("check") { dependsOn(verifyNativeAar) }
 
 dependencies {
+    api(libs.jspecify)
     androidTestImplementation(libs.android.test.runner)
     androidTestImplementation(libs.junit)
 }

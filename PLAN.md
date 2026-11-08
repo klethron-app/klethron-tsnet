@@ -29,6 +29,8 @@ Go 1.27.3, NDK 30.0.16248370, AGP 9.5.1 and Gradle 9.9.0 are pinned.
   features and remove logtail uploads/buffering; startup logging and storage still need work below.
 - `check` checks Android lint and native AAR architecture/alignment, and compiles JNI instrumentation.
 - `:demo` is a platform-only Java Activity with an explicit offline native-load/lifecycle button.
+- Public Java types use JSpecify non-null defaults, exported with the Maven dependency metadata.
+  The release demo exercises the native lifecycle with R8/resource shrinking enabled.
 - Maven publishing is configured only to `build/maven/`; there is no remote artifact publication.
 - Android interface discovery uses bionic `getifaddrs` through `netmon.RegisterInterfaceGetter`.
   The adapter copies IPv4/IPv6 addresses and masks, queries index/MTU/flags with public ioctls, and
@@ -193,6 +195,52 @@ Verification:
   `feature-exclusions-api37/`. These cover native lifecycle/version and interface/monitor regression;
   they do not start a node or verify authentication, networking, or arm64 runtime.
 
+## Consumer contracts iteration (2026-11-08)
+
+- Adopt package-level JSpecify `@NullMarked` and pin `org.jspecify:jspecify:1.0.1` as an `api`
+  dependency, following [upstream guidance](https://jspecify.dev/docs/using/). This makes reference
+  types non-null by default for Java analysis and Kotlin callers. The public version result is the
+  first concrete beneficiary. Export the dependency through Maven metadata and ship its licence.
+- Defer AndroidX annotations until there is a concrete threading/permission contract: future blocking
+  operations can use `@WorkerThread`, and methods opening sockets can use `@RequiresPermission`.
+  Do not duplicate JSpecify nullness annotations, blanket-keep the library with `@Keep`, or require
+  INTERNET for the current unstarted-node API. `minSdk` already establishes the API 34 floor.
+- Enable R8/resource shrinking for the release demo, signed only with the local debug key for tests.
+  Build its instrumentation APK in `build`, and exercise the real UI's native lifecycle without direct
+  test references to `TsnetNode` or additional JNI keep rules. Two optional AndroidX Test Error Prone
+  annotation warnings are suppressed only for the test APK.
+- Native sources, dependency versions, feature tags, lifecycle behavior and networking capabilities
+  are unchanged.
+  This remains an unstarted scaffold, not a functioning tailnet client.
+
+Verification:
+
+- `./gradlew build :tsnet:publishReleasePublicationToLocalBuildRepository` passes. Both API/runtime
+  Gradle metadata variants and the POM's compile dependency export exactly JSpecify 1.0.1; there is
+  no Kotlin stdlib dependency. The published AAR includes `package-info.class` and the JSpecify
+  licence; annotation classes remain in their separate transitive artifact. Repeating the build reuses
+  the configuration cache and leaves all four Go tasks up to date.
+- A local Kotlin 2.4.21 compiler probe against the published AAR's classes accepts normal version
+  usage and rejects assigning null to `var version = TsnetNode.tailscaleVersion()`. Removing only
+  `package-info.class` makes the same assignment compile, confirming the annotation changes inference.
+  Probe artifacts are retained under `tsnet/build/reports/consumer-contracts/`.
+- R8 removes all four JSpecify annotation classes and `package-info` from the release demo while
+  preserving the JNI class name. No blanket `@Keep` or extra consumer rules were needed.
+- Instrumentation JUnit XML records **six passed tests, zero failures/errors/skips per device**:
+  five library tests plus one minified demo test on API 34 / x86_64 / 4,096-byte pages and API 37.2 /
+  x86_64 / 16,384-byte pages, both SELinux Enforcing. Reports are retained under each module's
+  `build/reports/device-verification/consumer-api34/` and `consumer-api37/`. The demo test clicks twice,
+  requiring the exact pinned version and successful create/close each time.
+- Both release ABI libraries pass architecture/16 KiB ELF alignment checks, and
+  `zipalign -c -P 16 4 demo/build/outputs/apk/release/demo-release.apk` passes. These runs establish
+  offline native loading/lifecycle through an R8-minified consumer, not Start/login/dial, network
+  handover, arm64 runtime, or Play split delivery.
+
+Native sizes are unchanged: arm64-v8a **17,098,672 raw / 6,646,573 ZIP bytes**; x86_64
+**18,546,352 raw / 7,309,396 ZIP bytes**. Complete AAR: **13,966,385 bytes**, up **4,300 bytes**
+for package metadata and the JSpecify licence. The separately resolved JSpecify JAR is not part
+of this AAR size; its classes are removed by R8 in the verified demo.
+
 ## Next increments
 
 1. **Prove a real Android node.** Interface discovery and monitor initialization are addressed above.
@@ -218,8 +266,9 @@ Verification:
    result. Update the licence inventory for the final linked feature set.
 6. **Release readiness.** Generate an exact Android-linked dependency/licence inventory, including any
    non-Go embedded resources and Go runtime notices. Package notices in the AAR. Test R8-minified
-   consumers, arm64 hardware, API 34, 16 KiB ELF/APK alignment and cold-start loading. Preserve native
-   symbols separately if needed for crash reports. Record sizes per ABI before/after each dependency change.
+   consumers with actual networking (offline R8 lifecycle now verified), arm64 hardware, API 34,
+   16 KiB ELF/APK alignment and cold-start loading. Preserve native symbols separately if needed for
+   crash reports. Record sizes per ABI before/after each dependency change.
 7. **Publish immutable versions.** Verify ownership of Maven Central namespace `com.klethron`, configure
    signing and protected release credentials, add required POM/source/Javadoc metadata, and publish from
    tags. Keep the wrapper API version independent of upstream tsnet; record the full upstream commit for
@@ -233,6 +282,7 @@ Verification:
 ```sh
 ./gradlew build :tsnet:publishReleasePublicationToLocalBuildRepository
 ANDROID_SERIAL=emulator-5554 ./gradlew :tsnet:connectedDebugAndroidTest
+ANDROID_SERIAL=emulator-5554 ./gradlew :demo:connectedReleaseAndroidTest
 ./gradlew :tsnet:verifyNativeAar
 ```
 

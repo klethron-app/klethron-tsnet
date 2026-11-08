@@ -18,6 +18,7 @@ Native builds support Linux x86_64 and macOS with the NDK's Darwin host tools; o
 ./gradlew build
 ./gradlew :tsnet:publishReleasePublicationToLocalBuildRepository
 ANDROID_SERIAL=emulator-5554 ./gradlew :tsnet:connectedDebugAndroidTest
+ANDROID_SERIAL=emulator-5554 ./gradlew :demo:connectedReleaseAndroidTest
 ./gradlew :demo:installDebug
 ```
 
@@ -25,6 +26,16 @@ The release AAR is `tsnet/build/outputs/aar/tsnet-release.aar`. The local Maven 
 The native size/alignment report is `tsnet/build/reports/native/sizes.tsv`.
 Android 14/API 34 is the minimum; the AAR contains arm64-v8a and x86_64 native code.
 Consumers of a published AAR will not need Go or an NDK.
+
+The Java API uses package-level JSpecify `@NullMarked`: reference types are non-null unless explicitly
+annotated otherwise. Kotlin consumers see `tailscaleVersion()` as `String`, and Java nullness tools can
+check the same contract. JSpecify 1.0.1 is a transitive API dependency in the Maven publication; use the
+Maven coordinates to retain dependency metadata. Copying only the AAR requires supplying JSpecify too.
+See [JSpecify's dependency guidance](https://jspecify.dev/docs/using/).
+
+AndroidX threading and permission annotations are deferred until the corresponding networking APIs
+exist. The current unstarted-node API needs no INTERNET permission. Callers must close nodes explicitly;
+`close()` is idempotent and synchronized. Nullness annotations do not enforce resource ownership.
 
 Both build variants disable Tailscale SSH, the embedded web client, and logtail using upstream build
 tags. This disables log uploads and disk log buffering, but does not yet make node startup safe:
@@ -37,6 +48,12 @@ discovery and network-monitor creation, using INTERNET permission only in the te
 It contacts no endpoint and requires a device with SELinux **Enforcing** (`adb shell getenforce`) to
 verify the standard Go discovery failure. The native test bridge is present only in debug builds;
 the release AAR check rejects it. Neither the demo nor these tests proves tailnet connectivity.
+
+The release demo enables R8 and resource shrinking and uses the local debug signing key solely for
+installation/testing. `build` assembles it and its instrumentation APK; `:demo:connectedReleaseAndroidTest`
+exercises the actual button through native load, version reporting and repeated create/close. Its test
+does not reference `TsnetNode` or add JNI keep rules. The demo uses the standard optimized Android
+rules and the AAR's consumer rules.
 
 ## Upstream pin
 

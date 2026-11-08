@@ -18,6 +18,7 @@ public final class TsnetNode implements AutoCloseable {
         return nativeTailscaleVersion();
     }
 
+    /// Releases this node. Repeated or concurrent calls are safe and have no additional effect.
     @Override
     public synchronized void close() {
         if (handle != 0) {

@@ -5,9 +5,9 @@ plugins {
 }
 
 tasks.named("check") {
-    dependsOn(":tsnet:check", ":tsnet:assembleDebugAndroidTest", ":demo:check")
+    dependsOn(":tsnet:check", ":tsnet:assembleDebugAndroidTest", ":demo:check", ":demo:assembleReleaseAndroidTest")
 }
 
 tasks.named("assemble") {
-    dependsOn(":tsnet:assembleRelease", ":demo:assembleDebug")
+    dependsOn(":tsnet:assembleRelease", ":demo:assembleDebug", ":demo:assembleRelease")
 }

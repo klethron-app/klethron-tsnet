@@ -19,7 +19,19 @@ android {
         targetSdk = libs.versions.targetSdk.get().toInt()
         versionCode = 1
         versionName = "0.1.0"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
+    buildTypes {
+        release {
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))
+            testProguardFiles("test-rules.pro")
+            // This offline demo is a consumer smoke test, not a distributable application.
+            signingConfig = signingConfigs.getByName("debug")
+        }
+    }
+    testBuildType = "release"
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -28,4 +40,6 @@ android {
 
 dependencies {
     implementation(project(":tsnet"))
+    androidTestImplementation(libs.android.test.runner)
+    androidTestImplementation(libs.junit)
 }
