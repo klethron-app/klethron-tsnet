@@ -27,8 +27,9 @@ Go 1.27.3, NDK 30.0.16248370, AGP 9.5.1 and Gradle 9.9.0 are pinned.
 - Native builds are incremental and configuration-cache compatible. Shared build caching is deliberately
   disabled until toolchains are provisioned hermetically. Only one installed Go version is accepted.
 - Release libraries use Go `-trimpath`, stripped symbols/DWARF and 16 KiB linker alignment.
-- Both variants use `ts_omit_ssh`, `ts_omit_webclient`, `ts_omit_logtail` and `ts_omit_cachenetmap`.
-  These disable out-of-scope features, logtail uploads/buffering and the on-disk netmap (peer) cache.
+- Both variants omit 18 upstream features with `ts_omit_*` tags (listed in `tsnet/build.gradle.kts`):
+  out-of-scope servers/integrations, logtail, debug hooks, metrics, the on-disk netmap cache, PeerAPI
+  serving, exit nodes, environment proxies, OAuth secrets, MDM policy and baked-in TLS roots.
   Two local patches skip log configuration and socket-log directory initialization; both user/backend
   loggers discard output.
 - `check` checks Android lint, native AAR architecture/alignment and both variants' Go module notices,
@@ -57,7 +58,8 @@ Go 1.27.3, NDK 30.0.16248370, AGP 9.5.1 and Gradle 9.9.0 are pinned.
   started node then re-examines its network and rebinds when it changed. Verified with a real Wi-Fi to
   cellular change on emulators against the loopback tailnet, not on hardware or a real tailnet.
 - Go TLS verification trusts Android's current system CA store (Conscrypt APEX on Android 14+, minus
-  user-disabled roots) instead of stock Go's system-image directory. User-added CAs are not trusted.
+  user-disabled roots) instead of stock Go's system-image directory. User-added CAs are not trusted,
+  and `ts_omit_bakedroots` removes Tailscale's Let's Encrypt fallback, so no other roots are trusted.
 - A debug-only probe resolves and verifies Tailscale's real control plane through the platform, then
   starts an ephemeral node until control offers a login URL. No credentials; not a joined tailnet.
 
@@ -454,7 +456,8 @@ cross-device or NAT traversal, network changes, arm64 runtime, or a cancellable 
 - **Deliberate limits:** user-added CAs are not trusted, matching Android's default for apps targeting
   API 24+. The consuming app's network security configuration (domain pins, debug overrides, user CA
   opt-in) is not applied to native TLS; document this for consumers. Upstream `tlsdial` still falls
-  back to its baked-in Let's Encrypt roots for Tailscale connections, even if a user disabled them.
+  back to its baked-in Let's Encrypt roots for Tailscale connections, even if a user disabled them
+  (since removed by `ts_omit_bakedroots`; see the second feature exclusion iteration).
   The load cost (~120–134 PEM files once per process) was not measured on device.
 
 Verification:
@@ -508,7 +511,8 @@ findings, checked against our pin:
   `net.DefaultResolver`, and our cgo build uses bionic's resolver (respecting Private DNS). Still verify
   control/DERP bootstrap on a real network.
 - **Build tags to measure:** `ts_omit_syspolicy`, `ts_omit_oauthkey`, `ts_omit_drive`,
-  `ts_omit_appconnectors`, `ts_omit_c2n`. Keep the portmapper for NAT traversal.
+  `ts_omit_appconnectors`, `ts_omit_c2n`. Keep the portmapper for NAT traversal. (Measured in the second
+  feature exclusion iteration: all adopted except `c2n`.)
 - Possible later addition: caller-supplied `hostinfo` OS version/device model (they report `linux` by default).
 
 ## Default network seam iteration (2026-11-08)
@@ -575,7 +579,7 @@ Real control-plane bootstrap (debug-only `control_probe.go`, new `ControlPlaneTe
 - A plain `crypto/tls` dial to `controlplane.tailscale.com:443` resolves through bionic (Go prefers the cgo
   resolver on Android) and verifies only against Go's system pool, i.e. our platform roots. Upstream
   `tlsdial` would silently fall back to baked-in Let's Encrypt roots, so the node's own connection cannot
-  prove this. Java requires the verified chain's root SHA-256 to be one of `AndroidCAStore`'s system roots.
+  prove this (`ts_omit_bakedroots` later removed that fallback). Java requires the verified chain's root SHA-256 to be one of `AndroidCAStore`'s system roots.
 - It then starts an ephemeral, in-memory node with discarding loggers and an explicit
   `ipn.DefaultControlURL`. `Start` fetches the control key over TLS, registers over Noise and requests
   interactive login. The probe watches the IPN bus (`NotifyInitialState`) for `BrowseToURL`, requires
@@ -634,6 +638,81 @@ Sizes: release native libraries are byte-identical to the previous iteration. Co
 **14,004,534 bytes**, up **104 bytes**. Debug libraries are **19,953,296 raw / 7,762,032 ZIP bytes**
 (arm64) and **21,634,672 / 8,529,347** (x86_64); the debug AAR is **16,376,460 bytes**.
 
+## Second feature exclusion iteration (2026-11-08)
+
+Measured every omittable upstream feature tag against the unchanged pin, toolchains and sources, on
+**debug** x86_64 libraries (Start, Up, Dial and LocalAPI are reachable there, unlike release). Each tag
+was added to the four existing exclusions. Kept 14 more, giving 18 in both variants. No upstream patch,
+dependency version or toolchain changed. Decisions:
+
+| Omitted feature | Debug x86_64 raw saved | ZIP saved | Reason |
+|---|---:|---:|---|
+| `debug` | 273,280 | 109,325 | Removes `SSLKEYLOGFILE` TLS key logging (an environment variable would make Go write session keys to a file), control-enabled debug logging and debug endpoints |
+| `syspolicy` | 266,336 | 97,115 | No MDM policy store is registered in an embedded Android library |
+| `peerapiserver` | 219,424 | 88,451 | The node only connects out; no PeerAPI listener on its tailnet address |
+| `useexitnode` | 155,968 | 65,076 | The library dials tailnet and subnet-routed hosts, not the internet via exit nodes |
+| `useproxy` | 218,272 | 55,863 | Android's system proxy is not in environment variables; the host's environment must not redirect control/DERP |
+| `appconnectors` | 90,624 | 34,026 | The node is never an app connector |
+| `usermetrics` | 88,640 | 31,167 | No metrics are served |
+| `oauthkey` | 50,432 | 20,253 | Removes the `TS_CLIENT_SECRET` OAuth-to-auth-key path and `golang.org/x/oauth2` |
+| `drive` | 37,152 | 14,694 | No Taildrive |
+| `exitnodehealth` | 39,040 | 14,262 | Requires `useexitnode` |
+| `advertiseroutes` | 14,656 | 4,887 | The node never advertises routes |
+| `clientupdate` | 10,208 | 2,644 | Nothing to self-update |
+| `bakedroots` | 2,304 | 961 | Trust only Android's system CA store (see below) |
+| `advertiseexitnode` | 1,792 | 1,243 | Requires `peerapiserver` and `advertiseroutes` |
+
+Kept, because they are core to a client: `dns` (MagicDNS names, 454 KB raw), `portmapper` (NAT traversal,
+395 KB), `health` (status warnings), `gro` (netstack receive throughput), `useroutes`, `tailnetlock`,
+`ipnbus` (login URL delivery), `c2n` (control queries; only 23 KB) and `netstack`. Not added despite
+compiling: tags saving under about 10 KB without a behavioral reason, and tags with no Android effect
+(`cloud` returns early on Android, `portlist` cannot read `/proc/net` from an app, the DNS disk cache's
+hooks are never registered by tsnet). `bird`, `netlog` and `taildrop` depend on omitted features but are
+not linked, so their tags would be no-ops. Measured but unusable: **`ts_omit_acme` fails to compile
+`tsnet` at this pin** (`tsnet.go` calls `local.Client.GetCertificate` unconditionally), so `serve` and
+`acme` stay. `clientmetrics` breaks `util/syspolicy`, and `tailnetlock` breaks the debug test servers.
+Dependency consistency was checked with upstream `featuretags.RequiredBy`.
+
+**Baked-in roots:** `tlsdial` verified Tailscale control, DERP and DNS-fallback certificates against
+Let's Encrypt roots compiled into the binary whenever the platform store rejected them, which bypassed
+roots a user disabled in Settings (recorded as a limit in the TLS iteration). With `ts_omit_bakedroots`,
+the platform store is the only trust source. Negative controls on API 34 temporarily emptied the
+platform store and skipped the probe's plain TLS check. With the tag, the node never got a login URL
+(`no login url` after 45 s). Without it, the node reached login through the baked roots and only
+failed the later root-hash check (`omit-negative-bakedroots-{omitted,kept}-api34/`). Both changes were
+reverted, and `ControlPlaneTest` passed again on the restored build.
+
+Release licence inventory: `golang.org/x/oauth2` is no longer linked, so its row and licence were removed.
+The release inventory is **26 modules** and the debug check **31**. `go.mod` keeps the indirect
+requirement because the Tailscale module graph needs it; the notice check confirms the linked set.
+
+Verification:
+
+- `./gradlew build :tsnet:publishReleasePublicationToLocalBuildRepository` passes, including lint,
+  notice and release-alignment/probe checks. Repeating `build` reuses the configuration cache.
+  `go version -m` shows all 18 tags in all four libraries and `klethron_test` only in debug.
+  `zipalign -c -P 16 4` passes for the release demo APK.
+- Instrumentation JUnit XML records **thirteen passed tests, zero failures/errors/skips per device**:
+  twelve library tests plus the R8-minified demo test. Devices: dedicated emulators at API 34 / x86_64 /
+  4,096-byte pages and API 37.2 / x86_64 / 16,384-byte pages, both SELinux Enforcing (`omit-api34/`,
+  `omit-api37/` under each module's `build/reports/device-verification/`). These cover startup, loopback
+  direct and DERP-only exchange, network-change rebinding and real control-plane bootstrap with the new
+  tags. They do not cover an authorized node, real DERP or MagicDNS resolution of a real peer.
+
+Release sizes (`tsnet/build/reports/native/sizes.tsv`):
+
+| Entry | Before raw | After raw | Before ZIP | After ZIP |
+|---|---:|---:|---:|---:|
+| arm64-v8a library | 17,058,864 | 15,795,536 | 6,631,706 | 6,170,328 |
+| x86_64 library | 18,501,808 | 17,142,544 | 7,294,651 | 6,785,694 |
+
+Complete release AAR: **13,032,988 bytes**, down **971,546 bytes (6.94%)**. Raw libraries shrank
+1,263,328 bytes (arm64-v8a, 7.41%) and 1,359,264 bytes (x86_64, 7.35%). Debug libraries are
+**18,656,848 raw / 7,293,266 ZIP bytes** (arm64) and **20,241,360 / 8,014,583** (x86_64); the debug AAR is
+**15,391,719 bytes**, down 984,741. The table above uses individual debug measurements. Savings are not
+additive and release reaches less code than a future public start API will. Measurement script and
+results are retained under `tsnet/build/reports/native-feature-audit-2/`.
+
 ## Next increments
 
 1. **Prove a real Android node.** Interface discovery, monitor initialization, file-free startup,
@@ -659,10 +738,10 @@ Sizes: release native libraries are byte-identical to the previous iteration. Co
 4. **Turn the demo into a network proof.** Add INTERNET permission only with networking. Explicit setup,
    browser authorization, one selected destination and a simple exchange. Keep all network work off the
    UI thread. No auth keys checked into tests or supplied to pull requests from forks.
-5. **Revalidate feature exclusions with working networking.** Initial individual/combined measurements
-   for `ts_omit_ssh`, `ts_omit_webclient`, `ts_omit_logtail` and `ts_omit_cachenetmap` are recorded above.
-   Measure the further candidates listed in the tailsocks notes the same way.
-   The loopback tailnet test now exercises all four in debug. Once Start/Dial are
+5. **Revalidate feature exclusions with working networking.** Individual and combined measurements for
+   all 18 omitted features are recorded above, and the debug device tests exercise them. Reconsider
+   `useexitnode` or `useproxy` only if a real caller needs exit nodes or proxies; `acme` cannot be omitted
+   until upstream fixes the tsnet build. Confirm MagicDNS peer names still resolve. Once Start/Dial are
    reachable, repeat both ABI libraries' raw/ZIP sizes and the complete AAR comparison against the
    same dependency/toolchain baseline. Verify startup, login, DNS and direct/relayed dialing on API 34
    and 16 KiB devices. Scaffold-only savings and lifecycle tests do not establish the production

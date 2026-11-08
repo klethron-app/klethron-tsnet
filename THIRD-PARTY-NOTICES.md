@@ -10,15 +10,15 @@ is included as `JSPECIFY-LICENSE` alongside the native notices for consumers pac
 
 ## Native module inventory
 
-[`GO-MODULES.tsv`](tsnet/src/main/assets/klethron-tsnet/licenses/GO-MODULES.tsv) records the 27 dependency
+[`GO-MODULES.tsv`](tsnet/src/main/assets/klethron-tsnet/licenses/GO-MODULES.tsv) records the 26 dependency
 modules reported by `go version -m` for both Android ABIs in both build variants: module path, pinned
 version, Go module checksum, and paths to the included notices. Paths are relative to the inventory.
 The inventory and full notice texts ship in the AAR under `assets/klethron-tsnet/licenses/`.
 
 Debug libraries also link an in-process test control server and DERP/STUN server for instrumentation.
 [`GO-MODULES-DEBUG.tsv`](tsnet/src/debug/assets/klethron-tsnet/licenses/GO-MODULES-DEBUG.tsv) records the
-five modules these add (32 in total), with notices copied verbatim from the verified module cache. They are
-packaged only in the debug AAR. The release AAR and its 27-module inventory are unchanged.
+five modules these add (31 in total), with notices copied verbatim from the verified module cache. They are
+packaged only in the debug AAR. The release AAR and its 26-module inventory are unchanged.
 
 `TAILSCALE-MODIFICATIONS` records two local patches that make `ts_omit_logtail` skip log configuration
 and socket-log directory initialization. `BuildGoLibrary` verifies the upstream modules and both

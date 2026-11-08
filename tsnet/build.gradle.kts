@@ -31,6 +31,20 @@ android {
     packaging.jniLibs.keepDebugSymbols += "**/libklethron_tsnet.so"
 }
 
+// Upstream features this client never uses. See PLAN.md for the measured savings and reasons.
+val omittedFeatures = listOf(
+    // Out of scope: embedded SSH server, web UI, Taildrive, app connectors, self-update.
+    "ssh", "webclient", "drive", "appconnectors", "clientupdate",
+    // The node only connects out: no PeerAPI server, advertised routes or exit node, nor exit node use.
+    "peerapiserver", "advertiseroutes", "advertiseexitnode", "useexitnode", "exitnodehealth",
+    // No log upload/buffering, debug hooks (including SSLKEYLOGFILE), metrics or on-disk netmap cache.
+    "logtail", "debug", "usermetrics", "cachenetmap",
+    // Ignore host-process environment and policy: proxy variables, OAuth secrets, MDM settings.
+    "useproxy", "oauthkey", "syspolicy",
+    // TLS trusts only Android's system CA store, not Tailscale's baked-in Let's Encrypt roots.
+    "bakedroots",
+)
+
 val nativeTasks = listOf("release", "debug").associateWith { buildType ->
     listOf("arm64-v8a", "x86_64").map { abi ->
         val suffix = if (buildType == "debug") "Debug" else ""
@@ -41,8 +55,7 @@ val nativeTasks = listOf("release", "debug").associateWith { buildType ->
             goVersion.set(libs.versions.go)
             api.set(libs.versions.minSdk.get().toInt())
             this.abi.set(abi)
-            // No embedded SSH server, web UI, log upload/buffering, or on-disk netmap (peer) cache.
-            buildTags.set(listOf("ts_omit_ssh", "ts_omit_webclient", "ts_omit_logtail", "ts_omit_cachenetmap") +
+            buildTags.set(omittedFeatures.map { "ts_omit_$it" } +
                 if (buildType == "debug") listOf("klethron_test") else emptyList())
             outputDirectory.set(layout.buildDirectory.dir("generated/jniLibs/$buildType/$abi"))
         }

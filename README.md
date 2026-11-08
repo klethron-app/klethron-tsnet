@@ -46,8 +46,11 @@ by name, so the AAR does not export `androidx.annotation` (which would add the K
 `error_prone_annotations`. The current unstarted-node API needs no INTERNET permission. Callers must close
 nodes explicitly; `close()` is idempotent and synchronized.
 
-Both build variants disable Tailscale SSH, the embedded web client, logtail and the on-disk netmap
-cache using upstream build tags. The netmap cache would otherwise persist peer names, addresses and
+Both build variants omit 18 upstream features with build tags (see `tsnet/build.gradle.kts`), including
+Tailscale SSH, the embedded web client, logtail, debug hooks, PeerAPI serving, exit nodes, environment
+proxies, OAuth client secrets, MDM policy and the on-disk netmap cache. This keeps the host app's
+environment from redirecting connections or enabling TLS key logging, and reduces native size.
+The netmap cache would otherwise persist peer names, addresses and
 keys in the node directory whenever the control server enables it. Two small patches also skip upstream log-configuration creation and socket-log directory lookup
 when logtail is disabled. Both user and backend loggers discard output. Patches are applied to an
 isolated, verified build copy; the shared module cache is untouched. The AAR ships the patch notice.
@@ -58,8 +61,8 @@ See [PLAN.md](PLAN.md) for verification and remaining startup work.
 Native TLS verification uses Android's current system CA store: the updatable Conscrypt APEX directory
 on Android 14+, without roots the user disabled in Settings. Stock Go would read only the system image
 copy, missing root changes delivered by Google Play system updates. User-added CAs and the consuming
-app's network security configuration do not apply to native TLS. For its own control and DERP
-servers, Tailscale also accepts its built-in Let's Encrypt roots.
+app's network security configuration do not apply to native TLS. Tailscale's built-in Let's Encrypt
+fallback roots are omitted, so a root disabled on the device is not trusted for control or DERP either.
 
 Android does not let native code discover the default network, so the app reports it with
 `TsnetNode.setDefaultNetwork(interfaceName, ipv4Gateway)`, for example from a
@@ -110,7 +113,7 @@ verification and release setup. GitHub Packages is an alternative, but requires 
 for public downloads. CI retains verification reports; it does not publish binary artifacts or Maven releases.
 
 Original wrapper/build/demo code uses the Apache License 2.0. Tailscale and its dependencies retain
-their own licences. Both AAR variants include an inventory and notices for the 27 Go modules recorded
+their own licences. Both AAR variants include an inventory and notices for the 26 Go modules recorded
 in their native binaries. `build` checks module versions/checksums and packaged notice contents for
 both ABIs. Source-level, embedded-resource and native toolchain attribution review remains a release
 prerequisite. See [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
