@@ -61,6 +61,18 @@ val verifyNativeAar = tasks.register<VerifyNativeAar>("verifyNativeAar") {
 }
 tasks.named("check") { dependsOn(verifyNativeAar) }
 
+// Audit the binaries actually packaged in each variant, not the wider go.mod graph.
+for (buildType in listOf("release", "debug")) {
+    val verifyNotices = tasks.register<VerifyNativeNotices>("verify" + buildType.replaceFirstChar { it.uppercase() } + "NativeNotices") {
+        dependsOn("bundle" + buildType.replaceFirstChar { it.uppercase() } + "Aar")
+        aar.set(layout.buildDirectory.file("outputs/aar/tsnet-$buildType.aar"))
+        notices.set(layout.projectDirectory.dir("src/main/assets/klethron-tsnet/licenses"))
+        goVersion.set(libs.versions.go)
+        report.set(layout.buildDirectory.file("reports/native/notices-$buildType.tsv"))
+    }
+    tasks.named("check") { dependsOn(verifyNotices) }
+}
+
 dependencies {
     api(libs.jspecify)
     androidTestImplementation(libs.android.test.runner)

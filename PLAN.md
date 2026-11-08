@@ -27,7 +27,8 @@ Go 1.27.3, NDK 30.0.16248370, AGP 9.5.1 and Gradle 9.9.0 are pinned.
 - Release libraries use Go `-trimpath`, stripped symbols/DWARF and 16 KiB linker alignment.
 - Both variants use `ts_omit_ssh`, `ts_omit_webclient` and `ts_omit_logtail`. These disable out-of-scope
   features and remove logtail uploads/buffering; startup logging and storage still need work below.
-- `check` checks Android lint and native AAR architecture/alignment, and compiles JNI instrumentation.
+- `check` checks Android lint, native AAR architecture/alignment and both variants' Go module notices,
+  and compiles JNI instrumentation.
 - `:demo` is a platform-only Java Activity with an explicit offline native-load/lifecycle button.
 - Public Java types use JSpecify non-null defaults, exported with the Maven dependency metadata.
   The release demo exercises the native lifecycle with R8/resource shrinking enabled.
@@ -241,6 +242,47 @@ Native sizes are unchanged: arm64-v8a **17,098,672 raw / 6,646,573 ZIP bytes**; 
 for package metadata and the JSpecify licence. The separately resolved JSpecify JAR is not part
 of this AAR size; its classes are removed by R8 in the verified demo.
 
+## Native module notices iteration (2026-11-08)
+
+- Added a checked-in inventory of the **27 Go dependency modules** reported by `go version -m` on
+  both ABIs in both variants. Rows record exact module versions, module checksums and notice paths.
+  This is more precise than copying the entire `go.mod` graph, but is not a symbol-level inventory.
+- Copied 36 upstream licence/patent files verbatim from the verified module cache, including the
+  compression library's nested `internal/snapref` and `zstd/internal/xxhash` licences. Existing Go,
+  Tailscale and JSpecify notices remain. Each AAR packages 42 notice/inventory files in total.
+- `build` now checks both AARs' actual native build metadata against the inventory, rejects module
+  replacements and version/checksum drift, verifies the pinned Go version, and compares packaged
+  notices byte-for-byte with checked-in files. Verification does not fetch or generate notices.
+  Native code, dependency versions, feature tags and public API are unchanged.
+- Documented the maintenance procedure and remaining audit scope in `THIRD-PARTY-NOTICES.md`.
+  Module metadata does not establish source-level attributions, generated-data provenance or C/NDK
+  runtime coverage. The Android import graphs report Tailscale version/toolchain text and DNS fallback
+  JSON as embedded files; no resource-retention or complete licence-audit claim follows from that.
+  Startup/login/dial and the remaining release prerequisites are still outstanding.
+
+Verification:
+
+- `./gradlew build :tsnet:publishReleasePublicationToLocalBuildRepository` passes. Repeating it reuses
+  the configuration cache; all four native builds and both notice checks are up to date. Both release
+  libraries still pass architecture and 16 KiB alignment checks. `go mod verify` passes, and every
+  inventory notice matches its pinned module-cache source byte-for-byte.
+- Eleven local fixture checks pass: one valid AAR and ten expected rejections covering missing or
+  altered packaged notices, missing source notices, missing/stale modules, version/checksum drift,
+  a changed Go runtime, module replacement, and a missing ABI. The runtime/replacement mutations
+  target x86_64 after arm64 has passed. Fixtures, logs and the check script are retained locally under
+  `tsnet/build/reports/native-notices/`; these are build-tool checks, not JUnit/device tests.
+- No JNI/native behavior changed, so device instrumentation was not rerun. No device was attached.
+  The preceding iteration's API 34 / 4 KiB and API 37.2 / 16 KiB x86_64 coverage remains the latest;
+  there are no new device/JUnit test counts to report. arm64 runtime remains unverified.
+
+Native sizes are unchanged: arm64-v8a **17,098,672 raw / 6,646,573 ZIP bytes**; x86_64
+**18,546,352 raw / 7,309,396 ZIP bytes**. Complete release AAR: **14,032,412 bytes**, up
+**66,027 bytes (0.47%)** for the module inventory and additional upstream notices.
+The R8-minified release demo retains the added assets: **48,689 compressed bytes** plus approximately
+**7,574 bytes** of ZIP headers/filenames, roughly **55 KiB** in the APK. Notices therefore contribute
+to delivered/installed APK size; the AAR size increase must not be described as having no end-user
+storage cost. These are local APK entry measurements, not a Play download or on-device storage test.
+
 ## Next increments
 
 1. **Prove a real Android node.** Interface discovery and monitor initialization are addressed above.
@@ -264,8 +306,9 @@ of this AAR size; its classes are removed by R8 in the verified demo.
    same dependency/toolchain baseline. Verify startup, login, DNS and direct/relayed dialing on API 34
    and 16 KiB devices. Scaffold-only savings and lifecycle tests do not establish the production
    result. Update the licence inventory for the final linked feature set.
-6. **Release readiness.** Generate an exact Android-linked dependency/licence inventory, including any
-   non-Go embedded resources and Go runtime notices. Package notices in the AAR. Test R8-minified
+6. **Release readiness.** Extend the checked Go module inventory into a complete Android-linked
+   dependency/licence review, including per-file attributions, generated data, non-Go embedded resources
+   and C/NDK runtime code. Module/root notices and Go runtime notices now ship in both AARs. Test R8-minified
    consumers with actual networking (offline R8 lifecycle now verified), arm64 hardware, API 34,
    16 KiB ELF/APK alignment and cold-start loading. Preserve native symbols separately if needed for
    crash reports. Record sizes per ABI before/after each dependency change.

@@ -69,4 +69,7 @@ verification and release setup. GitHub Packages is an alternative, but requires 
 for public downloads. CI retains verification reports; it does not publish binary artifacts or Maven releases.
 
 Original wrapper/build/demo code uses the Apache License 2.0. Tailscale and its dependencies retain
-their own licences. See [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
+their own licences. Both AAR variants include an inventory and notices for the 27 Go modules recorded
+in their native binaries. `build` checks module versions/checksums and packaged notice contents for
+both ABIs. Source-level, embedded-resource and native toolchain attribution review remains a release
+prerequisite. See [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).

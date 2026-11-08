@@ -8,8 +8,43 @@ The Java API depends on `org.jspecify:jspecify:1.0.1` (Apache-2.0). It is a tran
 not bundled classes inside the AAR. Its upstream [v1.0.1 licence](https://github.com/jspecify/jspecify/blob/v1.0.1/LICENSE)
 is included as `JSPECIFY-LICENSE` alongside the native notices for consumers packaging the annotations.
 
-`go.mod` and `go.sum` record dependencies, including dependencies used only on other platforms or by
-upstream tests. They are not an exact inventory of code linked into either Android binary.
-Before a public binary release, generate and review the Android-linked dependency licences and any
-embedded resources and ship their full notices. The initial CI artifacts are development scaffolding;
-no Maven binary release is configured. See `PLAN.md`.
+## Native module inventory
+
+[`GO-MODULES.tsv`](tsnet/src/main/assets/klethron-tsnet/licenses/GO-MODULES.tsv) records the 27 dependency
+modules reported by `go version -m` for both Android ABIs in both build variants: module path, pinned
+version, Go module checksum, and paths to the included notices. Paths are relative to the inventory.
+The inventory and full notice texts ship in the AAR under `assets/klethron-tsnet/licenses/`.
+
+Notices were copied verbatim from the checksum-verified Go module cache. Each module's root licence
+and any root patent notice are included. The compression dependency additionally includes the nested
+licences for `internal/snapref` and `zstd/internal/xxhash`, both in the Android import graph. Its root
+licence also contains notices for code outside that graph; those upstream notices remain intact.
+The existing Go and Tailscale notices are retained, including Go notices for Tailscale's Go-derived
+`tempfork/heap`, `tempfork/acme`, and `tempfork/httprec` sources.
+
+`./gradlew build` runs `:tsnet:verifyReleaseNativeNotices` and `:tsnet:verifyDebugNativeNotices`.
+These inspect each AAR's actual libraries, reject missing/stale modules, version/checksum drift and
+module replacements, check the pinned Go runtime version, and compare every packaged notice with
+its checked-in source. Reports are in `tsnet/build/reports/native/notices-{release,debug}.tsv`.
+Normal verification does not generate or download notices and does not accept new modules automatically.
+
+For an intentional native dependency change:
+
+1. Build both variants and inspect `go version -m` on all four libraries. Use the Android build tags
+   and toolchains when inspecting `go list -deps -json`; a host import graph can differ.
+2. Run `go mod verify` in `tsnet/src/main/go`. Locate each pinned source with
+   `go mod download -json module@version`, review its notices and relevant nested directories, and copy
+   notice bytes without editing them. Update the inventory's versions, sums and relative notice paths.
+3. Review source-level attributions, generated data, embedded resources and native toolchain code
+   separately. Recheck Go runtime notices when updating Go, and JSpecify notices when updating JSpecify.
+4. Run `./gradlew build`, review both notice reports, and record the ABI library and complete AAR sizes.
+
+This is a **Go module build-metadata inventory**, not a symbol-level or complete third-party audit.
+`go.mod` also contains modules used only on other platforms or by tests, while build metadata can
+include modules whose code is later removed by the linker. It does not inventory C/NDK runtime code,
+per-file attribution, generated tables, or non-Go resources. The current Android import graphs report
+only Tailscale version/toolchain text files and `net/dnsfallback/dns-fallback-servers.json` as embedded
+files; this is an import-graph observation, not proof of which resources survive linking.
+
+Complete that remaining audit and runtime verification before a public binary release. No Maven binary
+release is configured. See [PLAN.md](PLAN.md).
