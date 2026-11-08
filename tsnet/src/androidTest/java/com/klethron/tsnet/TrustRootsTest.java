@@ -1,0 +1,45 @@
+package com.klethron.tsnet;
+
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
+
+import java.security.KeyStore;
+import java.security.MessageDigest;
+import java.util.Collections;
+import java.util.HexFormat;
+import java.util.Set;
+import java.util.TreeSet;
+import org.json.JSONArray;
+import org.json.JSONObject;
+import org.junit.Test;
+
+public final class TrustRootsTest {
+    static {
+        System.loadLibrary("klethron_tsnet");
+    }
+
+    @Test
+    public void goTrustsExactlyAndroidSystemRoots() throws Exception {
+        JSONObject report = new JSONObject(nativeProbe());
+        assertTrue("Platform roots must replace Go's system pool", report.getBoolean("SystemPool"));
+        Set<String> actual = new TreeSet<>();
+        JSONArray roots = report.getJSONArray("Roots");
+        for (int i = 0; i < roots.length(); i++) {
+            actual.add(roots.getString(i));
+        }
+        // AndroidCAStore lists the current system store without user-disabled roots, plus user CAs.
+        KeyStore store = KeyStore.getInstance("AndroidCAStore");
+        store.load(null);
+        Set<String> expected = new TreeSet<>();
+        for (String alias : Collections.list(store.aliases())) {
+            if (alias.startsWith("system:")) {
+                byte[] der = store.getCertificate(alias).getEncoded();
+                expected.add(HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(der)));
+            }
+        }
+        assertTrue("Expected Android system roots", expected.size() > 100);
+        assertEquals(expected, actual);
+    }
+
+    private static native String nativeProbe();
+}

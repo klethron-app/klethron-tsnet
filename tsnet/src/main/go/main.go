@@ -14,6 +14,7 @@ import (
 )
 
 func newServer() *tsnet.Server {
+	usePlatformRoots()
 	return &tsnet.Server{UserLogf: logger.Discard, Logf: logger.Discard}
 }
 

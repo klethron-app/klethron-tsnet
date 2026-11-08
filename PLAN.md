@@ -52,6 +52,8 @@ Go 1.27.3, NDK 30.0.16248370, AGP 9.5.1 and Gradle 9.9.0 are pinned.
 - A third debug-only probe joins two in-process nodes to upstream's test control server and a loopback
   DERP/STUN server, then exchanges TCP data over a verified direct UDP path and over DERP only. This is
   a hermetic two-node tailnet, not a real tailnet, DNS/TLS bootstrap or public dial API.
+- Go TLS verification trusts Android's current system CA store (Conscrypt APEX on Android 14+, minus
+  user-disabled roots) instead of stock Go's system-image directory. User-added CAs are not trusted.
 
 Initial scaffold verification on 2026-11-08:
 
@@ -427,11 +429,87 @@ This proves Android in-process registration, netmap delivery, WireGuard/netstack
 between two nodes without credentials. It does not prove a real control plane, DNS/TLS bootstrap,
 cross-device or NAT traversal, network changes, arm64 runtime, or a cancellable public lifecycle.
 
+## Android TLS trust roots iteration (2026-11-08)
+
+- **Found:** pinned Go 1.27.3 `crypto/x509` reads Android roots only from `/system/etc/security/cacerts`
+  (plus an obsolete `/data/misc/keychain/certs-added`). Since Android 14, the platform's system store
+  is the updatable Conscrypt APEX directory `/apex/com.android.conscrypt/cacerts`, so stock Go misses
+  roots added or removed by Google Play system updates. It also ignores roots the user disabled in
+  Settings (`/data/misc/user/<user>/cacerts-removed`), so the native stack would still trust them.
+  Every Tailscale control, DNS-fallback and DERP TLS connection first verifies against this pool.
+- **Fix, without patches or environment mutation:** `roots_android.go` loads the first existing
+  directory of APEX then system image, drops certificates matching the current user's removed entries
+  by DER bytes (as `TrustedCertificateStore` does), and installs the result with
+  `x509.SetFallbackRoots`. A `//go:debug x509usefallbackroots=1` directive makes Go use it instead of
+  its own on-disk discovery; `go version -m` records it in all four libraries. Setting `SSL_CERT_DIR`
+  was rejected because it would mutate the host app's process environment. Installation runs once,
+  at first node creation (not library load), before any node can dial. An empty store fails closed.
+- **Deliberate limits:** user-added CAs are not trusted, matching Android's default for apps targeting
+  API 24+. The consuming app's network security configuration (domain pins, debug overrides, user CA
+  opt-in) is not applied to native TLS; document this for consumers. Upstream `tlsdial` still falls
+  back to its baked-in Let's Encrypt roots for Tailscale connections, even if a user disabled them.
+  The load cost (~120–134 PEM files once per process) was not measured on device.
+
+Verification:
+
+- `./gradlew build` passes; repeating it reuses the configuration cache with all four Go builds up to
+  date. Release libraries pass architecture/16 KiB alignment checks, and the existing release check
+  rejects the new `klethron_roots_probe` bridge.
+- New `TrustRootsTest` compares SHA-256 fingerprints of the Go-loaded roots with Java's
+  `AndroidCAStore` `system:` entries, and requires Go's `x509.SystemCertPool()` to equal that pool.
+  Instrumentation JUnit XML records **eleven passed tests, zero failures/errors/skips per device**
+  (ten library tests plus the R8-minified demo) on dedicated emulators at API 34 / x86_64 / 4,096-byte
+  pages (134 roots) and API 37.2 / x86_64 / 16,384-byte pages (120 roots), both SELinux Enforcing.
+  Reports are under each module's `build/reports/device-verification/roots-emulator-555{4,6}/`.
+- These factory images have identical APEX and system-image directories, so the parity test alone does
+  not distinguish stock Go. With a root shell, one APEX root was placed in
+  `/data/misc/user/0/cacerts-removed` (owner/mode/SELinux label as Settings would create it). An ordinary
+  app could read it, Java excluded the root, and all ten library tests passed on both devices
+  (`roots-removed-emulator-555{4,6}/`). Two negative controls on API 37.2 then failed as expected:
+  ignoring removals failed fingerprint parity, and skipping `SetFallbackRoots` failed the system-pool
+  check (`roots-negative-removed-api37/`, `roots-negative-stock-api37/`). The fixture was removed.
+  A diverged Mainline APEX update and a real certificate chain were not exercised; arm64 runtime
+  remains unverified.
+
+Release sizes (no dependency or toolchain changes):
+
+| Entry | Before raw | After raw | Before ZIP | After ZIP |
+|---|---:|---:|---:|---:|
+| arm64-v8a library | 17,048,976 | 17,053,840 | 6,625,669 | 6,630,972 |
+| x86_64 library | 18,491,504 | 18,496,688 | 7,287,697 | 7,293,055 |
+
+Complete release AAR: **14,001,550 bytes**, up **10,661 bytes (0.08%)**. Debug AAR: **16,362,948 bytes**.
+
+## Prior art: tailsocks (2026-11-08)
+
+Reviewed [bropines/tailsocks](https://github.com/bropines/tailsocks) (BSD-3-Clause; no code copied). It
+runs patched `tailscaled` v1.104.1 as a subprocess behind a foreground Service, SOCKS and VPN modes, so
+its architecture conflicts with this library's constraints. It does not address TLS roots. Useful
+findings, checked against our pin:
+
+- **Network-change seam:** on each `ConnectivityManager` change it calls
+  `netmon.UpdateLastKnownDefaultRouteInterface(linkProperties.interfaceName)` and then
+  `Monitor.InjectEvent()`. Without a default interface name, change deltas never mark the network usable,
+  so no rebind or netcheck follows. Their polling-wake patch is unnecessary for us: the engine registers
+  its monitor in `tsd.System`, reachable via the unstable `tsnet.Server.Sys().NetMon` after Start (pin-test
+  it). The route name is process-global. `UpdateLastKnownDefaultGateway` (portmapper) can come from
+  `LinkProperties` routes in the same seam. Rebinding/DERP recovery on validation changes is caller policy.
+- **Login events:** take the URL from `ipn.Notify.BrowseToURL`, never logs; do not request the
+  `Obsolete*` watch-mask bits; clear a cached URL on each backend start. Upstream `printAuthURLLoop` logs it
+  through `Server.logf`, which we already discard.
+- **DNS:** their hard-coded public fallback resolvers are not needed. tsnet `Dial` falls back to
+  `net.DefaultResolver`, and our cgo build uses bionic's resolver (respecting Private DNS). Still verify
+  control/DERP bootstrap on a real network.
+- **Build tags to measure:** `ts_omit_syspolicy`, `ts_omit_oauthkey`, `ts_omit_drive`,
+  `ts_omit_appconnectors`, `ts_omit_c2n`. Keep the portmapper for NAT traversal.
+- Possible later addition: caller-supplied `hostinfo` OS version/device model (they report `linux` by default).
+
 ## Next increments
 
-1. **Prove a real Android node.** Interface discovery, monitor initialization, file-free startup and
-   loopback two-node direct/DERP dialing are proven above. Remaining: DNS/TLS bootstrap with real
-   certificate verification, a host notification seam for network changes (with a test that changes
+1. **Prove a real Android node.** Interface discovery, monitor initialization, file-free startup,
+   loopback two-node direct/DERP dialing and platform TLS roots are proven above. Remaining: DNS
+   bootstrap and verifying a real certificate chain, a host notification seam for network changes
+   (default interface name, gateway, `InjectEvent`; see the tailsocks notes, with a test that changes
    the default network), and cross-device or NAT-traversing paths. Keep tests credential-free until an
    explicit live-tailnet proof; the loopback harness can host the network-change test.
 2. **Add only the lifecycle/configuration needed by that proof.** Explicit no-backup state directory and
@@ -450,6 +528,7 @@ cross-device or NAT traversal, network changes, arm64 runtime, or a cancellable 
    UI thread. No auth keys checked into tests or supplied to pull requests from forks.
 5. **Revalidate feature exclusions with working networking.** Initial individual/combined measurements
    for `ts_omit_ssh`, `ts_omit_webclient`, `ts_omit_logtail` and `ts_omit_cachenetmap` are recorded above.
+   Measure the further candidates listed in the tailsocks notes the same way.
    The loopback tailnet test now exercises all four in debug. Once Start/Dial are
    reachable, repeat both ABI libraries' raw/ZIP sizes and the complete AAR comparison against the
    same dependency/toolchain baseline. Verify startup, login, DNS and direct/relayed dialing on API 34

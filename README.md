@@ -49,6 +49,12 @@ The patch implementation is part of Gradle's task fingerprint, so edits invalida
 Go's cache also tracks the modified source. Shared native output caching is disabled.
 See [PLAN.md](PLAN.md) for verification and remaining startup work.
 
+Native TLS verification uses Android's current system CA store: the updatable Conscrypt APEX directory
+on Android 14+, without roots the user disabled in Settings. Stock Go would read only the system image
+copy, missing root changes delivered by Google Play system updates. User-added CAs and the consuming
+app's network security configuration do not apply to native TLS. For its own control and DERP
+servers, Tailscale also accepts its built-in Let's Encrypt roots.
+
 The engine runs inside the Android app process using Go goroutines and native threads. The library
 does not launch executables or subprocesses. Future blocking networking APIs must be called off the
 UI thread; construction and close are currently synchronous.
