@@ -1,0 +1,5 @@
+<resources>
+    <string name="load_native">Load tsnet and test node lifecycle</string>
+    <string name="native_loaded">Loaded %1$s\nNode created and closed. Networking is not implemented yet.</string>
+    <string name="native_failed">Native smoke test failed: %1$s</string>
+</resources>
