@@ -33,7 +33,8 @@ Verified locally on 2026-11-08:
 
 - `./gradlew build :tsnet:publishReleasePublicationToLocalBuildRepository` passed. Repeating the command
   reused the configuration cache and left both Go compilation tasks up to date. The generated POM has
-  the intended coordinates and no Java runtime dependencies (implicit Kotlin stdlib is disabled).
+  the intended coordinates and no Java runtime dependencies. Built-in Kotlin compilation and its
+  implicit stdlib dependency are disabled for the Java-only Android modules.
 - Instrumentation JUnit XML records two passed tests, zero failures/errors/skips on each of API 34
   (x86_64, 4,096-byte pages) and API 37.2 (x86_64, 16,384-byte pages). These test linked-version reporting
   and 100 create/close cycles including double close. No host JVM tests exist yet.

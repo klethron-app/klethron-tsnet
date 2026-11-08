@@ -3,6 +3,7 @@ plugins {
 }
 
 android {
+    enableKotlin = false
     namespace = "com.klethron.tsnet.demo"
     compileSdk {
         version = release(libs.versions.compileSdk.get().toInt()) {

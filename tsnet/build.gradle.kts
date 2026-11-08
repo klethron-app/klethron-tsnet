@@ -7,6 +7,7 @@ group = "com.klethron"
 version = rootProject.version
 
 android {
+    enableKotlin = false
     namespace = "com.klethron.tsnet"
     compileSdk {
         version = release(libs.versions.compileSdk.get().toInt()) {
