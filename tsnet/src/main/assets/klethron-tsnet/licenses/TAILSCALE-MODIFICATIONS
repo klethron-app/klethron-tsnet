@@ -1,0 +1,36 @@
+Klethron tsnet modifies two tailscale.com source files in an isolated build copy.
+Upstream revision: 503010831ecd44ab3d86864e5e65ff9f8b969d88
+Original file SHA-256:
+tsnet/tsnet.go: cfb60541a65b6e1b7c16a4a6ea0666dab41572eaa80fd3733addcf78d3f8213b
+ipn/ipnlocal/local.go: e14a75f9cf70209a27178bedb7fd013278d642319bd2e760bb86c75a26232537
+
+The build verifies upstream modules and rejects changes to either source file.
+The shared Go module cache remains unchanged. A temporary go.mod replaces
+tailscale.com with ./tailscale; binary build metadata records that replacement.
+The inventory's Tailscale checksum identifies the upstream module before this
+patches, not the modified copy. BuildGoLibrary.kt applies these changes:
+
+--- a/tsnet/tsnet.go
++++ b/tsnet/tsnet.go
+@@ -1117,1 +1117,1 @@
+-	if testenv.InTest() {
++	if !buildfeatures.HasLogTail || testenv.InTest() {
+
+--- a/ipn/ipnlocal/local.go
++++ b/ipn/ipnlocal/local.go
+@@ -684,4 +684,6 @@
+-	b.sockstatLogger, err = sockstatlog.NewLogger(logpolicy.LogsDir(logf), logf, logID, netMon, sys.HealthTracker.Get(), sys.Bus.Get())
+-	if err != nil {
+-		logf("error setting up sockstat logger: %v", err)
++	if buildfeatures.HasLogTail {
++		b.sockstatLogger, err = sockstatlog.NewLogger(logpolicy.LogsDir(logf), logf, logID, netMon, sys.HealthTracker.Get(), sys.Bus.Get())
++		if err != nil {
++			logf("error setting up sockstat logger: %v", err)
++		}
+-	}
++	}
+
+With ts_omit_logtail, skip log policy loading, log configuration creation,
+log buffering, log directory discovery and logger initialization entirely. Without that tag, upstream
+behavior is unchanged. This does not disable node state storage or other log
+sinks: the wrapper separately sets both UserLogf and Logf to logger.Discard.

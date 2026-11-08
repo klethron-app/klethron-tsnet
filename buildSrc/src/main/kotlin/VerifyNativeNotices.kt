@@ -82,8 +82,21 @@ abstract class VerifyNativeNotices @Inject constructor(private val exec: ExecOpe
                 val lines = output.toString(Charsets.UTF_8).lineSequence().toList()
                 requireNotice(lines.first().endsWith(": go${goVersion.get()}"), "Unexpected Go version in ${entry.name}")
                 val fields = lines.drop(1).map { it.trim().split(Regex("\\s+")) }
-                requireNotice(fields.none { it.first() == "=>" }, "Replaced Go modules require a new notice review")
-                val actual = fields.filter { it.first() == "dep" }.map { it.drop(1) }.toSet()
+                // The build verifies upstream checksums before applying our documented tsnet patch.
+                // Local replacements have no binary module checksum; accept only this exact one.
+                val replacements = fields.withIndex().filter { it.value.first() == "=>" }
+                requireNotice(replacements.size == 1 && replacements.all { (index, row) ->
+                    row == listOf("=>", "./tailscale", "(devel)") && index > 0 &&
+                        fields[index - 1].take(2) == listOf("dep", "tailscale.com")
+                }, "Unexpected Go module replacement; only the documented tsnet patch is allowed")
+                requireNotice(directory.resolve("TAILSCALE-MODIFICATIONS").isFile, "Missing Tailscale patch notice")
+                val upstreamTailscale = expected.single { it[0] == "tailscale.com" }
+                val actual = fields.filter { it.first() == "dep" }.map {
+                    val dependency = it.drop(1)
+                    if (dependency.first() == "tailscale.com" && dependency.size == 2) {
+                        dependency + upstreamTailscale[2]
+                    } else dependency
+                }.toSet()
                 requireNotice(actual == expected,
                     "Go module inventory differs in ${entry.name}: missing=${actual - expected}, stale=${expected - actual}")
                 results.append("${entry.name}\t${goVersion.get()}\t${actual.size}\n")

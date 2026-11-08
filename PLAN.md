@@ -11,6 +11,8 @@ Tailscale feature; the base app must not acquire native libraries or initialize 
 - Library owns tsnet and JNI mechanics. Consumers own UI, authorization flow, node lifetime,
   app-private no-backup state directories, and their application-specific transport adapters.
 - No SSH implementation, local SOCKS proxy, Android service, subprocess or device-wide VPN.
+- Native work stays inside the app process, using threads and goroutines. Blocking networking must
+  run off the UI thread; no fork/exec or downloaded executable is part of the Android runtime design.
 
 ## Current checkpoint
 
@@ -26,7 +28,8 @@ Go 1.27.3, NDK 30.0.16248370, AGP 9.5.1 and Gradle 9.9.0 are pinned.
   disabled until toolchains are provisioned hermetically. Only one installed Go version is accepted.
 - Release libraries use Go `-trimpath`, stripped symbols/DWARF and 16 KiB linker alignment.
 - Both variants use `ts_omit_ssh`, `ts_omit_webclient` and `ts_omit_logtail`. These disable out-of-scope
-  features and remove logtail uploads/buffering; startup logging and storage still need work below.
+  features and remove logtail uploads/buffering. Two local patches now skip log configuration and
+  socket-log directory initialization; both user/backend loggers discard output.
 - `check` checks Android lint, native AAR architecture/alignment and both variants' Go module notices,
   and compiles JNI instrumentation.
 - `:demo` is a platform-only Java Activity with an explicit offline native-load/lifecycle button.
@@ -42,6 +45,9 @@ Go 1.27.3, NDK 30.0.16248370, AGP 9.5.1 and Gradle 9.9.0 are pinned.
   build tag, checked by `verifyNativeAar`. The probe compares interface metadata and address prefixes
   with Java `NetworkInterface`, and creates/starts/closes upstream network monitors. Only the test APK
   requests INTERNET permission. The public Java API and offline demo remain at the scaffold stage.
+- A second debug-only probe now starts and closes a node with in-memory identity and a rejecting
+  loopback control stub. It verifies `NeedsLogin`, no assigned IP, and no files in its caller-owned
+  no-backup directory. This does not establish live-tailnet networking or a public startup API.
 
 Initial scaffold verification on 2026-11-08:
 
@@ -283,15 +289,84 @@ The R8-minified release demo retains the added assets: **48,689 compressed bytes
 to delivered/installed APK size; the AAR size increase must not be described as having no end-user
 storage cost. These are local APK entry measurements, not a Play download or on-device storage test.
 
+## File-free startup iteration (2026-11-08)
+
+- Added a debug-only JNI startup probe, with both user/backend loggers explicitly set to discard
+  through the same server constructor as the public unstarted-node API. The probe uses an ephemeral
+  in-memory state store, an explicit hostname, and a temporary directory under Android's no-backup
+  storage. It refuses ambient authentication configuration. A loopback HTTP stub returns 503 to
+  `/key`, preventing control-key exchange and registration. No real auth key or tailnet is involved.
+- The probe exercises actual `Start`, repeated `Start`, in-process LocalAPI status (`NeedsLogin`, no
+  Tailscale IP), the loopback bootstrap request, and sequential shutdown. It also closes after a
+  deliberate startup failure. The test runs off the UI thread and requires the directory to remain
+  completely empty after each successful cycle. UTF-8 paths, including a supplementary character,
+  cross JNI as explicit byte arrays. Only fixed diagnostic strings are returned, never upstream errors,
+  state or login URLs. The release AAR check rejects both instrumentation bridges.
+- Patched two upstream logging paths under `!buildfeatures.HasLogTail`. `tsnet.startLogger` returns
+  before loading or creating `tailscaled.log.conf`. `ipnlocal.NewLocalBackend` skips socket logger
+  initialization, including evaluation of `logpolicy.LogsDir`. The first device run exposed that second
+  path: even though `sockstatlog.NewLogger` is itself a no-op, its directory argument tried filesystem
+  discovery and panicked on Android. Both guards are needed. No test-environment bypass or global
+  environment workaround is used. These patches supersede the logging blockers recorded above.
+- `BuildGoLibrary` downloads the pinned module, verifies upstream module checksums, checks exact
+  SHA-256 hashes of both original files, and patches an isolated writable build copy. A temporary
+  `go.mod` replaces only `tailscale.com` with `./tailscale`; the shared module cache stays unchanged.
+  The patch is part of the task implementation fingerprint, so edits/additions/removals invalidate
+  Gradle's native tasks, while Go tracks the changed source in its own compilation cache. Shared
+  native output caching remains disabled. No dependency or toolchain versions changed.
+- Both AARs ship `TAILSCALE-MODIFICATIONS` with original hashes and exact diffs (43 notice/inventory
+  files total). The 27-module inventory still records the upstream Tailscale checksum; local replacement
+  metadata cannot attest to the patched source with that checksum. Notice verification accepts exactly
+  this documented replacement and rejects other replacements or upstream version drift.
+
+Verification:
+
+- `./gradlew build :tsnet:publishReleasePublicationToLocalBuildRepository` passes, including alignment
+  and notice checks for both ABIs. Repeating it reuses the configuration cache and leaves all four Go
+  builds up to date. Upstream source hashes remain unchanged in the shared module cache.
+- Instrumentation JUnit XML records **eight passed tests, zero failures/errors/skips per device**:
+  seven library tests and one R8-minified demo test, on API 34 / x86_64 / 4,096-byte pages and API 37.2 /
+  x86_64 / 16,384-byte pages, both SELinux Enforcing. Each library run includes three successful
+  startup/status/close cycles and one deliberate startup failure. Reports are retained under each
+  module's `build/reports/device-verification/startup-api34/` and `startup-api37/`.
+- A negative control temporarily removed just the `tsnet.startLogger` guard. Gradle `--info` confirmed
+  both debug native tasks reran because their implementation classpath changed; the startup test then
+  failed because the directory contained one file. Its failure-path companion passed (two JUnit tests,
+  one expected failure). The guard was restored and verification repeated. Evidence is retained under
+  `tsnet/build/reports/device-verification/startup-negative-api34/`.
+- Thirteen local notice fixtures pass: one valid AAR and twelve expected rejections, including an
+  unexpected replacement, a changed replacement path and Tailscale version drift. Reports and the
+  fixture script are retained under `tsnet/build/reports/native-notices-startup/`.
+
+Release sizes (the public API still cannot start a node):
+
+| Entry | Uncompressed bytes | ZIP-compressed bytes |
+|---|---:|---:|
+| arm64-v8a library | 17,098,608 | 6,646,303 |
+| x86_64 library | 18,546,352 | 7,309,376 |
+
+Complete release AAR: **14,033,202 bytes**, up **790 bytes** from the previous iteration, including the
+patch notice. The arm64 library shrank 64 bytes raw; x86_64 raw size is unchanged. Startup is reachable
+only in debug, whose libraries are **18,895,568 raw / 7,340,212 ZIP bytes** (arm64) and
+**20,504,176 raw / 8,066,693 ZIP bytes** (x86_64); its complete AAR is **15,484,432 bytes**. Do not use
+release scaffold sizes to predict a future public networking API's size.
+
+This proves local unauthenticated startup and shutdown, not tailnet connectivity, DNS/TLS bootstrap,
+direct/relayed dialing, network changes, arm64 runtime or cancellable public lifecycle. The test checks
+its state directory; this is not a syscall-level audit of all upstream filesystem or process behavior.
+Persistent node identity remains a future explicit choice using caller-owned no-backup storage; the
+patches suppress logging files, not intentional future state persistence.
+
 ## Next increments
 
 1. **Prove a real Android node.** Interface discovery and monitor initialization are addressed above.
-   Next prove actual startup with controlled storage/logging, then direct and relayed TCP dialing on
-   Android 14 and the current 16 KiB emulator. Include DNS/TLS bootstrap and network changes; a working
-   interface getter does not prove these. Keep tests credential-free until an explicit live-tailnet proof.
+   Local unauthenticated startup with controlled storage/logging is now proven above. Next prove
+   DNS/TLS bootstrap, then direct and relayed TCP dialing on Android 14 and the current 16 KiB emulator,
+   including network changes. Keep tests credential-free until an explicit live-tailnet proof.
 2. **Add only the lifecycle/configuration needed by that proof.** Explicit no-backup state directory and
    hostname; cancellable start/login/status; deliberate logout. No credential-bearing default log sinks
-   or login URLs in logs. Audit upstream package initialization, logtail and state permissions. Use
+   or login URLs in logs. Logging-file creation is patched above; continue auditing upstream package
+   initialization, remaining filesystem/process behavior and state permissions. Use
    bounded typed events, not log parsing, to deliver the browser login URL after user action.
 3. **Design the connection boundary with a real caller.** Opaque connection handles; bounded read/write;
    backpressure, deadlines, cancellation and exactly-once close. Resolve concurrent close/start/dial

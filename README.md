@@ -5,7 +5,9 @@ Java package: `com.klethron.tsnet`. Maven coordinates: `com.klethron:tsnet:0.1.0
 
 **Initial scaffold:** native loading, linked-version reporting, and creating/closing an unstarted node.
 Android interface discovery and network-monitor initialization are now verified under app restrictions.
-Login, starting a node, peer discovery and dialing are not implemented. No package registry release exists yet.
+A debug-only test also starts a node against a rejecting loopback control endpoint, checks its
+unauthenticated status, and closes it without writing files. Public startup, login, peer discovery
+and dialing are not implemented. No package registry release exists yet.
 See [PLAN.md](PLAN.md) for the next implementation steps and verification status.
 
 ## Build
@@ -38,16 +40,25 @@ exist. The current unstarted-node API needs no INTERNET permission. Callers must
 `close()` is idempotent and synchronized. Nullness annotations do not enforce resource ownership.
 
 Both build variants disable Tailscale SSH, the embedded web client, and logtail using upstream build
-tags. This disables log uploads and disk log buffering, but does not yet make node startup safe:
-upstream still creates log configuration and defaults to a user logger. See the measured comparisons
-and remaining startup work in [PLAN.md](PLAN.md).
+tags. Two small patches also skip upstream log-configuration creation and socket-log directory lookup
+when logtail is disabled. Both user and backend loggers discard output. Patches are applied to an
+isolated, verified build copy; the shared module cache is untouched. The AAR ships the patch notice.
+The patch implementation is part of Gradle's task fingerprint, so edits invalidate native builds;
+Go's cache also tracks the modified source. Shared native output caching is disabled.
+See [PLAN.md](PLAN.md) for verification and remaining startup work.
+
+The engine runs inside the Android app process using Go goroutines and native threads. The library
+does not launch executables or subprocesses. Future blocking networking APIs must be called off the
+UI thread; construction and close are currently synchronous.
 
 The demo has one button that loads the library and creates/closes a node. It has no network permission,
-stores no identity and does not authenticate to Tailscale. JNI instrumentation also tests interface
-discovery and network-monitor creation, using INTERNET permission only in the test APK to open sockets.
-It contacts no endpoint and requires a device with SELinux **Enforcing** (`adb shell getenforce`) to
-verify the standard Go discovery failure. The native test bridge is present only in debug builds;
-the release AAR check rejects it. Neither the demo nor these tests proves tailnet connectivity.
+stores no identity and does not authenticate to Tailscale. JNI instrumentation tests interface discovery,
+network monitors and unauthenticated startup, using INTERNET permission only in the test APK. The
+startup test uses an in-memory identity store and a temporary no-backup directory, requires that the
+directory remain empty, and contacts its own loopback control stub, which refuses key exchange.
+It requires a device with SELinux **Enforcing** (`adb shell getenforce`) to verify the standard Go
+discovery failure. Native test bridges are present only in debug builds; the release AAR check rejects
+them. Neither the demo nor these tests proves tailnet connectivity, DNS/TLS bootstrap or dial support.
 
 The release demo enables R8 and resource shrinking and uses the local debug signing key solely for
 installation/testing. `build` assembles it and its instrumentation APK; `:demo:connectedReleaseAndroidTest`

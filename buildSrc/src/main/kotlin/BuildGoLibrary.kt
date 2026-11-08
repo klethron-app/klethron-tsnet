@@ -1,8 +1,12 @@
 import java.io.ByteArrayOutputStream
+import java.io.File
+import java.security.MessageDigest
+import groovy.json.JsonSlurper
 import javax.inject.Inject
 import org.gradle.api.DefaultTask
 import org.gradle.api.GradleException
 import org.gradle.api.file.DirectoryProperty
+import org.gradle.api.file.FileSystemOperations
 import org.gradle.api.provider.ListProperty
 import org.gradle.api.provider.Property
 import org.gradle.api.tasks.Input
@@ -17,7 +21,10 @@ import org.gradle.work.DisableCachingByDefault
 
 // Incremental locally; do not share cached binaries before hermetic toolchain provisioning exists.
 @DisableCachingByDefault(because = "Uses locally installed, version-checked Go and NDK toolchains")
-abstract class BuildGoLibrary @Inject constructor(private val exec: ExecOperations) : DefaultTask() {
+abstract class BuildGoLibrary @Inject constructor(
+    private val exec: ExecOperations,
+    private val files: FileSystemOperations,
+) : DefaultTask() {
     @get:InputDirectory
     @get:PathSensitive(PathSensitivity.RELATIVE)
     abstract val sources: DirectoryProperty
@@ -62,8 +69,53 @@ abstract class BuildGoLibrary @Inject constructor(private val exec: ExecOperatio
         }
         val output = outputDirectory.get().asFile.resolve(abi.get())
         output.mkdirs()
+        // Patch an isolated copy of the pinned source, without changing the module cache.
+        // See the distributed TAILSCALE-MODIFICATIONS notice for the upstream diff.
+        val moduleInfo = ByteArrayOutputStream()
         exec.exec {
             workingDir(sources)
+            commandLine("go", "mod", "download", "-json", "tailscale.com")
+            environment("GOTOOLCHAIN", "local")
+            environment("GOWORK", "off")
+            standardOutput = moduleInfo
+        }
+        val module = JsonSlurper().parseText(moduleInfo.toString(Charsets.UTF_8)) as Map<*, *>
+        exec.exec {
+            workingDir(sources)
+            commandLine("go", "mod", "verify")
+            environment("GOTOOLCHAIN", "local")
+            environment("GOWORK", "off")
+        }
+        val upstream = File(module["Dir"] as String)
+        val workspace = temporaryDir.resolve("go")
+        files.sync { from(sources); into(workspace) }
+        files.sync {
+            from(upstream)
+            into(workspace.resolve("tailscale"))
+            // Module-cache directories are read-only; our private build copy must be writable.
+            dirPermissions { unix("0755") }
+            filePermissions { unix("0644") }
+        }
+        fun patch(path: String, expectedHash: String, before: String, after: String) {
+            val original = upstream.resolve(path).readBytes()
+            val checksum = MessageDigest.getInstance("SHA-256").digest(original)
+                .joinToString("") { "%02x".format(it) }
+            val source = original.toString(Charsets.UTF_8)
+            if (checksum != expectedHash || source.split(before).size != 2) {
+                throw GradleException("Pinned $path changed; review the no-logtail patches before building")
+            }
+            workspace.resolve("tailscale/$path").writeText(source.replace(before, after))
+        }
+        patch("tsnet/tsnet.go", "cfb60541a65b6e1b7c16a4a6ea0666dab41572eaa80fd3733addcf78d3f8213b",
+            "if testenv.InTest() {", "if !buildfeatures.HasLogTail || testenv.InTest() {")
+        val sockstatInit = "\tb.sockstatLogger, err = sockstatlog.NewLogger(logpolicy.LogsDir(logf), logf, logID, netMon, sys.HealthTracker.Get(), sys.Bus.Get())\n" +
+            "\tif err != nil {\n\t\tlogf(\"error setting up sockstat logger: %v\", err)\n\t}\n"
+        patch("ipn/ipnlocal/local.go", "e14a75f9cf70209a27178bedb7fd013278d642319bd2e760bb86c75a26232537",
+            sockstatInit, "\tif buildfeatures.HasLogTail {\n" +
+                sockstatInit.lines().dropLast(1).joinToString("") { "\t$it\n" } + "\t}\n")
+        workspace.resolve("go.mod").appendText("\nreplace tailscale.com => ./tailscale\n")
+        exec.exec {
+            workingDir(workspace)
             environment("GOOS", "android")
             environment("GOARCH", arch)
             environment("CGO_ENABLED", "1")

@@ -15,6 +15,13 @@ modules reported by `go version -m` for both Android ABIs in both build variants
 version, Go module checksum, and paths to the included notices. Paths are relative to the inventory.
 The inventory and full notice texts ship in the AAR under `assets/klethron-tsnet/licenses/`.
 
+`TAILSCALE-MODIFICATIONS` records two local patches that make `ts_omit_logtail` skip log configuration
+and socket-log directory initialization. `BuildGoLibrary` verifies the upstream modules and both
+original source-file hashes, then patches an isolated copy using a temporary `./tailscale` module
+replacement. The shared module cache is unchanged. Binary metadata records this replacement and
+the original Tailscale version; its inventory checksum identifies the **unmodified upstream module**,
+not the patched source. Other dependencies retain their binary-reported checksums.
+
 Notices were copied verbatim from the checksum-verified Go module cache. Each module's root licence
 and any root patent notice are included. The compression dependency additionally includes the nested
 licences for `internal/snapref` and `zstd/internal/xxhash`, both in the Android import graph. Its root
@@ -24,9 +31,10 @@ The existing Go and Tailscale notices are retained, including Go notices for Tai
 
 `./gradlew build` runs `:tsnet:verifyReleaseNativeNotices` and `:tsnet:verifyDebugNativeNotices`.
 These inspect each AAR's actual libraries, reject missing/stale modules, version/checksum drift and
-module replacements, check the pinned Go runtime version, and compare every packaged notice with
+unexpected module replacements, check the pinned Go runtime version, and compare every packaged notice with
 its checked-in source. Reports are in `tsnet/build/reports/native/notices-{release,debug}.tsv`.
-Normal verification does not generate or download notices and does not accept new modules automatically.
+Only the documented `tailscale.com => ./tailscale (devel)` replacement is accepted. Normal verification
+does not generate or download notices and does not accept new modules automatically.
 
 For an intentional native dependency change:
 
@@ -35,9 +43,13 @@ For an intentional native dependency change:
 2. Run `go mod verify` in `tsnet/src/main/go`. Locate each pinned source with
    `go mod download -json module@version`, review its notices and relevant nested directories, and copy
    notice bytes without editing them. Update the inventory's versions, sums and relative notice paths.
-3. Review source-level attributions, generated data, embedded resources and native toolchain code
+3. Re-review the patches in `BuildGoLibrary.kt` against any new upstream pin; update the source hashes
+   and `TAILSCALE-MODIFICATIONS` together. Removing or changing a patch changes the Gradle task
+   implementation fingerprint, forcing native rebuilds. Keep the replacement check in sync if the
+   patches are retired. Do not merely accept a new source hash without reviewing the patched paths.
+4. Review source-level attributions, generated data, embedded resources and native toolchain code
    separately. Recheck Go runtime notices when updating Go, and JSpecify notices when updating JSpecify.
-4. Run `./gradlew build`, review both notice reports, and record the ABI library and complete AAR sizes.
+5. Run `./gradlew build`, review both notice reports, and record the ABI library and complete AAR sizes.
 
 This is a **Go module build-metadata inventory**, not a symbol-level or complete third-party audit.
 `go.mod` also contains modules used only on other platforms or by tests, while build metadata can
