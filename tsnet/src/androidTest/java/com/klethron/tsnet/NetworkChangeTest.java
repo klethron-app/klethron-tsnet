@@ -80,7 +80,7 @@ public final class NetworkChangeTest {
             }
             shell("svc wifi enable");
             // Leave the device as found; Wi-Fi reconnects asynchronously.
-            awaitWifiDefault(connectivity);
+            boolean unused = awaitWifiDefault(connectivity); // Best effort: must not mask a test failure.
             nativeProbeStop();
             TsnetNode.setDefaultNetwork(null, null);
             StartupTest.deleteDirectory(directory);

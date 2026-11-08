@@ -3,14 +3,15 @@
 An Android AAR containing a precompiled Tailscale tsnet engine and a small Java/JNI bridge.
 Java package: `com.klethron.tsnet`. Maven coordinates: `com.klethron:tsnet:0.1.0-SNAPSHOT`.
 
-**Initial scaffold:** native loading, linked-version reporting, and creating/closing an unstarted node.
-Android interface discovery and network-monitor initialization are now verified under app restrictions.
-Debug-only tests also start a node against a rejecting loopback control endpoint, and connect two
-in-process nodes through a loopback test control and DERP server to exchange TCP data over direct
-and relay-only paths, and to rebind when the device's default network changes. Another debug-only test contacts Tailscale's
-real control plane without credentials, stopping at an unauthorized login URL that never leaves native
-code. These nodes write no files. Public startup, login, peer discovery and dialing are not implemented,
-and no real tailnet has been used. No package registry release exists yet.
+**Early development:** a public API starts a node with persistent state in a caller-owned directory,
+reports its login URL and backend status, and closes it. It is verified against an in-process
+loopback test control server, including interactive login and resuming from saved state, but not yet
+against a real tailnet. Dialing peers is not public yet. Debug-only tests also start nodes against
+a rejecting loopback control endpoint, connect two in-process nodes through a loopback test control
+and DERP server to exchange TCP data over direct and relay-only paths, and rebind when the device's
+default network changes. Another contacts Tailscale's real control plane without credentials,
+stopping at an unauthorized login URL that never leaves native code. No package registry release
+exists yet.
 See [PLAN.md](PLAN.md) for the next implementation steps and verification status.
 
 ## Build
@@ -40,11 +41,33 @@ See [JSpecify's dependency guidance](https://jspecify.dev/docs/using/).
 
 The package is also Error Prone `@CheckReturnValue`: an ignored `new TsnetNode()` can never be closed.
 Construction is `@WorkerThread`, because the first node in a process reads Android's CA store from disk;
-the other methods are `@AnyThread`. Android lint (`ThreadConstraint`, `CheckResult`), Error Prone and
+so are `start`, `awaitStatus` and `close`. `tailscaleVersion` and `setDefaultNetwork` are `@AnyThread`. Android lint (`ThreadConstraint`, `CheckResult`), Error Prone and
 Kotlin's opt-in `-Xreturn-value-checker` report misuse from Java and Kotlin. They read these annotations
 by name, so the AAR does not export `androidx.annotation` (which would add the Kotlin stdlib) or
-`error_prone_annotations`. The current unstarted-node API needs no INTERNET permission. Callers must close
-nodes explicitly; `close()` is idempotent and synchronized.
+`error_prone_annotations`. `start` is `@RequiresPermission(INTERNET)`. Callers must close nodes
+explicitly; `close()` is idempotent, safe to call concurrently, and waits for shutdown.
+
+```java
+// On a background thread. The directory holds the node's private keys: keep it out of backups.
+try (TsnetNode node = new TsnetNode()) {
+    node.start(new File(context.getNoBackupFilesDir(), "tailscale"), "my-device");
+    TsnetStatus status = null;
+    do {
+        status = node.awaitStatus(status, Duration.ofSeconds(30));
+        if (status.loginUrl() != null) {
+            // Open in the user's browser; never log it. Whoever opens it can claim this node.
+        }
+    } while (status.state() != TsnetStatus.State.RUNNING);
+    // Connected. Closing the node disconnects it; its state remains for the next start.
+}
+```
+
+`start` returns once the node is initialized locally; `awaitStatus` returns the latest status after it
+changes, waking when the node is closed. Status records keep only the latest state, so intermediate
+states can be skipped. Every connection-relevant setting is explicit: the control URL is Tailscale's,
+not `TS_CONTROL_URL`, and `start` refuses to run if the process environment (as seen when the library
+loaded) sets `TS_AUTHKEY` or `TS_AUTH_KEY`, which upstream would otherwise use silently. State lives in
+`tailscaled.state` (mode 0600) in the given directory, which is created with mode 0700 if missing.
 
 Both build variants omit 18 upstream features with build tags (see `tsnet/build.gradle.kts`), including
 Tailscale SSH, the embedded web client, logtail, debug hooks, PeerAPI serving, exit nodes, environment
@@ -72,8 +95,7 @@ are process-wide; registering and unregistering the callback is the caller's res
 The library discards Go's standard logger, which upstream uses directly for some messages.
 
 The engine runs inside the Android app process using Go goroutines and native threads. The library
-does not launch executables or subprocesses. Future blocking networking APIs must be called off the
-UI thread; construction and close are currently synchronous.
+does not launch executables or subprocesses. Call blocking methods off the UI thread.
 
 The demo has one button that loads the library and creates/closes a node. It has no network permission,
 stores no identity and does not authenticate to Tailscale. JNI instrumentation tests interface discovery,
@@ -87,7 +109,9 @@ DERP uses a self-signed certificate that clients are told not to verify. These t
 more Go modules into debug libraries only; their notices ship in the debug AAR.
 It requires a device with SELinux **Enforcing** (`adb shell getenforce`) to verify the standard Go
 discovery failure. Native test bridges are present only in debug builds; the release AAR check rejects
-them. Neither the demo nor these tests proves connectivity to a real tailnet, DNS/TLS bootstrap, or a
+them. `LoginTest` starts nodes through the public API against a loopback test control server that requires
+interactive login, completes the login in place of a browser, and restarts from the saved state.
+Neither the demo nor these tests proves connectivity to a real tailnet, DNS/TLS bootstrap, or a
 public dial API. `ControlPlaneTest` needs internet access: it resolves and verifies
 `controlplane.tailscale.com` through the platform, then starts an ephemeral in-memory node until control
 returns a `login.tailscale.com` URL. The URL is validated in Go and never returned, logged or opened.

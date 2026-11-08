@@ -21,9 +21,11 @@ Tailscale main is pinned to `503010831ecd44ab3d86864e5e65ff9f8b969d88` (2026-11-
 Go 1.27.3, NDK 30.0.16248370, AGP 9.5.1 and Gradle 9.9.0 are pinned.
 
 - `:tsnet` packages Java, C JNI, and a Go `c-shared` library into an AAR.
-- `TsnetNode` creates an **unstarted** `tsnet.Server` behind a `runtime/cgo.Handle` and closes it once.
-  Java synchronizes close; raw Go pointers never cross JNI. There is no finalizer or automatic cleanup:
-  callers must close explicitly. There is no start, login, status, or dial API yet.
+- `TsnetNode` owns a `tsnet.Server` behind a never-reused node ID; raw Go pointers never cross JNI.
+  Public `start(stateDirectory, hostname)` persists identity in the caller's directory and begins
+  interactive login; `awaitStatus` reports state, login URL and Tailscale addresses; `close` stops it.
+  Go serializes start/close and wakes waiters. There is no finalizer: callers must close explicitly.
+  Verified against a loopback test control server only. There is no public dial or logout API yet.
 - Native builds are incremental and configuration-cache compatible. Shared build caching is deliberately
   disabled until toolchains are provisioned hermetically. Only one installed Go version is accepted.
 - Release libraries use Go `-trimpath`, stripped symbols/DWARF and 16 KiB linker alignment.
@@ -47,7 +49,7 @@ Go 1.27.3, NDK 30.0.16248370, AGP 9.5.1 and Gradle 9.9.0 are pinned.
 - Debug native libraries include an instrumentation-only probe; release libraries exclude it via a
   build tag, checked by `verifyNativeAar`. The probe compares interface metadata and address prefixes
   with Java `NetworkInterface`, and creates/starts/closes upstream network monitors. Only the test APK
-  requests INTERNET permission. The public Java API and offline demo remain at the scaffold stage.
+  requests INTERNET permission. The offline demo remains at the scaffold stage.
 - A second debug-only probe now starts and closes a node with in-memory identity and a rejecting
   loopback control stub. It verifies `NeedsLogin`, no assigned IP, and no files in its caller-owned
   no-backup directory. This does not establish live-tailnet networking or a public startup API.
@@ -713,24 +715,99 @@ Complete release AAR: **13,032,988 bytes**, down **971,546 bytes (6.94%)**. Raw 
 additive and release reaches less code than a future public start API will. Measurement script and
 results are retained under `tsnet/build/reports/native-feature-audit-2/`.
 
+## Public lifecycle iteration (2026-11-08)
+
+First public networking API: start a node with persistent state, follow its login and status, close it.
+
+- `TsnetNode.start(File stateDirectory, String hostname)` (`@WorkerThread`,
+  `@RequiresPermission(INTERNET)`) sets directory, hostname and control URL (`ipn.DefaultControlURL`)
+  explicitly, then calls upstream `Start`, which initializes locally and returns without waiting for
+  control. Identity persists in upstream's file store, `tailscaled.state` (mode 0600; the directory is
+  created 0700). Klethron needs a persistent node to avoid a browser login on every app start; an
+  ephemeral/in-memory mode was not added without a caller. A package-private overload takes another
+  control URL for tests. Invalid configuration throws `IllegalArgumentException`, repeated start or
+  start after close `IllegalStateException`, and startup failure a fixed-message `IOException`.
+- **Found:** `tsnet` reads `TS_AUTHKEY`/`TS_AUTH_KEY` from the environment when no key is configured, and
+  an interactive-login API cannot set one. `start` refuses instead of silently using a host-process
+  credential (identity federation and OAuth hooks are not linked). Go copies the environment when the
+  library loads, so Android's `Os.setenv` afterwards affects neither upstream nor this check; the test
+  sets it through Go's `os.Setenv`.
+- `awaitStatus(previous, timeout)` returns an immutable `TsnetStatus` (state enum, login URL, Tailscale
+  addresses) once it differs from `previous`, or at the timeout. One Go goroutine per started node follows
+  the IPN bus (`NotifyInitialState`, re-watching after an unexpected disconnect) and keeps only the latest
+  snapshot, so memory is bounded and there are no JNI upcalls or Java callbacks. Login URLs come from
+  `BrowseToURL`, must be printable-ASCII absolute HTTP(S) URLs, are cleared once the state leaves
+  `NeedsLogin`, and are omitted from `toString`. Status crosses JNI as one ASCII record.
+- Lifecycle: a Go registry maps never-reused IDs to nodes, replacing `cgo.Handle`, whose `Value` panics
+  after `Delete`. A call racing or following close finds no node and throws `IllegalStateException`,
+  so Java needs no synchronization. A per-node mutex serializes upstream Start and Close (forbidden to
+  overlap); Close waits at most for local initialization. Close wakes waiters first, stops status
+  watching and default-network reports, then closes the server. `close` is now `@WorkerThread`, since a
+  started node's shutdown blocks. Started nodes register with the default-network seam.
+- Debug-only `login_probe.go` runs upstream `testcontrol` with `RequireAuth` plus the loopback DERP/STUN
+  server, and approves a login URL in place of the user's browser (`CompleteAuth`).
+- Boy scout: fixed a pre-existing lint `CheckResult` warning in `NetworkChangeTest`'s cleanup.
+
+New `LoginTest` (three tests, public API only, off the UI thread):
+
+- Interactive login: `NEEDS_LOGIN` with a loopback `/auth/` URL and no addresses; after approval,
+  `RUNNING`, no URL and a `100.x` IPv4 address; an unchanged status times out with the same version.
+  Restarting a new node with the same directory reaches `RUNNING` without ever offering a login URL and
+  with the same addresses. After each close the directory contains exactly `tailscaled.state`, mode
+  `rw-------`, in a `rwx------` directory, under a path with a supplementary character.
+- Closing wakes a thread blocked in `awaitStatus` (which then throws), and later calls throw.
+- Relative directory, empty hostname, embedded NUL and an environment auth key are refused without
+  consuming the node, which then starts; a file instead of a directory fails start, consuming it.
+
+Verification:
+
+- `./gradlew build :tsnet:publishReleasePublicationToLocalBuildRepository` passes, including lint (only
+  the existing Error Prone version notice remains), notice checks (26 release modules, unchanged) and
+  release alignment/probe checks; repeating `build` reuses the configuration cache with all four Go builds
+  up to date. `zipalign -c -P 16 4` passes for the release demo APK.
+- Instrumentation JUnit XML records **sixteen passed tests, zero failures/errors/skips per device**: fifteen
+  library tests (three new) plus the R8-minified demo test, on dedicated emulators at API 34 / x86_64 /
+  4,096-byte pages and API 37.2 / x86_64 / 16,384-byte pages, both SELinux Enforcing (`lifecycle-api34/`,
+  `lifecycle-api37/` under each module's `build/reports/device-verification/`). `LoginTest` then passed
+  five further runs per device (`lifecycle-repeat-*`, 30 passes).
+- Negative controls on API 34 failed as expected: without waking waiters on close, the close test timed
+  out (`lifecycle-negative-nowake-api34/`); without the environment check, the refusal test saw no
+  exception (`lifecycle-negative-noenvcheck-api34/`). Both were reverted before the final runs.
+
+Release sizes (the public API now reaches upstream Start, LocalBackend and LocalAPI):
+
+| Entry | Before raw | After raw | Before ZIP | After ZIP |
+|---|---:|---:|---:|---:|
+| arm64-v8a library | 15,795,536 | 17,548,816 | 6,170,328 | 6,848,483 |
+| x86_64 library | 17,142,544 | 19,053,776 | 6,785,694 | 7,529,304 |
+
+Complete release AAR: **14,458,075 bytes**, up **1,425,087 bytes (10.9%)**. Raw libraries grew 1,753,280
+bytes (arm64-v8a, 11.1%) and 1,911,232 bytes (x86_64, 11.1%). This is upstream startup code becoming
+reachable in release, not new dependencies: the release notice check still finds exactly 26 modules.
+Debug libraries are **18,682,992 raw** (arm64) and **20,267,152** (x86_64), up about 26 KB each; the debug
+AAR is **15,414,071 bytes**. Dial is still unreachable in release, so expect further growth.
+
+This proves the public start/login/status/close lifecycle and state persistence on Android against an
+in-process test control server. It does not prove a real tailnet login, real DERP, dialing, logout,
+arm64 runtime, or how state behaves across upstream version changes.
+
 ## Next increments
 
 1. **Prove a real Android node.** Interface discovery, monitor initialization, file-free startup,
-   loopback two-node direct/DERP dialing, platform TLS roots, the default-network seam and real
-   control-plane DNS/TLS/registration up to `NeedsLogin` are proven above. Remaining: real DERP, fallback
+   loopback two-node direct/DERP dialing, platform TLS roots, the default-network seam, real
+   control-plane DNS/TLS/registration up to `NeedsLogin`, and the public start/login/status lifecycle
+   against loopback control are proven above. Remaining: real interactive login, real DERP, fallback
    DNS when system DNS fails, and cross-device or NAT-traversing paths, including recovery after a real
-   network change. These need an authorized node: design the explicit live-tailnet proof (browser login
-   on a test device, never a checked-in or CI auth key) before adding it.
-2. **Add only the lifecycle/configuration needed by that proof.** Explicit no-backup state directory and
-   hostname; cancellable start/login/status; deliberate logout. No credential-bearing default log sinks
-   or login URLs in logs. Logging files and the netmap cache are removed above; continue auditing
-   upstream package initialization, remaining filesystem/process behavior and state permissions.
-   `Server.Up` already blocks until Running in the loopback probe; a public start still needs
-   cancellation and Close-during-start semantics. Use bounded typed events, not log parsing, to deliver
-   the browser login URL after user action; the control probe shows the IPN bus `BrowseToURL` path works.
-   Set control URL and auth fields explicitly so tsnet never reads them from the environment. Annotate
-   blocking methods `@WorkerThread`, socket-opening ones `@RequiresPermission(INTERNET)`, and keep
-   `@CheckReturnValue` (opt out with `@CanIgnoreReturnValue` only where ignoring is harmless).
+   network change. Design the explicit live-tailnet proof (browser login on a test device through the
+   public API, never a checked-in or CI auth key) before adding it.
+2. **Complete the lifecycle needed by that proof.** Start, interactive login URL delivery, status,
+   persistent state and close are public. Remaining: deliberate logout (deregister and delete state),
+   key expiry and re-login (a new `BrowseToURL` while `NeedsLogin`), `NEEDS_MACHINE_AUTH` handling,
+   and surfacing backend errors (`Notify.ErrMessage`) as typed status. Decide whether an ephemeral,
+   in-memory mode is needed before adding one. Continue auditing upstream package initialization,
+   remaining filesystem/process behavior and state permissions; the state file format is upstream's
+   and must be retested on every upstream update. Verify the `@RequiresPermission` contract in a
+   scratch consumer as was done for the threading annotations.
 3. **Design the connection boundary with a real caller.** Opaque connection handles; bounded read/write;
    backpressure, deadlines, cancellation and exactly-once close. Resolve concurrent close/start/dial
    before exposing those APIs. JNI strings need deliberate UTF-8 conversion; current version reporting
@@ -776,4 +853,4 @@ emulator hides the interface-discovery regression and deliberately fails its neg
 For an intentional upstream update, resolve `tailscale/tailscale` main to a full SHA first, update the
 Go requirement and sums, update the version assertion and documented SHA, then rebuild both ABIs and
 repeat the device checks. Do not equate an imported `tsnet` package or a successful Close with a
-successfully running tailnet node. Current size measurements omit future Start/Dial reachable code.
+successfully running tailnet node. Current release size measurements omit future Dial reachable code.

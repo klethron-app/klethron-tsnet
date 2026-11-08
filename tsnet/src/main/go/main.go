@@ -8,8 +8,10 @@ import "C"
 import (
 	"io"
 	"log"
-	"runtime/cgo"
+	"math"
 	"runtime/debug"
+	"sync"
+	"time"
 
 	"tailscale.com/tsnet"
 	"tailscale.com/types/logger"
@@ -26,19 +28,80 @@ func newServer() *tsnet.Server {
 	return &tsnet.Server{UserLogf: logger.Discard, Logf: logger.Discard}
 }
 
-// Handles keep Go pointers out of Java and C. Java serializes access and closes each handle once.
-//
+// Java holds node IDs, never Go pointers. IDs are not reused, so a call racing or following
+// close finds no node instead of a different one.
+var nodes struct {
+	sync.Mutex
+	byID map[int64]*node
+	last int64
+}
+
+func lookupNode(id C.longlong) *node {
+	nodes.Lock()
+	defer nodes.Unlock()
+	return nodes.byID[int64(id)]
+}
+
 //export klethron_node_create
 func klethron_node_create() C.longlong {
-	return C.longlong(cgo.NewHandle(newServer()))
+	n := newNode(newServer())
+	nodes.Lock()
+	defer nodes.Unlock()
+	if nodes.byID == nil {
+		nodes.byID = make(map[int64]*node)
+	}
+	nodes.last++
+	nodes.byID[nodes.last] = n
+	return C.longlong(nodes.last)
+}
+
+// Results of klethron_node_start; TsnetNode.start maps them to exceptions.
+const (
+	startOK = iota
+	startClosed
+	startRepeated
+	startInvalid
+	startAuthEnvironment
+	startFailed
+)
+
+//export klethron_node_start
+func klethron_node_start(id C.longlong, config *C.char, length C.int) C.int {
+	n := lookupNode(id)
+	if n == nil {
+		return startClosed
+	}
+	return C.int(n.start(C.GoStringN(config, length)))
+}
+
+// klethron_node_await_status returns the status record, or NULL once the node is closed.
+//
+//export klethron_node_await_status
+func klethron_node_await_status(id C.longlong, after C.longlong, timeoutMillis C.longlong) *C.char {
+	n := lookupNode(id)
+	if n == nil {
+		return nil
+	}
+	timeout := time.Duration(math.MaxInt64)
+	if timeoutMillis < C.longlong(timeout/time.Millisecond) {
+		timeout = time.Duration(timeoutMillis) * time.Millisecond
+	}
+	record, open := n.await(uint64(after), timeout)
+	if !open {
+		return nil
+	}
+	return C.CString(record)
 }
 
 //export klethron_node_close
 func klethron_node_close(id C.longlong) {
-	handle := cgo.Handle(id)
-	defer handle.Delete()
-	// An unstarted server's first Close cannot fail. Revisit when Start is exposed.
-	_ = handle.Value().(*tsnet.Server).Close()
+	nodes.Lock()
+	n := nodes.byID[int64(id)]
+	delete(nodes.byID, int64(id))
+	nodes.Unlock()
+	if n != nil {
+		n.close()
+	}
 }
 
 //export klethron_tailscale_version

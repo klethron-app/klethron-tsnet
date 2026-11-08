@@ -56,3 +56,31 @@ JNIEXPORT void JNICALL
 Java_com_klethron_tsnet_NetworkChangeTest_nativeProbeStop(JNIEnv *env, jclass type) {
     klethron_netchange_probe_stop();
 }
+
+JNIEXPORT jstring JNICALL
+Java_com_klethron_tsnet_LoginTest_nativeProbeStart(JNIEnv *env, jclass type) {
+    char *url = klethron_login_probe_start(); // ASCII loopback URL, or empty.
+    jstring result = (*env)->NewStringUTF(env, url);
+    free(url);
+    return result;
+}
+
+JNIEXPORT jboolean JNICALL
+Java_com_klethron_tsnet_LoginTest_nativeProbeComplete(JNIEnv *env, jclass type, jbyteArray loginUrl) {
+    jsize length = (*env)->GetArrayLength(env, loginUrl);
+    jbyte *bytes = (*env)->GetByteArrayElements(env, loginUrl, NULL);
+    if (bytes == NULL) return JNI_FALSE; // Pending allocation exception.
+    int completed = klethron_login_probe_complete((char *) bytes, length);
+    (*env)->ReleaseByteArrayElements(env, loginUrl, bytes, JNI_ABORT);
+    return completed ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT void JNICALL
+Java_com_klethron_tsnet_LoginTest_nativeProbeStop(JNIEnv *env, jclass type) {
+    klethron_login_probe_stop();
+}
+
+JNIEXPORT void JNICALL
+Java_com_klethron_tsnet_LoginTest_nativeProbeSetAuthKeyEnvironment(JNIEnv *env, jclass type, jboolean set) {
+    klethron_login_probe_set_auth_key_environment(set == JNI_TRUE);
+}
