@@ -31,19 +31,23 @@ android {
     packaging.jniLibs.keepDebugSymbols += "**/libklethron_tsnet.so"
 }
 
-val nativeTasks = listOf("arm64-v8a", "x86_64").map { abi ->
-    tasks.register<BuildGoLibrary>("buildGo" + if (abi == "arm64-v8a") "Arm64" else "X86_64") {
-        sources.set(layout.projectDirectory.dir("src/main/go"))
-        sdkDirectory.set(androidComponents.sdkComponents.sdkDirectory)
-        ndkVersion.set(libs.versions.ndk)
-        goVersion.set(libs.versions.go)
-        api.set(libs.versions.minSdk.get().toInt())
-        this.abi.set(abi)
-        outputDirectory.set(layout.buildDirectory.dir("generated/jniLibs/$abi"))
+val nativeTasks = listOf("release", "debug").associateWith { buildType ->
+    listOf("arm64-v8a", "x86_64").map { abi ->
+        val suffix = if (buildType == "debug") "Debug" else ""
+        tasks.register<BuildGoLibrary>("buildGo" + (if (abi == "arm64-v8a") "Arm64" else "X86_64") + suffix) {
+            sources.set(layout.projectDirectory.dir("src/main/go"))
+            sdkDirectory.set(androidComponents.sdkComponents.sdkDirectory)
+            ndkVersion.set(libs.versions.ndk)
+            goVersion.set(libs.versions.go)
+            api.set(libs.versions.minSdk.get().toInt())
+            this.abi.set(abi)
+            includeTestBridge.set(buildType == "debug")
+            outputDirectory.set(layout.buildDirectory.dir("generated/jniLibs/$buildType/$abi"))
+        }
     }
 }
 androidComponents.onVariants { variant ->
-    nativeTasks.forEach { task ->
+    nativeTasks.getValue(variant.buildType!!).forEach { task ->
         variant.sources.jniLibs?.addGeneratedSourceDirectory(task, BuildGoLibrary::outputDirectory)
     }
 }

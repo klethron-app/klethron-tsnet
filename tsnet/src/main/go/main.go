@@ -13,6 +13,7 @@ import (
 )
 
 // Handles keep Go pointers out of Java and C. Java serializes access and closes each handle once.
+//
 //export klethron_node_create
 func klethron_node_create() C.longlong {
 	return C.longlong(cgo.NewHandle(new(tsnet.Server)))

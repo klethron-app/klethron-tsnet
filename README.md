@@ -4,7 +4,8 @@ An Android AAR containing a precompiled Tailscale tsnet engine and a small Java/
 Java package: `com.klethron.tsnet`. Maven coordinates: `com.klethron:tsnet:0.1.0-SNAPSHOT`.
 
 **Initial scaffold:** native loading, linked-version reporting, and creating/closing an unstarted node.
-Login, starting a node, discovery and dialing are not implemented. No package registry release exists yet.
+Android interface discovery and network-monitor initialization are now verified under app restrictions.
+Login, starting a node, peer discovery and dialing are not implemented. No package registry release exists yet.
 See [PLAN.md](PLAN.md) for the next implementation steps and verification status.
 
 ## Build
@@ -26,8 +27,11 @@ Android 14/API 34 is the minimum; the AAR contains arm64-v8a and x86_64 native c
 Consumers of a published AAR will not need Go or an NDK.
 
 The demo has one button that loads the library and creates/closes a node. It has no network permission,
-stores no identity and does not authenticate to Tailscale. JNI instrumentation is similarly offline.
-Neither proves that Android tsnet networking works.
+stores no identity and does not authenticate to Tailscale. JNI instrumentation also tests interface
+discovery and network-monitor creation, using INTERNET permission only in the test APK to open sockets.
+It contacts no endpoint and requires a device with SELinux **Enforcing** (`adb shell getenforce`) to
+verify the standard Go discovery failure. The native test bridge is present only in debug builds;
+the release AAR check rejects it. Neither the demo nor these tests proves tailnet connectivity.
 
 ## Upstream pin
 

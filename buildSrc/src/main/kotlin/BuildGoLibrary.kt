@@ -26,7 +26,12 @@ abstract class BuildGoLibrary @Inject constructor(private val exec: ExecOperatio
     @get:Input abstract val goVersion: Property<String>
     @get:Input abstract val api: Property<Int>
     @get:Input abstract val abi: Property<String>
+    @get:Input abstract val includeTestBridge: Property<Boolean>
     @get:OutputDirectory abstract val outputDirectory: DirectoryProperty
+
+    init {
+        includeTestBridge.convention(false)
+    }
 
     @TaskAction
     fun build() {
@@ -66,6 +71,7 @@ abstract class BuildGoLibrary @Inject constructor(private val exec: ExecOperatio
             environment("GOWORK", "off")
             commandLine(
                 "go", "build", "-mod=readonly", "-trimpath", "-buildvcs=false",
+                "-tags=" + if (includeTestBridge.get()) "klethron_test" else "",
                 "-buildmode=c-shared",
                 "-ldflags=-s -w -buildid= -extldflags=-Wl,-z,max-page-size=16384",
                 "-o", output.resolve("libklethron_tsnet.so").absolutePath, "."

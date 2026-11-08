@@ -32,6 +32,8 @@ abstract class VerifyNativeAar : DefaultTask() {
             }.toSet(), "AAR must contain exactly the two supported native libraries")
             for (entry in entries) {
                 val bytes = zip.getInputStream(entry).use { it.readBytes() }
+                requireNative(!String(bytes, Charsets.ISO_8859_1).contains("klethron_network_probe"),
+                    "${entry.name} includes the debug-only network test bridge")
                 val elf = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
                 requireNative(elf.getInt(0) == 0x464c457f && bytes[4] == 2.toByte() && bytes[5] == 1.toByte(),
                     "${entry.name} must be little-endian ELF64")
