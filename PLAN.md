@@ -142,15 +142,22 @@ Complete AAR: **14,020,596 bytes**, up 6,761 bytes from the scaffold. Native lib
 4. **Turn the demo into a network proof.** Add INTERNET permission only with networking. Explicit setup,
    browser authorization, one selected destination and a simple exchange. Keep all network work off the
    UI thread. No auth keys checked into tests or supplied to pull requests from forks.
-5. **Release readiness.** Generate an exact Android-linked dependency/licence inventory, including any
+5. **Measure removal of unused features.** Audit the pinned upstream's build tags, starting with
+   `ts_omit_ssh`, `ts_omit_webclient` and `ts_omit_logtail`. Compare each candidate and the combined set
+   against the same dependency/toolchain baseline, recording both ABI libraries' uncompressed and
+   ZIP-compressed sizes and the complete compressed AAR size. Keep only exclusions compatible with
+   the intended API; verify startup, login, DNS, and direct/relayed dialing on API 34 and 16 KiB devices.
+   Repeat measurements once Start/Dial are reachable: scaffold-only savings do not establish the
+   production result. Update the licence inventory for the final linked feature set.
+6. **Release readiness.** Generate an exact Android-linked dependency/licence inventory, including any
    non-Go embedded resources and Go runtime notices. Package notices in the AAR. Test R8-minified
    consumers, arm64 hardware, API 34, 16 KiB ELF/APK alignment and cold-start loading. Preserve native
    symbols separately if needed for crash reports. Record sizes per ABI before/after each dependency change.
-6. **Publish immutable versions.** Verify ownership of Maven Central namespace `com.klethron`, configure
+7. **Publish immutable versions.** Verify ownership of Maven Central namespace `com.klethron`, configure
    signing and protected release credentials, add required POM/source/Javadoc metadata, and publish from
    tags. Keep the wrapper API version independent of upstream tsnet; record the full upstream commit for
    each release. Consumers pin a release and Gradle verification checksums. Never overwrite a release.
-7. **Integrate into Klethron separately.** Update its TAILSCALE-PLAN.md/local-build requirement, add the
+8. **Integrate into Klethron separately.** Update its TAILSCALE-PLAN.md/local-build requirement, add the
    artifact only to `:klethron_tailscale`, and test Play split loading plus the existing SSH transport seam.
    Repository creation here does not change that app or its current work in progress.
 
