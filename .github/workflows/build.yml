@@ -23,7 +23,7 @@ jobs:
           with open('gradle/libs.versions.toml', 'rb') as source:
               versions = tomllib.load(source)['versions']
           with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
-              for key in ('buildJdk', 'buildTools', 'ndk'):
+              for key in ('buildJdk', 'buildTools', 'commandLineToolsBuild', 'ndk'):
                   print(f'{key}={versions[key]}', file=output)
               print(f"platform=android-{versions['compileSdk']}.{versions['compileSdkMinor']}", file=output)
           PY
@@ -36,6 +36,10 @@ jobs:
           go-version-file: tsnet/src/main/go/go.mod
           cache-dependency-path: tsnet/src/main/go/go.sum
       - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+        with:
+          cmdline-tools-version: ${{ steps.versions.outputs.commandLineToolsBuild }}
+          packages: platform-tools
+          log-accepted-android-sdk-licenses: false
       - name: Install Android toolchains
         env:
           PLATFORM: ${{ steps.versions.outputs.platform }}
