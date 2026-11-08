@@ -7,8 +7,10 @@ Java package: `com.klethron.tsnet`. Maven coordinates: `com.klethron:tsnet:0.1.0
 Android interface discovery and network-monitor initialization are now verified under app restrictions.
 Debug-only tests also start a node against a rejecting loopback control endpoint, and connect two
 in-process nodes through a loopback test control and DERP server to exchange TCP data over direct
-and relay-only paths, and to rebind when the device's default network changes. These nodes write no files. Public startup, login, peer discovery and dialing
-are not implemented, and no real tailnet has been used. No package registry release exists yet.
+and relay-only paths, and to rebind when the device's default network changes. Another debug-only test contacts Tailscale's
+real control plane without credentials, stopping at an unauthorized login URL that never leaves native
+code. These nodes write no files. Public startup, login, peer discovery and dialing are not implemented,
+and no real tailnet has been used. No package registry release exists yet.
 See [PLAN.md](PLAN.md) for the next implementation steps and verification status.
 
 ## Build
@@ -36,9 +38,13 @@ check the same contract. JSpecify 1.0.1 is a transitive API dependency in the Ma
 Maven coordinates to retain dependency metadata. Copying only the AAR requires supplying JSpecify too.
 See [JSpecify's dependency guidance](https://jspecify.dev/docs/using/).
 
-AndroidX threading and permission annotations are deferred until the corresponding networking APIs
-exist. The current unstarted-node API needs no INTERNET permission. Callers must close nodes explicitly;
-`close()` is idempotent and synchronized. Nullness annotations do not enforce resource ownership.
+The package is also Error Prone `@CheckReturnValue`: an ignored `new TsnetNode()` can never be closed.
+Construction is `@WorkerThread`, because the first node in a process reads Android's CA store from disk;
+the other methods are `@AnyThread`. Android lint (`ThreadConstraint`, `CheckResult`), Error Prone and
+Kotlin's opt-in `-Xreturn-value-checker` report misuse from Java and Kotlin. They read these annotations
+by name, so the AAR does not export `androidx.annotation` (which would add the Kotlin stdlib) or
+`error_prone_annotations`. The current unstarted-node API needs no INTERNET permission. Callers must close
+nodes explicitly; `close()` is idempotent and synchronized.
 
 Both build variants disable Tailscale SSH, the embedded web client, logtail and the on-disk netmap
 cache using upstream build tags. The netmap cache would otherwise persist peer names, addresses and
@@ -79,11 +85,14 @@ more Go modules into debug libraries only; their notices ship in the debug AAR.
 It requires a device with SELinux **Enforcing** (`adb shell getenforce`) to verify the standard Go
 discovery failure. Native test bridges are present only in debug builds; the release AAR check rejects
 them. Neither the demo nor these tests proves connectivity to a real tailnet, DNS/TLS bootstrap, or a
-public dial API.
+public dial API. `ControlPlaneTest` needs internet access: it resolves and verifies
+`controlplane.tailscale.com` through the platform, then starts an ephemeral in-memory node until control
+returns a `login.tailscale.com` URL. The URL is validated in Go and never returned, logged or opened.
 
 The release demo enables R8 and resource shrinking and uses the local debug signing key solely for
 installation/testing. `build` assembles it and its instrumentation APK; `:demo:connectedReleaseAndroidTest`
-exercises the actual button through native load, version reporting and repeated create/close. Its test
+exercises the actual button through native load, version reporting and repeated create/close on a
+background thread. Its test
 does not reference `TsnetNode` or add JNI keep rules. The demo uses the standard optimized Android
 rules and the AAR's consumer rules.
 

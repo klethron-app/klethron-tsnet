@@ -76,6 +76,10 @@ for (buildType in listOf("release", "debug")) {
 
 dependencies {
     api(libs.jspecify)
+    // Lint, Error Prone and Kotlin's return-value checker match these by name in our class files, so
+    // consumers need neither artifact (androidx.annotation would also export the Kotlin stdlib).
+    compileOnly(libs.androidx.annotation)
+    compileOnly(libs.errorprone.annotations)
     androidTestImplementation(libs.android.test.runner)
     androidTestImplementation(libs.junit)
 }

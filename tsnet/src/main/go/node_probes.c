@@ -4,10 +4,10 @@
 #include <stdlib.h>
 #include "_cgo_export.h"
 
-enum probe { STARTUP, TAILNET, TAILNET_RELAY_ONLY, NETCHANGE_START, NETCHANGE_AWAIT };
+enum probe { STARTUP, CONTROL, TAILNET, TAILNET_RELAY_ONLY, NETCHANGE_START, NETCHANGE_AWAIT };
 
 // Java supplies standard UTF-8, including supplementary characters in paths.
-// Probes return fixed ASCII diagnostics, so JNI modified UTF-8 is sufficient for results.
+// Probes return fixed ASCII diagnostics (and hex hashes), so JNI modified UTF-8 is sufficient for results.
 static jstring probe_bytes(JNIEnv *env, jbyteArray argument, enum probe probe) {
     jsize length = (*env)->GetArrayLength(env, argument);
     jbyte *bytes = (*env)->GetByteArrayElements(env, argument, NULL);
@@ -15,6 +15,7 @@ static jstring probe_bytes(JNIEnv *env, jbyteArray argument, enum probe probe) {
     char *chars = (char *) bytes, *report;
     switch (probe) {
         case STARTUP: report = klethron_startup_probe(chars, length); break;
+        case CONTROL: report = klethron_control_probe(chars, length); break;
         case TAILNET: report = klethron_tailnet_probe(chars, length, 0); break;
         case TAILNET_RELAY_ONLY: report = klethron_tailnet_probe(chars, length, 1); break;
         case NETCHANGE_START: report = klethron_netchange_probe_start(chars, length); break;
@@ -29,6 +30,11 @@ static jstring probe_bytes(JNIEnv *env, jbyteArray argument, enum probe probe) {
 JNIEXPORT jstring JNICALL
 Java_com_klethron_tsnet_StartupTest_nativeProbe(JNIEnv *env, jclass type, jbyteArray directory) {
     return probe_bytes(env, directory, STARTUP);
+}
+
+JNIEXPORT jstring JNICALL
+Java_com_klethron_tsnet_ControlPlaneTest_nativeProbe(JNIEnv *env, jclass type, jbyteArray directory) {
+    return probe_bytes(env, directory, CONTROL);
 }
 
 JNIEXPORT jstring JNICALL

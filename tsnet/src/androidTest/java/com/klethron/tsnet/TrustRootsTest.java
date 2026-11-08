@@ -27,18 +27,24 @@ public final class TrustRootsTest {
         for (int i = 0; i < roots.length(); i++) {
             actual.add(roots.getString(i));
         }
+        Set<String> expected = systemRootFingerprints();
+        assertTrue("Expected Android system roots", expected.size() > 100);
+        assertEquals(expected, actual);
+    }
+
+    /** SHA-256 hex fingerprints of Android's current system roots, without user-disabled roots. */
+    static Set<String> systemRootFingerprints() throws Exception {
         // AndroidCAStore lists the current system store without user-disabled roots, plus user CAs.
         KeyStore store = KeyStore.getInstance("AndroidCAStore");
         store.load(null);
-        Set<String> expected = new TreeSet<>();
+        Set<String> fingerprints = new TreeSet<>();
         for (String alias : Collections.list(store.aliases())) {
             if (alias.startsWith("system:")) {
                 byte[] der = store.getCertificate(alias).getEncoded();
-                expected.add(HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(der)));
+                fingerprints.add(HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(der)));
             }
         }
-        assertTrue("Expected Android system roots", expected.size() > 100);
-        assertEquals(expected, actual);
+        return fingerprints;
     }
 
     private static native String nativeProbe();

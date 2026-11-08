@@ -1,10 +1,12 @@
 package com.klethron.tsnet.demo;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 
 import android.app.Activity;
 import android.app.Instrumentation;
 import android.content.Intent;
+import android.os.SystemClock;
 import android.view.ViewGroup;
 import android.widget.Button;
 import androidx.test.platform.app.InstrumentationRegistry;
@@ -20,14 +22,15 @@ public final class MinifiedDemoTest {
         // Exercise the real consumer without referencing TsnetNode or adding test keep rules.
         Activity activity = instrumentation.startActivitySync(intent);
         try {
-            String[] result = new String[1];
+            Button button = (Button) ((ViewGroup) activity.findViewById(android.R.id.content)).getChildAt(0);
             for (int i = 0; i < 2; i++) {
-                instrumentation.runOnMainSync(() -> {
-                    ViewGroup content = activity.findViewById(android.R.id.content);
-                    Button button = (Button) content.getChildAt(0);
-                    button.performClick();
-                    result[0] = button.getText().toString();
-                });
+                instrumentation.runOnMainSync(button::performClick);
+                // The node is created on a background thread; the button is re-enabled with the result.
+                String[] result = new String[1];
+                for (long deadline = SystemClock.uptimeMillis() + 10000; result[0] == null; SystemClock.sleep(20)) {
+                    assertTrue("No result from the demo", SystemClock.uptimeMillis() < deadline);
+                    instrumentation.runOnMainSync(() -> result[0] = button.isEnabled() ? button.getText().toString() : null);
+                }
                 assertEquals("Loaded v1.105.0-pre.0.20261107202901-503010831ecd\n"
                                 + "Node created and closed. Networking is not implemented yet.",
                         result[0]);

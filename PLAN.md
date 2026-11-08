@@ -34,8 +34,9 @@ Go 1.27.3, NDK 30.0.16248370, AGP 9.5.1 and Gradle 9.9.0 are pinned.
 - `check` checks Android lint, native AAR architecture/alignment and both variants' Go module notices,
   and compiles JNI instrumentation.
 - `:demo` is a platform-only Java Activity with an explicit offline native-load/lifecycle button.
-- Public Java types use JSpecify non-null defaults, exported with the Maven dependency metadata.
-  The release demo exercises the native lifecycle with R8/resource shrinking enabled.
+- Public Java types use JSpecify non-null defaults, exported with the Maven dependency metadata, plus
+  Error Prone `@CheckReturnValue` and AndroidX threading annotations as compile-only, name-matched
+  contracts. The release demo exercises the native lifecycle off the UI thread with R8/resource shrinking.
 - Maven publishing is configured only to `build/maven/`; there is no remote artifact publication.
 - Android interface discovery uses bionic `getifaddrs` through `netmon.RegisterInterfaceGetter`.
   The adapter copies IPv4/IPv6 addresses and masks, queries index/MTU/flags with public ioctls, and
@@ -57,6 +58,8 @@ Go 1.27.3, NDK 30.0.16248370, AGP 9.5.1 and Gradle 9.9.0 are pinned.
   cellular change on emulators against the loopback tailnet, not on hardware or a real tailnet.
 - Go TLS verification trusts Android's current system CA store (Conscrypt APEX on Android 14+, minus
   user-disabled roots) instead of stock Go's system-image directory. User-added CAs are not trusted.
+- A debug-only probe resolves and verifies Tailscale's real control plane through the platform, then
+  starts an ephemeral node until control offers a login URL. No credentials; not a joined tailnet.
 
 Initial scaffold verification on 2026-11-08:
 
@@ -217,7 +220,8 @@ Verification:
   dependency, following [upstream guidance](https://jspecify.dev/docs/using/). This makes reference
   types non-null by default for Java analysis and Kotlin callers. The public version result is the
   first concrete beneficiary. Export the dependency through Maven metadata and ship its licence.
-- Defer AndroidX annotations until there is a concrete threading/permission contract: future blocking
+- (Threading annotations were added later; see the control-plane iteration.)
+  Defer AndroidX annotations until there is a concrete threading/permission contract: future blocking
   operations can use `@WorkerThread`, and methods opening sockets can use `@RequiresPermission`.
   Do not duplicate JSpecify nullness annotations, blanket-keep the library with `@Keep`, or require
   INTERNET for the current unstarted-node API. `minSdk` already establishes the API 34 floor.
@@ -564,20 +568,90 @@ This proves the seam drives upstream's rebind path on a real Android default-net
 nodes share the emulator's interfaces and talk over loopback, so it does not prove path recovery across
 real networks, NAT traversal, DERP reconnection to a remote server, or behavior on hardware/arm64.
 
+## Real control plane and consumer annotations iteration (2026-11-08)
+
+Real control-plane bootstrap (debug-only `control_probe.go`, new `ControlPlaneTest`, needs internet):
+
+- A plain `crypto/tls` dial to `controlplane.tailscale.com:443` resolves through bionic (Go prefers the cgo
+  resolver on Android) and verifies only against Go's system pool, i.e. our platform roots. Upstream
+  `tlsdial` would silently fall back to baked-in Let's Encrypt roots, so the node's own connection cannot
+  prove this. Java requires the verified chain's root SHA-256 to be one of `AndroidCAStore`'s system roots.
+- It then starts an ephemeral, in-memory node with discarding loggers and an explicit
+  `ipn.DefaultControlURL`. `Start` fetches the control key over TLS, registers over Noise and requests
+  interactive login. The probe watches the IPN bus (`NotifyInitialState`) for `BrowseToURL`, requires
+  `https://login.tailscale.com/a/...`, then `NeedsLogin` with no Tailscale IP. The URL never leaves Go, so
+  the pending registration cannot be authorized; only fixed diagnostics and the public root hash cross JNI.
+  The node directory must remain empty. Each run creates one unauthorized pending registration at Tailscale.
+- **Found:** `tsnet.Server` reads `TS_CONTROL_URL`, `TS_AUTHKEY`/`TS_AUTH_KEY` and OAuth/ID-token variables
+  from the process environment whenever the corresponding field is empty. Probes refuse the auth variables
+  and set the control URL explicitly. A public start API must likewise set every field explicitly so the
+  host app's environment cannot redirect control or inject credentials.
+- Not covered: DERP (control sends the DERP map only after authorization), `dnsfallback` bootstrap DNS
+  when system DNS fails, Private DNS modes, proxies, and any authenticated or cross-device path.
+
+Consumer annotations (public API unchanged apart from annotations):
+
+- Measured on emulators (debug libraries): library load **4–5 ms**; first node creation **3 ms** warm,
+  **10–20 ms** on a cold page cache (it reads the CA store); later creations **30–70 µs**. Hence
+  `TsnetNode()` is `@WorkerThread`; `close`, `tailscaleVersion` and `setDefaultNetwork` are `@AnyThread`
+  (synchronized or non-blocking; the last is meant for `ConnectivityManager` callbacks). Revisit `close`
+  when a started node's shutdown can block.
+- The package is `@NullMarked` and Error Prone `@CheckReturnValue`: a discarded `new TsnetNode()` leaks a
+  native node, as there is no finalizer. `@MustBeClosed` was rejected: Klethron holds nodes across leases,
+  not in try-with-resources, so every field-held node would need a suppression. No AndroidX
+  `@RequiresPermission` yet: no public method opens sockets.
+- A scratch consumer (AGP 9.5.1, Kotlin 2.4.21, Error Prone 2.51.0) resolving the published artifact
+  showed lint `ThreadConstraint` errors for creation in `onCreate` (Java and Kotlin), lint `CheckResult`
+  for an ignored version, Error Prone `CheckReturnValue` for an ignored node/version, and Kotlin
+  `-Xreturn-value-checker=check` warnings for both. Results were **identical without `androidx.annotation`,
+  `error_prone_annotations` or JSpecify on the consumer classpath**: all tools match names in class files.
+  Kotlin still rejected assigning `null` to the version without JSpecify. With none of the three present,
+  `javac -Xlint:all -Werror` and an R8 release build passed. Lint does not infer the UI thread for click
+  listener lambdas. Probe sources and the lint report are under `tsnet/build/reports/consumer-annotations/`.
+- Therefore `androidx.annotation` 1.11.0 and `error_prone_annotations` 2.51.0 (Klethron's pin; 2.52.0 is
+  under two weeks old) are `compileOnly`: AndroidX would otherwise export the Kotlin stdlib, and no Error
+  Prone classes are distributed, so no new notice is needed. JSpecify stays `api` because
+  [upstream](https://jspecify.dev/docs/using/) explicitly recommends against hiding it from users or
+  runtime; the published metadata still contains only JSpecify. R8 removes all annotation references from
+  the release demo.
+- The demo is `@NullMarked`, creates nodes on a background thread and disables its button meanwhile;
+  `MinifiedDemoTest` waits for the re-enabled result.
+
+Verification:
+
+- `./gradlew build :tsnet:publishReleasePublicationToLocalBuildRepository` passes, including lint, notice
+  and release-alignment checks; the release check still rejects the new probe bridge.
+- Instrumentation JUnit XML records **thirteen passed tests, zero failures/errors/skips per device**:
+  twelve library tests (one new) plus the R8-minified demo test, on dedicated emulators at API 34 / x86_64 /
+  4,096-byte pages and API 37.2 / x86_64 / 16,384-byte pages, both SELinux Enforcing (`control-api34/`,
+  `control-api37/` under each module's `build/reports/device-verification/`). `ControlPlaneTest` passed
+  two further runs per device (`control-repeat-*`) in 1.3–2.6 s per run.
+- Negative control on API 34: with no platform root directories the test failed with
+  `platform tls dial failed` (`control-negative-noroots-api34/`). `zipalign -c -P 16 4` passes for the
+  release demo APK.
+
+Sizes: release native libraries are byte-identical to the previous iteration. Complete release AAR:
+**14,004,534 bytes**, up **104 bytes**. Debug libraries are **19,953,296 raw / 7,762,032 ZIP bytes**
+(arm64) and **21,634,672 / 8,529,347** (x86_64); the debug AAR is **16,376,460 bytes**.
+
 ## Next increments
 
 1. **Prove a real Android node.** Interface discovery, monitor initialization, file-free startup,
-   loopback two-node direct/DERP dialing, platform TLS roots and the default-network seam are proven
-   above. Remaining: DNS bootstrap and verifying a real certificate chain, and cross-device or
-   NAT-traversing paths, including recovery after a real network change. Keep tests credential-free until an
-   explicit live-tailnet proof; the loopback harness can host the network-change test.
+   loopback two-node direct/DERP dialing, platform TLS roots, the default-network seam and real
+   control-plane DNS/TLS/registration up to `NeedsLogin` are proven above. Remaining: real DERP, fallback
+   DNS when system DNS fails, and cross-device or NAT-traversing paths, including recovery after a real
+   network change. These need an authorized node: design the explicit live-tailnet proof (browser login
+   on a test device, never a checked-in or CI auth key) before adding it.
 2. **Add only the lifecycle/configuration needed by that proof.** Explicit no-backup state directory and
    hostname; cancellable start/login/status; deliberate logout. No credential-bearing default log sinks
    or login URLs in logs. Logging files and the netmap cache are removed above; continue auditing
    upstream package initialization, remaining filesystem/process behavior and state permissions.
    `Server.Up` already blocks until Running in the loopback probe; a public start still needs
-   cancellation and Close-during-start semantics. Use
-   bounded typed events, not log parsing, to deliver the browser login URL after user action.
+   cancellation and Close-during-start semantics. Use bounded typed events, not log parsing, to deliver
+   the browser login URL after user action; the control probe shows the IPN bus `BrowseToURL` path works.
+   Set control URL and auth fields explicitly so tsnet never reads them from the environment. Annotate
+   blocking methods `@WorkerThread`, socket-opening ones `@RequiresPermission(INTERNET)`, and keep
+   `@CheckReturnValue` (opt out with `@CanIgnoreReturnValue` only where ignoring is harmless).
 3. **Design the connection boundary with a real caller.** Opaque connection handles; bounded read/write;
    backpressure, deadlines, cancellation and exactly-once close. Resolve concurrent close/start/dial
    before exposing those APIs. JNI strings need deliberate UTF-8 conversion; current version reporting
@@ -616,6 +690,7 @@ ANDROID_SERIAL=emulator-5554 ./gradlew :demo:connectedReleaseAndroidTest
 ./gradlew :tsnet:verifyNativeAar
 ```
 
+`ControlPlaneTest` needs internet access and contacts Tailscale's public control plane without credentials.
 Use an enforcing-mode device for instrumentation (`adb -s <serial> shell getenforce`); a permissive
 emulator hides the interface-discovery regression and deliberately fails its negative-control test.
 

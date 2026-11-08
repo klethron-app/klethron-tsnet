@@ -1,5 +1,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <!-- Interface queries open sockets; node probes contact only their own loopback test servers. -->
+    <!-- Interface queries open sockets; ControlPlaneTest contacts Tailscale's real control plane
+         without credentials. Other node probes contact only their own loopback test servers. -->
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- NetworkChangeTest follows the default network, as a consuming app would. -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
