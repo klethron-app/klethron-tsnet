@@ -6,6 +6,9 @@ import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
 import android.os.Looper;
+import android.system.Os;
+import android.system.OsConstants;
+import android.system.StructPollfd;
 import android.os.ParcelFileDescriptor;
 import java.io.ByteArrayOutputStream;
 import java.io.FileInputStream;
@@ -116,6 +119,23 @@ public final class DialTest {
             assertEquals(-1, new FileInputStream(connection.getFileDescriptor()).read());
         }
         assertThrows(IllegalStateException.class, () -> node.dial(peer, 7070, WAIT));
+    }
+
+    @Test(timeout = 60000)
+    public void logoutEndsTailnetAccess() throws Exception {
+        try (TsnetNode node = startNode();
+                ParcelFileDescriptor connection = node.dial(peer, 7070, WAIT)) {
+            write(connection, new byte[] {1});
+            assertEquals(1, new FileInputStream(connection.getFileDescriptor()).read());
+            node.logout(WAIT);
+            // The peer is gone from this node's tailnet: nothing is echoed, and new dials wait for a login.
+            write(connection, new byte[] {2});
+            StructPollfd poll = new StructPollfd();
+            poll.fd = connection.getFileDescriptor();
+            poll.events = (short) OsConstants.POLLIN;
+            assertEquals(0, Os.poll(new StructPollfd[] {poll}, 2000));
+            assertThrows(SocketTimeoutException.class, () -> node.dial(peer, 7070, Duration.ofMillis(500)));
+        }
     }
 
     @Test(timeout = 60000)

@@ -42,7 +42,7 @@ See [JSpecify's dependency guidance](https://jspecify.dev/docs/using/).
 
 The package is also Error Prone `@CheckReturnValue`: an ignored `new TsnetNode()` can never be closed.
 Construction is `@WorkerThread`, because the first node in a process reads Android's CA store from disk;
-so are `start`, `awaitStatus`, `dial` and `close`. `tailscaleVersion` and `setDefaultNetwork` are `@AnyThread`. Android lint (`ThreadConstraint`, `CheckResult`), Error Prone and
+so are `start`, `awaitStatus`, `dial`, `logout` and `close`. `tailscaleVersion` and `setDefaultNetwork` are `@AnyThread`. Android lint (`ThreadConstraint`, `CheckResult`), Error Prone and
 Kotlin's opt-in `-Xreturn-value-checker` report misuse from Java and Kotlin. They read these annotations
 by name, so the AAR does not export `androidx.annotation` (which would add the Kotlin stdlib) or
 `error_prone_annotations`. `start` is `@RequiresPermission(INTERNET)`. Callers must close nodes
@@ -75,6 +75,11 @@ tailnet connection, so callers can block on it, or make it non-blocking and poll
 Closing the descriptor, or shutting down its output, closes the connection. Closing the node closes all
 of its connections.
 
+`logout` asks control to expire the node's key and deletes the login from the state directory; the node
+stays in `NEEDS_LOGIN`, and a new node started with the same directory offers a new login URL. To also
+forget the device key, close the node and delete the directory. A failed logout leaves the node
+`STOPPED` with its login intact, so it can be retried.
+
 `start` returns once the node is initialized locally; `awaitStatus` returns the latest status after it
 changes, waking when the node is closed. Status records keep only the latest state, so intermediate
 states can be skipped. Every connection-relevant setting is explicit: the control URL is Tailscale's,
@@ -88,7 +93,8 @@ proxies, OAuth client secrets, MDM policy and the on-disk netmap cache. This kee
 environment from redirecting connections or enabling TLS key logging, and reduces native size.
 The netmap cache would otherwise persist peer names, addresses and
 keys in the node directory whenever the control server enables it. Two small patches also skip upstream log-configuration creation and socket-log directory lookup
-when logtail is disabled. Both user and backend loggers discard output. Patches are applied to an
+when logtail is disabled. Both user and backend loggers discard output. A third keeps the node key after
+a failed logout, so the login survives and the logout can be retried. Patches are applied to an
 isolated, verified build copy; the shared module cache is untouched. The AAR ships the patch notice.
 The patch implementation is part of Gradle's task fingerprint, so edits invalidate native builds;
 Go's cache also tracks the modified source. Shared native output caching is disabled.

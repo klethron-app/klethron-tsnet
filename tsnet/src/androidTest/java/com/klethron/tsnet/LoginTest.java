@@ -12,6 +12,7 @@ import java.io.File;
 import java.io.IOException;
 import java.net.Inet4Address;
 import java.net.InetAddress;
+import java.net.SocketTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -89,6 +90,84 @@ public final class LoginTest {
         assertOnlyStateFile();
     }
 
+    @Test(timeout = 120000)
+    public void logoutRequiresANewLogin() throws Exception {
+        String firstUrl;
+        try (TsnetNode node = new TsnetNode()) {
+            assertThrows(IllegalStateException.class, () -> node.logout(WAIT));
+            node.start(directory.toFile(), "klethron-logout-test", controlUrl);
+            TsnetStatus status = await(node, s -> s.loginUrl() != null);
+            firstUrl = status.loginUrl();
+            node.logout(WAIT); // Not logged in: no effect.
+            assertEquals(firstUrl, node.awaitStatus(null, WAIT).loginUrl());
+            assertTrue(nativeProbeComplete(firstUrl.getBytes(StandardCharsets.UTF_8)));
+            assertFalse(await(node, s -> s.state() == TsnetStatus.State.RUNNING).addresses().isEmpty());
+
+            assertThrows(SocketTimeoutException.class, () -> node.logout(Duration.ZERO));
+            node.logout(WAIT);
+            // Upstream reports NEEDS_LOGIN shortly before it clears the network map.
+            status = await(node, s -> s.state() == TsnetStatus.State.NEEDS_LOGIN && s.addresses().isEmpty());
+            assertNull(status.loginUrl());
+            assertTrue(status.addresses().isEmpty());
+            node.logout(WAIT); // Already logged out.
+            assertEquals(status.version, node.awaitStatus(status, Duration.ofMillis(500)).version);
+        }
+        assertOnlyStateFile();
+
+        // The logout persists: the directory no longer resumes, and a new login is offered.
+        try (TsnetNode node = new TsnetNode()) {
+            node.start(directory.toFile(), "klethron-logout-test", controlUrl);
+            TsnetStatus status = await(node, s -> {
+                assertTrue("Logged-out node resumed", s.state() != TsnetStatus.State.RUNNING);
+                return s.loginUrl() != null;
+            });
+            assertFalse("Login URL was reused", firstUrl.equals(status.loginUrl()));
+            assertTrue(nativeProbeComplete(status.loginUrl().getBytes(StandardCharsets.UTF_8)));
+            assertFalse(await(node, s -> s.state() == TsnetStatus.State.RUNNING).addresses().isEmpty());
+            node.close();
+            assertThrows(IllegalStateException.class, () -> node.logout(WAIT));
+        }
+        assertOnlyStateFile();
+    }
+
+    @Test(timeout = 120000)
+    public void failedLogoutKeepsTheLoginForRetries() throws Exception {
+        List<InetAddress> addresses;
+        try (TsnetNode node = new TsnetNode()) {
+            node.start(directory.toFile(), "klethron-logout-failure-test", controlUrl);
+            TsnetStatus status = await(node, s -> s.loginUrl() != null);
+            assertTrue(nativeProbeComplete(status.loginUrl().getBytes(StandardCharsets.UTF_8)));
+            addresses = await(node, s -> s.state() == TsnetStatus.State.RUNNING).addresses();
+            nativeProbeRejectRegistrations(true);
+            assertThrows(IOException.class, () -> node.logout(WAIT));
+            status = await(node, s -> s.state() == TsnetStatus.State.STOPPED);
+            assertEquals(addresses, status.addresses());
+            // Let netmap updates arrive: upstream saved an empty node key over the login here.
+            assertEquals(status.version, node.awaitStatus(status, Duration.ofSeconds(3)).version);
+        }
+        assertOnlyStateFile();
+
+        // The login persisted: a new node resumes it. Once control accepts, the same node that
+        // failed to log out retries successfully.
+        nativeProbeRejectRegistrations(false);
+        try (TsnetNode node = new TsnetNode()) {
+            node.start(directory.toFile(), "klethron-logout-failure-test", controlUrl);
+            TsnetStatus status = await(node, s -> {
+                assertNull("Node asked to log in again", s.loginUrl());
+                return s.state() == TsnetStatus.State.RUNNING;
+            });
+            assertEquals(addresses, status.addresses());
+            nativeProbeRejectRegistrations(true);
+            assertThrows(IOException.class, () -> node.logout(WAIT));
+            nativeProbeRejectRegistrations(false);
+            node.logout(WAIT);
+            status = await(node, s -> s.state() == TsnetStatus.State.NEEDS_LOGIN && s.addresses().isEmpty());
+            assertNull(status.loginUrl());
+            assertTrue(status.addresses().isEmpty());
+        }
+        assertOnlyStateFile();
+    }
+
     @Test(timeout = 60000)
     public void closeWakesWaitersAndRejectsLaterCalls() throws Exception {
         TsnetNode node = new TsnetNode();
@@ -158,6 +237,8 @@ public final class LoginTest {
     private static native boolean nativeProbeComplete(byte[] loginUrl);
 
     static native void nativeProbeStop();
+
+    private static native void nativeProbeRejectRegistrations(boolean reject);
 
     private static native void nativeProbeSetAuthKeyEnvironment(boolean set);
 }

@@ -95,3 +95,8 @@ JNIEXPORT void JNICALL
 Java_com_klethron_tsnet_LoginTest_nativeProbeSetAuthKeyEnvironment(JNIEnv *env, jclass type, jboolean set) {
     klethron_login_probe_set_auth_key_environment(set == JNI_TRUE);
 }
+
+JNIEXPORT void JNICALL
+Java_com_klethron_tsnet_LoginTest_nativeProbeRejectRegistrations(JNIEnv *env, jclass type, jboolean reject) {
+    klethron_login_probe_reject_registrations(reject == JNI_TRUE);
+}

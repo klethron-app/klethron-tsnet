@@ -96,12 +96,23 @@ func klethron_node_await_status(id C.longlong, after C.longlong, timeoutMillis C
 func klethron_node_dial(id C.longlong, host *C.char, length C.int, port C.int, timeoutMillis C.longlong) C.int {
 	n := lookupNode(id)
 	if n == nil {
-		return dialClosed
+		return resultClosed
 	}
 	if port < 0 || port > math.MaxUint16 {
-		return dialInvalid
+		return resultInvalid
 	}
 	return C.int(n.dial(C.GoStringN(host, length), uint16(port), milliseconds(timeoutMillis)))
+}
+
+// klethron_node_logout returns 0 or a negative failure result.
+//
+//export klethron_node_logout
+func klethron_node_logout(id C.longlong, timeoutMillis C.longlong) C.int {
+	n := lookupNode(id)
+	if n == nil {
+		return resultClosed
+	}
+	return C.int(n.logout(milliseconds(timeoutMillis)))
 }
 
 // milliseconds converts a non-negative Java timeout, saturating rather than overflowing.

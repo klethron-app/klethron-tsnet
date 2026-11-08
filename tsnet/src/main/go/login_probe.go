@@ -149,6 +149,22 @@ func klethron_login_probe_complete(loginURL *C.char, length C.int) C.int {
 	return 1
 }
 
+// klethron_login_probe_reject_registrations makes control reject every registration request,
+// including logouts, with an error. Stopping the server would not: nodes keep their hijacked Noise
+// connection. testcontrol reads the field without locking; no registration is in flight here.
+//
+//export klethron_login_probe_reject_registrations
+func klethron_login_probe_reject_registrations(reject C.int) {
+	loginProbe.Lock()
+	defer loginProbe.Unlock()
+	if loginProbe.control != nil {
+		loginProbe.control.RequireAuthKey = ""
+		if reject != 0 {
+			loginProbe.control.RequireAuthKey = "tskey-test-never-sent"
+		}
+	}
+}
+
 //export klethron_login_probe_stop
 func klethron_login_probe_stop() {
 	loginProbe.Lock()

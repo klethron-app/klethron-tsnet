@@ -27,7 +27,8 @@ Go 1.27.3, NDK 30.0.16248370, AGP 9.5.1 and Gradle 9.9.0 are pinned.
   Go serializes start/close and wakes waiters. There is no finalizer: callers must close explicitly.
   `dial(host, port, timeout)` returns a socket-pair `ParcelFileDescriptor` relaying a netstack TCP
   connection, refusing addresses outside the network map instead of using the device's network.
-  Verified against a loopback test control server and peer only. There is no logout API yet.
+  `logout(timeout)` expires the node key at control and deletes the login from the state directory.
+  Verified against a loopback test control server and peer only.
 - Native builds are incremental and configuration-cache compatible. Shared build caching is deliberately
   disabled until toolchains are provisioned hermetically. Only one installed Go version is accepted.
 - Release libraries use Go `-trimpath`, stripped symbols/DWARF and 16 KiB linker alignment.
@@ -35,7 +36,7 @@ Go 1.27.3, NDK 30.0.16248370, AGP 9.5.1 and Gradle 9.9.0 are pinned.
   out-of-scope servers/integrations, logtail, debug hooks, metrics, the on-disk netmap cache, PeerAPI
   serving, exit nodes, environment proxies, OAuth secrets, MDM policy and baked-in TLS roots.
   Two local patches skip log configuration and socket-log directory initialization; both user/backend
-  loggers discard output.
+  loggers discard output. A third keeps the node key after a failed logout (see the logout iteration).
 - `check` checks Android lint, native AAR architecture/alignment and both variants' Go module notices,
   and compiles JNI instrumentation.
 - `:demo` is a platform-only Java Activity with an explicit offline native-load/lifecycle button.
@@ -875,20 +876,105 @@ test control server and peer, whose path is loopback. It does not prove a real t
 cross-device or NAT traversal, subnet routes, IPv6 peers, throughput, or a non-blocking consumer such as
 Klethron's selector loop.
 
+## Public logout iteration (2026-11-08)
+
+Deliberate logout, the first remaining lifecycle item. Klethron needs it to sign a device out.
+
+- `TsnetNode.logout(Duration timeout)` (`@WorkerThread`) calls upstream's LocalAPI logout: it sets
+  `WantRunning=false`/`LoggedOut`, sends control a registration with an expiry in the past (expiring the
+  node key), then deletes the login profile and resets the backend. The node stays started and reports
+  `NEEDS_LOGIN` without a login URL and without addresses; existing connections stop relaying and new
+  dials wait for a login. Logging in again uses a new node with the same directory, whose `start`
+  offers a new login URL; `tailscaled.state` keeps the machine key, so deleting the directory forgets
+  the device completely. A node that is not logged in (including one waiting in `NEEDS_LOGIN`) is
+  unaffected. No re-login API on the same node was added without a caller.
+- Errors reuse dial's mapping: `IllegalStateException` (not started or closed), `SocketTimeoutException`
+  and a fixed-message `IOException`. Go shares `whenStarted`/`failed` between dial and logout, and Java
+  one `check`; dial results were renamed to shared `result*` constants. No new types or callbacks.
+- **Found: a failed logout destroyed the local login while the node stayed registered.** Upstream
+  `Direct.TryLogout` clears its in-memory node key even when control rejects the request, but the map poll
+  keeps running; the next netmap update sends that empty (yet `Valid`) `Persist`, and LocalBackend saves it
+  over the stored key. The device then remains in the tailnet with no local key to log out with: a retry
+  is a silent no-op, and a restart asks for a new login. Reproduced in roughly one of three runs on
+  API 37.2. Patched `control/controlclient/direct.go` to clear the key only after a successful logout
+  (hash-checked like the other two patches, documented in `TAILSCALE-MODIFICATIONS`, README and
+  `THIRD-PARTY-NOTICES.md`). A failed logout now deterministically leaves the node `STOPPED` with its
+  addresses and login, and the same node, or a new one with the same directory, can retry. Worth
+  reporting upstream; drop the patch once fixed there.
+- Upstream reports `NeedsLogin` shortly before it clears the network map, so a status can briefly show
+  `NEEDS_LOGIN` with the old addresses. Tests wait for the settled state; documented as "soon".
+- Debug-only `klethron_login_probe_reject_registrations` makes the loopback control reject registrations
+  (testcontrol's `RequireAuthKey`). Stopping the control server does not make it unreachable: nodes keep
+  their hijacked Noise connection, which `httptest.Server.Close` does not track.
+
+New tests (public API only, off the UI thread):
+
+- `LoginTest.logoutRequiresANewLogin`: refused before start; no effect while waiting for login (same URL);
+  after login, a zero timeout throws `SocketTimeoutException`, then logout reaches `NEEDS_LOGIN` without
+  URL or addresses, and repeating it has no effect. A new node with the same directory never reaches
+  `RUNNING` before offering a different login URL, then logs in again. Only `tailscaled.state` remains
+  (0600 in a 0700 directory). Logout after close throws.
+- `LoginTest.failedLogoutKeepsTheLoginForRetries`: with registrations rejected, logout throws
+  `IOException`, the node is `STOPPED` with unchanged addresses, a retry also throws, and no status change
+  follows for 3 s. A new node with the same directory resumes `RUNNING` with the same addresses and no
+  login URL; it fails to log out while control rejects, then the same node succeeds once control accepts.
+- `DialTest.logoutEndsTailnetAccess`: an echo connection works, then after logout a written byte is not
+  echoed within 2 s (`Os.poll`) and a 500 ms dial times out.
+
+Verification:
+
+- `./gradlew build :tsnet:publishReleasePublicationToLocalBuildRepository` passes, including lint (only
+  the existing Error Prone version notice), notice checks (26 release modules, unchanged) and release
+  alignment/probe checks; repeating `build` reuses the configuration cache with all four Go builds up to
+  date. `zipalign -c -P 16 4` passes for the release demo APK.
+- Instrumentation JUnit XML records **24 passed tests, zero failures/errors/skips per device**: 23 library
+  tests (three new) plus the R8-minified demo test, on dedicated emulators at API 34 / x86_64 / 4,096-byte
+  pages and API 37.2 / x86_64 / 16,384-byte pages, both SELinux Enforcing (`logout-api34/`, `logout-api37/`
+  under each module's `build/reports/device-verification/`). `LoginTest` and `DialTest` then passed five
+  further runs per device (`logout-repeat-*`, 110 passes). Earlier, `LoginTest` passed 30 consecutive class
+  runs across both devices with temporary diagnostics, since removed.
+- Negative controls failed as expected: a no-op native logout failed both logout tests on API 34
+  (`logout-negative-noop-api34/`). Without the `direct.go` patch, the failure test failed on both devices
+  (`logout-negative-unpatched-*`): on API 34 the restarted node asked to log in again; on API 37.2 the
+  empty key had been saved, so the retry "succeeded" as a no-op and the node stayed `STOPPED`, still
+  registered.
+- **Unexplained once:** before the final test fixes, one API 37.2 run of the successful-logout test saw
+  no status change after `STOPPED` for 30 s, and the next test's close took 10 s instead of 0.2 s. It did
+  not recur in over 40 later runs, diagnostics included. Watch for it in future runs; a host or emulator
+  stall is possible but unproven. Separately, a Gradle connected-test invocation once failed within
+  seconds with no result files and passed when rerun unchanged.
+
+Release sizes (no dependency or toolchain changes; logout was already linked via LocalAPI):
+
+| Entry | Before raw | After raw | Before ZIP | After ZIP |
+|---|---:|---:|---:|---:|
+| arm64-v8a library | 17,558,832 | 17,560,784 | 6,852,437 | 6,853,762 |
+| x86_64 library | 19,064,272 | 19,066,352 | 7,533,369 | 7,534,375 |
+
+Complete release AAR: **14,469,516 bytes**, up **2,754 bytes (0.02%)**, including the longer notice. Debug
+libraries are **18,705,136 raw / 7,309,842 ZIP bytes** (arm64) and **20,289,904 / 8,033,152** (x86_64);
+the debug AAR is **15,431,373 bytes**.
+
+This proves logout's local effects and failure handling against an in-process test control server.
+**Upstream testcontrol ignores the logout's expiry**, so control-side deregistration is not verified; it
+needs a real control plane with an authorized node (the live-tailnet proof). Key expiry by an
+administrator, `NEEDS_MACHINE_AUTH` and backend error reporting remain open.
+
 ## Next increments
 
 1. **Prove a real Android node.** Interface discovery, monitor initialization, file-free startup,
    loopback two-node direct/DERP dialing, platform TLS roots, the default-network seam, real
    control-plane DNS/TLS/registration up to `NeedsLogin`, and the public start/login/status/dial
-   lifecycle against loopback control are proven above. Remaining: real interactive login, real DERP, fallback
-   DNS when system DNS fails, and cross-device or NAT-traversing paths, including recovery after a real
-   network change. Design the explicit live-tailnet proof (browser login on a test device through the
+   lifecycle (including logout) against loopback control are proven above. Remaining: real interactive
+   login, logout deregistering the node at real control, real DERP, fallback DNS when system DNS fails,
+   and cross-device or NAT-traversing paths, including recovery after a real network change. Design the explicit live-tailnet proof (browser login on a test device through the
    public API, never a checked-in or CI auth key) before adding it.
 2. **Complete the lifecycle needed by that proof.** Start, interactive login URL delivery, status,
-   persistent state and close are public. Remaining: deliberate logout (deregister and delete state),
-   key expiry and re-login (a new `BrowseToURL` while `NeedsLogin`), `NEEDS_MACHINE_AUTH` handling,
-   and surfacing backend errors (`Notify.ErrMessage`) as typed status. Decide whether an ephemeral,
-   in-memory mode is needed before adding one. Continue auditing upstream package initialization,
+   persistent state, logout and close are public. Remaining: key expiry and re-login (testcontrol can
+   expire keys with `SetExpireAllNodes`; check for a new `BrowseToURL` while `NeedsLogin`), report the
+   failed-logout key loss upstream, `NEEDS_MACHINE_AUTH` handling, and surfacing backend errors
+   (`Notify.ErrMessage`) as typed status. Decide whether an ephemeral, in-memory mode is needed before
+   adding one. Continue auditing upstream package initialization,
    remaining filesystem/process behavior and state permissions; the state file format is upstream's
    and must be retested on every upstream update. Verify the `@RequiresPermission` contract in a
    scratch consumer as was done for the threading annotations.

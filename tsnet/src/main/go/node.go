@@ -193,16 +193,45 @@ func (n *node) await(after uint64, timeout time.Duration) (string, bool) {
 	}
 }
 
-// Results of dial, which otherwise returns a file descriptor; TsnetNode.dial maps them to exceptions.
+// Failures of dial and logout, which otherwise return a file descriptor or 0; TsnetNode.check
+// maps them to exceptions.
 const (
-	dialClosed = -1 - iota
-	dialNotStarted
-	dialInvalid
-	dialUnknownHost
-	dialNoRoute
-	dialTimeout
-	dialFailed
+	resultClosed = -1 - iota
+	resultNotStarted
+	resultInvalid
+	resultUnknownHost
+	resultNoRoute
+	resultTimeout
+	resultDialFailed
+	resultLogoutFailed
 )
+
+// whenStarted returns a context for a call on a started node, ending at the timeout or when the node
+// closes, or a failure result. It waits for a concurrent start.
+func (n *node) whenStarted(timeout time.Duration) (context.Context, context.CancelFunc, int) {
+	n.lifecycle.Lock()
+	started := n.stop != nil
+	n.lifecycle.Unlock()
+	if n.ctx.Err() != nil {
+		return nil, nil, resultClosed
+	}
+	if !started {
+		return nil, nil, resultNotStarted
+	}
+	ctx, cancel := context.WithTimeout(n.ctx, timeout)
+	return ctx, cancel, 0
+}
+
+// failed maps a failure of a call with ctx from whenStarted to closed or timed out, if applicable.
+func (n *node) failed(ctx context.Context, result int) int {
+	if n.ctx.Err() != nil {
+		return resultClosed
+	}
+	if ctx.Err() != nil {
+		return resultTimeout
+	}
+	return result
+}
 
 // dial connects to host:port through the tailnet and returns one end of a Unix socket pair that
 // relays the connection, owned by the caller, or a dial result. It waits up to timeout for the
@@ -210,52 +239,55 @@ const (
 // and never starts an unstarted node with ambient configuration.
 func (n *node) dial(host string, port uint16, timeout time.Duration) int {
 	if host == "" || !utf8.ValidString(host) || strings.ContainsRune(host, 0) || port == 0 {
-		return dialInvalid
+		return resultInvalid
 	}
-	n.lifecycle.Lock() // Waits for a concurrent start.
-	started := n.stop != nil
-	n.lifecycle.Unlock()
-	if n.ctx.Err() != nil {
-		return dialClosed
-	}
-	if !started {
-		return dialNotStarted
-	}
-	ctx, cancel := context.WithTimeout(n.ctx, timeout)
-	defer cancel()
-	failed := func(result int) int {
-		if n.ctx.Err() != nil {
-			return dialClosed
-		}
-		if ctx.Err() != nil {
-			return dialTimeout
-		}
+	ctx, cancel, result := n.whenStarted(timeout)
+	if result != 0 {
 		return result
 	}
+	defer cancel()
 	if !n.awaitRunning(ctx) {
-		return failed(dialTimeout)
+		return n.failed(ctx, resultTimeout)
 	}
 	// Resolves MagicDNS names through the tailnet's DNS configuration.
 	dialer := n.server.Sys().Dialer.Get()
 	target, _, err := dialer.UserDialPlan(ctx, "tcp", net.JoinHostPort(host, strconv.Itoa(int(port))))
 	if err != nil {
-		return failed(dialUnknownHost)
+		return n.failed(ctx, resultUnknownHost)
 	}
 	// Netstack reaches exactly the peers and subnet routes in the network map. Upstream would dial
 	// other addresses, including Tailscale IPs of unknown nodes, through the device's network.
 	if !dialer.UseNetstackForIP(target.Addr()) {
-		return dialNoRoute
+		return resultNoRoute
 	}
 	conn, err := dialer.NetstackDialTCP(ctx, target)
 	if err != nil {
-		return failed(dialFailed)
+		return n.failed(ctx, resultDialFailed)
 	}
 	fd, err := relay(conn)
 	if err != nil {
 		_ = conn.Close()
-		return failed(dialFailed)
+		return n.failed(ctx, resultDialFailed)
 	}
 	return fd
+}
+
+// logout asks control to expire this node's key, then deletes the node's profile from its state,
+// leaving the node in NeedsLogin. It returns 0, also when the node was not logged in, or a failure.
+func (n *node) logout(timeout time.Duration) int {
+	ctx, cancel, result := n.whenStarted(timeout)
+	if result != 0 {
+		return result
+	}
+	defer cancel()
+	client, err := n.server.LocalClient()
+	if err != nil {
+		return n.failed(ctx, resultLogoutFailed)
+	}
+	if err := client.Logout(ctx); err != nil {
+		return n.failed(ctx, resultLogoutFailed)
+	}
+	return 0
 }
 
 // awaitRunning waits until the node runs, returning false when ctx ends first.

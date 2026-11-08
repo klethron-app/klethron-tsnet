@@ -62,3 +62,8 @@ Java_com_klethron_tsnet_TsnetNode_nativeDial(JNIEnv *env, jclass type, jlong han
     (*env)->GetByteArrayRegion(env, host, 0, length, (jbyte *) bytes);
     return klethron_node_dial(handle, bytes, length, port, timeoutMillis);
 }
+
+JNIEXPORT jint JNICALL
+Java_com_klethron_tsnet_TsnetNode_nativeLogout(JNIEnv *env, jclass type, jlong handle, jlong timeoutMillis) {
+    return klethron_node_logout(handle, timeoutMillis);
+}

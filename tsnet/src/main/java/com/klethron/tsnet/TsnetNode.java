@@ -111,16 +111,30 @@ public final class TsnetNode implements AutoCloseable {
             throw new IllegalArgumentException("Host must have 1–255 bytes and port must be 1–65535");
         }
         int result = nativeDial(handle, name, port, millis(timeout));
-        return switch (result) {
-            case -1 -> throw new IllegalStateException("Node is closed");
-            case -2 -> throw new IllegalStateException("Node is not started");
-            case -3 -> throw new IllegalArgumentException("Invalid host");
-            case -4 -> throw new UnknownHostException("Tailnet DNS cannot resolve the host");
-            case -5 -> throw new NoRouteToHostException("Address is not reachable through the tailnet");
-            case -6 -> throw new SocketTimeoutException("Tailnet connection timed out");
-            case -7 -> throw new ConnectException("Tailnet connection failed");
-            default -> ParcelFileDescriptor.adoptFd(result);
-        };
+        check(result);
+        return ParcelFileDescriptor.adoptFd(result);
+    }
+
+    /// Logs this node out of its tailnet. Control expires the node's key, ending its tailnet
+    /// access, and the login is deleted from the state directory. The node remains started and
+    /// soon reports [TsnetStatus.State#NEEDS_LOGIN] without a login URL; its connections stop
+    /// working. Has no effect if the node is not logged in.
+    ///
+    /// To log in again, close this node and start a new one with the same directory. To also
+    /// forget the device key that remains there, close this node and delete the directory.
+    ///
+    /// If the logout fails, the node is [TsnetStatus.State#STOPPED] but remains registered, and its
+    /// login persists until a logout succeeds: retry, possibly from a new node started with the same
+    /// directory, which resumes the login. Deleting the directory instead leaves the device in the
+    /// tailnet until an administrator removes it or its key expires.
+    ///
+    /// @throws IllegalStateException if this node is not started, failed to start, or is or becomes
+    ///     closed
+    /// @throws SocketTimeoutException if control does not confirm the logout within `timeout`
+    /// @throws IOException if the logout fails
+    @WorkerThread
+    public void logout(Duration timeout) throws IOException {
+        check(nativeLogout(handle, millis(timeout)));
     }
 
     /// Returns the exact Go module version linked into this binary.
@@ -158,6 +172,21 @@ public final class TsnetNode implements AutoCloseable {
         nativeClose(handle);
     }
 
+    /// Throws the exception for a negative native result.
+    private static void check(int result) throws IOException {
+        switch (result) {
+            case -1 -> throw new IllegalStateException("Node is closed");
+            case -2 -> throw new IllegalStateException("Node is not started");
+            case -3 -> throw new IllegalArgumentException("Invalid host");
+            case -4 -> throw new UnknownHostException("Tailnet DNS cannot resolve the host");
+            case -5 -> throw new NoRouteToHostException("Address is not reachable through the tailnet");
+            case -6 -> throw new SocketTimeoutException("Timed out");
+            case -7 -> throw new ConnectException("Tailnet connection failed");
+            case -8 -> throw new IOException("Logout failed");
+            default -> { }
+        }
+    }
+
     /// Clamps to 0–`Long.MAX_VALUE` milliseconds; [Duration#toMillis] would throw on overflow.
     private static long millis(Duration timeout) {
         if (timeout.isNegative()) return 0;
@@ -171,6 +200,8 @@ public final class TsnetNode implements AutoCloseable {
     private static native @Nullable String nativeAwaitStatus(long handle, long afterVersion, long timeoutMillis);
 
     private static native int nativeDial(long handle, byte[] host, int port, long timeoutMillis);
+
+    private static native int nativeLogout(long handle, long timeoutMillis);
 
     private static native void nativeClose(long handle);
 

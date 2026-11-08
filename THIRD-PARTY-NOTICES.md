@@ -20,9 +20,9 @@ Debug libraries also link an in-process test control server and DERP/STUN server
 five modules these add (31 in total), with notices copied verbatim from the verified module cache. They are
 packaged only in the debug AAR. The release AAR and its 26-module inventory are unchanged.
 
-`TAILSCALE-MODIFICATIONS` records two local patches that make `ts_omit_logtail` skip log configuration
-and socket-log directory initialization. `BuildGoLibrary` verifies the upstream modules and both
-original source-file hashes, then patches an isolated copy using a temporary `./tailscale` module
+`TAILSCALE-MODIFICATIONS` records three local patches. Two make `ts_omit_logtail` skip log configuration
+and socket-log directory initialization; the third keeps the node key after a failed logout.
+`BuildGoLibrary` verifies the upstream modules and all three original source-file hashes, then patches an isolated copy using a temporary `./tailscale` module
 replacement. The shared module cache is unchanged. Binary metadata records this replacement and
 the original Tailscale version; its inventory checksum identifies the **unmodified upstream module**,
 not the patched source. Other dependencies retain their binary-reported checksums.

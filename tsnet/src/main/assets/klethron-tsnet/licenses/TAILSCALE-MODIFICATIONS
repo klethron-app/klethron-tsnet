@@ -1,13 +1,14 @@
-Klethron tsnet modifies two tailscale.com source files in an isolated build copy.
+Klethron tsnet modifies three tailscale.com source files in an isolated build copy.
 Upstream revision: 503010831ecd44ab3d86864e5e65ff9f8b969d88
 Original file SHA-256:
 tsnet/tsnet.go: cfb60541a65b6e1b7c16a4a6ea0666dab41572eaa80fd3733addcf78d3f8213b
 ipn/ipnlocal/local.go: e14a75f9cf70209a27178bedb7fd013278d642319bd2e760bb86c75a26232537
+control/controlclient/direct.go: a28e97e2a6822604182cdcfdd319ea9bb10c29b17e8b4592289c1cf2278160a9
 
-The build verifies upstream modules and rejects changes to either source file.
+The build verifies upstream modules and rejects changes to any of these source files.
 The shared Go module cache remains unchanged. A temporary go.mod replaces
 tailscale.com with ./tailscale; binary build metadata records that replacement.
-The inventory's Tailscale checksum identifies the upstream module before this
+The inventory's Tailscale checksum identifies the upstream module before these
 patches, not the modified copy. BuildGoLibrary.kt applies these changes:
 
 --- a/tsnet/tsnet.go
@@ -34,3 +35,20 @@ With ts_omit_logtail, skip log policy loading, log configuration creation,
 log buffering, log directory discovery and logger initialization entirely. Without that tag, upstream
 behavior is unchanged. This does not disable node state storage or other log
 sinks: the wrapper separately sets both UserLogf and Logf to logger.Discard.
+
+--- a/control/controlclient/direct.go
++++ b/control/controlclient/direct.go
+@@ -513,3 +513,5 @@
+-	c.mu.Lock()
+-	c.persist = new(persist.Persist).View()
+-	c.mu.Unlock()
++	if err == nil {
++		c.mu.Lock()
++		c.persist = new(persist.Persist).View()
++		c.mu.Unlock()
++	}
+
+TryLogout forgets the node key only when control confirmed the logout. Upstream
+also forgets it after a failed request; the map poll continues and saves the
+empty key over the stored login, leaving the node registered at control with no
+local key with which to log out again.

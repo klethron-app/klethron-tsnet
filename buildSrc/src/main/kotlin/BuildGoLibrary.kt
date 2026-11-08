@@ -102,7 +102,7 @@ abstract class BuildGoLibrary @Inject constructor(
                 .joinToString("") { "%02x".format(it) }
             val source = original.toString(Charsets.UTF_8)
             if (checksum != expectedHash || source.split(before).size != 2) {
-                throw GradleException("Pinned $path changed; review the no-logtail patches before building")
+                throw GradleException("Pinned $path changed; review TAILSCALE-MODIFICATIONS before building")
             }
             workspace.resolve("tailscale/$path").writeText(source.replace(before, after))
         }
@@ -113,6 +113,11 @@ abstract class BuildGoLibrary @Inject constructor(
         patch("ipn/ipnlocal/local.go", "e14a75f9cf70209a27178bedb7fd013278d642319bd2e760bb86c75a26232537",
             sockstatInit, "\tif buildfeatures.HasLogTail {\n" +
                 sockstatInit.lines().dropLast(1).joinToString("") { "\t$it\n" } + "\t}\n")
+        // A failed logout must not forget the node key: the map poll continues and would save the
+        // empty key over the login, leaving the node registered but unable to log out again.
+        val forgetKey = "\tc.mu.Lock()\n\tc.persist = new(persist.Persist).View()\n\tc.mu.Unlock()\n"
+        patch("control/controlclient/direct.go", "a28e97e2a6822604182cdcfdd319ea9bb10c29b17e8b4592289c1cf2278160a9",
+            forgetKey, "\tif err == nil {\n" + forgetKey.lines().joinToString("") { "\t$it\n" } + "\t}\n")
         workspace.resolve("go.mod").appendText("\nreplace tailscale.com => ./tailscale\n")
         exec.exec {
             workingDir(workspace)
