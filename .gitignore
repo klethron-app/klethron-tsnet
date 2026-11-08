@@ -2,5 +2,6 @@
 **/build/
 .idea/
 *.iml
+*.swp
 local.properties
 .kotlin/
