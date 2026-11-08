@@ -25,6 +25,8 @@ Go 1.27.3, NDK 30.0.16248370, AGP 9.5.1 and Gradle 9.9.0 are pinned.
 - Native builds are incremental and configuration-cache compatible. Shared build caching is deliberately
   disabled until toolchains are provisioned hermetically. Only one installed Go version is accepted.
 - Release libraries use Go `-trimpath`, stripped symbols/DWARF and 16 KiB linker alignment.
+- Both variants use `ts_omit_ssh`, `ts_omit_webclient` and `ts_omit_logtail`. These disable out-of-scope
+  features and remove logtail uploads/buffering; startup logging and storage still need work below.
 - `check` checks Android lint and native AAR architecture/alignment, and compiles JNI instrumentation.
 - `:demo` is a platform-only Java Activity with an explicit offline native-load/lifecycle button.
 - Maven publishing is configured only to `build/maven/`; there is no remote artifact publication.
@@ -125,6 +127,72 @@ Complete AAR: **14,020,596 bytes**, up 6,761 bytes from the scaffold. Native lib
   checks workflows with the official actionlint 1.7.12 Docker action pinned to its image digest.
   Both run before the Android build, with read-only repository permissions. Local actionlint passes.
 
+## Feature exclusion iteration (2026-11-08)
+
+Both release and debug builds now set `ts_omit_ssh`, `ts_omit_webclient` and `ts_omit_logtail`.
+Build tags are explicit Gradle task inputs, with `klethron_test` added only for debug. No dependency
+or toolchain versions changed, and no upstream patch is carried.
+
+Audit of the pinned source:
+
+- `tsnet` does not import `feature/ssh` or `feature/webclient`. The SSH implementation also excludes
+  Android. These tags mainly remove remaining feature-guarded paths in the current scaffold; they
+  do not remove a previously bundled full SSH server or web UI. Keep them to enforce the library's
+  intended scope, even though webclient alone slightly increases ZIP size.
+- `logtail/logtail_omit.go` makes log upload/logger methods no-ops, and
+  `logtail/filch/filch_omit.go` replaces disk buffering with no-ops. The logtail tag also excludes
+  conditional network-flow logger registration. Android `go list -deps` loses the same five packages
+  on both architectures: `github.com/creachadair/msync/trigger`, `tailscale.com/feature/netlog`,
+  `tailscale.com/types/netlogtype`, `tailscale.com/util/truncate`, and `tailscale.com/wgengine/netlog`.
+  This import-graph comparison is not a completed linked-binary licence inventory.
+- **Startup remains blocked on explicit logging/storage handling.** `tsnet.startLogger` still calls
+  `logpolicy.ConfigFromFile` / `NewConfig` / `Save`, creating `tailscaled.log.conf` even with the tag.
+  `Server.logf` still defaults to `log.Printf` if `UserLogf` is nil. Set both user/backend loggers to
+  discard before Start, and resolve the remaining log-configuration creation (a narrowly scoped
+  upstream change may be needed). An in-memory state store does not suppress that file. Do not use
+  the upstream test-environment bypass as a production workaround.
+
+Release measurements with identical native sources, module pin, toolchains and linker flags:
+
+| Exclusions | arm64 raw bytes | arm64 ZIP bytes | x86_64 raw bytes | x86_64 ZIP bytes | Complete AAR bytes |
+|---|---:|---:|---:|---:|---:|
+| None (baseline) | 17,173,456 | 6,673,374 | 18,623,280 | 7,341,106 | 14,020,596 |
+| `ts_omit_ssh` | 17,167,856 | 6,672,295 | 18,617,104 | 7,338,199 | 14,016,610 |
+| `ts_omit_webclient` | 17,172,240 | 6,674,521 | 18,621,968 | 7,340,510 | 14,021,147 |
+| `ts_omit_logtail` | 17,105,616 | 6,649,065 | 18,553,808 | 7,312,462 | 13,967,643 |
+| All three (retained) | 17,098,672 | 6,646,573 | 18,546,352 | 7,309,396 | 13,962,085 |
+
+Combined savings: **58,511 bytes (0.417%)** in the complete compressed AAR; **74,784 bytes** in
+arm64 and **76,928 bytes** in x86_64 uncompressed. Compression and layout changes make individual
+savings non-additive. These are still unstarted-scaffold measurements; repeat when Start/Dial become
+reachable. Complete startup/login/DNS/direct-and-relayed-dial tests before treating these exclusions
+as verified for a production networking API or publishing a release.
+
+To reproduce an individual measurement, use the opt-in init script (normal builds do not load it):
+
+```sh
+./gradlew --no-configuration-cache -I gradle/native-feature-audit.init.gradle \
+  -PauditTags=ts_omit_logtail :tsnet:verifyNativeAar
+```
+
+Use an empty `-PauditTags=` for baseline, one tag for an individual exclusion, or a comma-separated
+list for combinations. Save `tsnet/build/reports/native/sizes.tsv` after each run. The script changes
+only release tasks, so **run `./gradlew build` afterwards** to restore the normal feature set.
+This iteration's tables, import lists and Go build metadata are retained locally under
+`tsnet/build/reports/native-feature-audit/`.
+
+Verification:
+
+- `./gradlew build` passes; repeating it reuses the configuration cache and leaves all four Go builds
+  up to date. Both release ABI libraries pass architecture and 16 KiB ELF alignment checks; the release
+  AAR excludes the instrumentation bridge. `go version -m` confirms the three exclusions in all four
+  libraries and `klethron_test` only in debug.
+- Instrumentation JUnit XML counts **five passed tests, zero failures/errors/skips per device** on
+  API 34 / x86_64 / 4,096-byte pages and API 37.2 / x86_64 / 16,384-byte pages, both SELinux Enforcing.
+  Reports are retained under `tsnet/build/reports/device-verification/feature-exclusions-api34/` and
+  `feature-exclusions-api37/`. These cover native lifecycle/version and interface/monitor regression;
+  they do not start a node or verify authentication, networking, or arm64 runtime.
+
 ## Next increments
 
 1. **Prove a real Android node.** Interface discovery and monitor initialization are addressed above.
@@ -142,13 +210,12 @@ Complete AAR: **14,020,596 bytes**, up 6,761 bytes from the scaffold. Native lib
 4. **Turn the demo into a network proof.** Add INTERNET permission only with networking. Explicit setup,
    browser authorization, one selected destination and a simple exchange. Keep all network work off the
    UI thread. No auth keys checked into tests or supplied to pull requests from forks.
-5. **Measure removal of unused features.** Audit the pinned upstream's build tags, starting with
-   `ts_omit_ssh`, `ts_omit_webclient` and `ts_omit_logtail`. Compare each candidate and the combined set
-   against the same dependency/toolchain baseline, recording both ABI libraries' uncompressed and
-   ZIP-compressed sizes and the complete compressed AAR size. Keep only exclusions compatible with
-   the intended API; verify startup, login, DNS, and direct/relayed dialing on API 34 and 16 KiB devices.
-   Repeat measurements once Start/Dial are reachable: scaffold-only savings do not establish the
-   production result. Update the licence inventory for the final linked feature set.
+5. **Revalidate feature exclusions with working networking.** Initial individual/combined measurements
+   for `ts_omit_ssh`, `ts_omit_webclient` and `ts_omit_logtail` are recorded above. Once Start/Dial are
+   reachable, repeat both ABI libraries' raw/ZIP sizes and the complete AAR comparison against the
+   same dependency/toolchain baseline. Verify startup, login, DNS and direct/relayed dialing on API 34
+   and 16 KiB devices. Scaffold-only savings and lifecycle tests do not establish the production
+   result. Update the licence inventory for the final linked feature set.
 6. **Release readiness.** Generate an exact Android-linked dependency/licence inventory, including any
    non-Go embedded resources and Go runtime notices. Package notices in the AAR. Test R8-minified
    consumers, arm64 hardware, API 34, 16 KiB ELF/APK alignment and cold-start loading. Preserve native

@@ -41,7 +41,9 @@ val nativeTasks = listOf("release", "debug").associateWith { buildType ->
             goVersion.set(libs.versions.go)
             api.set(libs.versions.minSdk.get().toInt())
             this.abi.set(abi)
-            includeTestBridge.set(buildType == "debug")
+            // No embedded SSH server, web UI, or log upload/buffering in this library.
+            buildTags.set(listOf("ts_omit_ssh", "ts_omit_webclient", "ts_omit_logtail") +
+                if (buildType == "debug") listOf("klethron_test") else emptyList())
             outputDirectory.set(layout.buildDirectory.dir("generated/jniLibs/$buildType/$abi"))
         }
     }

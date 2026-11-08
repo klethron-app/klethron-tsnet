@@ -26,6 +26,11 @@ The native size/alignment report is `tsnet/build/reports/native/sizes.tsv`.
 Android 14/API 34 is the minimum; the AAR contains arm64-v8a and x86_64 native code.
 Consumers of a published AAR will not need Go or an NDK.
 
+Both build variants disable Tailscale SSH, the embedded web client, and logtail using upstream build
+tags. This disables log uploads and disk log buffering, but does not yet make node startup safe:
+upstream still creates log configuration and defaults to a user logger. See the measured comparisons
+and remaining startup work in [PLAN.md](PLAN.md).
+
 The demo has one button that loads the library and creates/closes a node. It has no network permission,
 stores no identity and does not authenticate to Tailscale. JNI instrumentation also tests interface
 discovery and network-monitor creation, using INTERNET permission only in the test APK to open sockets.

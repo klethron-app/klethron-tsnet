@@ -3,6 +3,7 @@ import javax.inject.Inject
 import org.gradle.api.DefaultTask
 import org.gradle.api.GradleException
 import org.gradle.api.file.DirectoryProperty
+import org.gradle.api.provider.ListProperty
 import org.gradle.api.provider.Property
 import org.gradle.api.tasks.Input
 import org.gradle.api.tasks.InputDirectory
@@ -26,11 +27,11 @@ abstract class BuildGoLibrary @Inject constructor(private val exec: ExecOperatio
     @get:Input abstract val goVersion: Property<String>
     @get:Input abstract val api: Property<Int>
     @get:Input abstract val abi: Property<String>
-    @get:Input abstract val includeTestBridge: Property<Boolean>
+    @get:Input abstract val buildTags: ListProperty<String>
     @get:OutputDirectory abstract val outputDirectory: DirectoryProperty
 
     init {
-        includeTestBridge.convention(false)
+        buildTags.convention(emptyList())
     }
 
     @TaskAction
@@ -71,7 +72,7 @@ abstract class BuildGoLibrary @Inject constructor(private val exec: ExecOperatio
             environment("GOWORK", "off")
             commandLine(
                 "go", "build", "-mod=readonly", "-trimpath", "-buildvcs=false",
-                "-tags=" + if (includeTestBridge.get()) "klethron_test" else "",
+                "-tags=" + buildTags.get().joinToString(","),
                 "-buildmode=c-shared",
                 "-ldflags=-s -w -buildid= -extldflags=-Wl,-z,max-page-size=16384",
                 "-o", output.resolve("libklethron_tsnet.so").absolutePath, "."

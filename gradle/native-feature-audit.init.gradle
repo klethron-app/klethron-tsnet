@@ -1,0 +1,12 @@
+// Opt-in size experiment; normal builds never load this script.
+// ./gradlew --no-configuration-cache -I gradle/native-feature-audit.init.gradle \
+//   -PauditTags=ts_omit_logtail :tsnet:verifyNativeAar
+// Pass -PauditTags= for the baseline. Run a normal build afterwards to restore all exclusions.
+gradle.projectsEvaluated {
+    def target = gradle.rootProject.findProject(':tsnet')
+    if (target == null) return // The init script also runs for buildSrc.
+    def tags = target.providers.gradleProperty('auditTags').get()
+    target.tasks.matching { it.name == 'buildGoArm64' || it.name == 'buildGoX86_64' }.configureEach {
+        buildTags.set(tags.isEmpty() ? [] : tags.split(',').toList())
+    }
+}
