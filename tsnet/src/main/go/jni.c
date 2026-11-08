@@ -1,4 +1,5 @@
 #include <jni.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include "_cgo_export.h"
 
@@ -19,4 +20,14 @@ Java_com_klethron_tsnet_TsnetNode_nativeTailscaleVersion(JNIEnv *env, jclass typ
     jstring result = (*env)->NewStringUTF(env, version);
     free(version);
     return result;
+}
+
+JNIEXPORT void JNICALL
+Java_com_klethron_tsnet_TsnetNode_nativeSetDefaultNetwork(JNIEnv *env, jclass type, jbyteArray name, jint gateway) {
+    // Java limits names to IFNAMSIZ - 1 bytes; copy exact bytes rather than modified UTF-8.
+    char bytes[16];
+    jsize length = (*env)->GetArrayLength(env, name);
+    if (length >= (jsize) sizeof bytes) return;
+    (*env)->GetByteArrayRegion(env, name, 0, length, (jbyte *) bytes);
+    klethron_set_default_network(bytes, length, (uint32_t) gateway);
 }

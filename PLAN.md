@@ -52,6 +52,9 @@ Go 1.27.3, NDK 30.0.16248370, AGP 9.5.1 and Gradle 9.9.0 are pinned.
 - A third debug-only probe joins two in-process nodes to upstream's test control server and a loopback
   DERP/STUN server, then exchanges TCP data over a verified direct UDP path and over DERP only. This is
   a hermetic two-node tailnet, not a real tailnet, DNS/TLS bootstrap or public dial API.
+- `TsnetNode.setDefaultNetwork` lets the host app report its default interface and IPv4 gateway; every
+  started node then re-examines its network and rebinds when it changed. Verified with a real Wi-Fi to
+  cellular change on emulators against the loopback tailnet, not on hardware or a real tailnet.
 - Go TLS verification trusts Android's current system CA store (Conscrypt APEX on Android 14+, minus
   user-disabled roots) instead of stock Go's system-image directory. User-added CAs are not trusted.
 
@@ -504,13 +507,69 @@ findings, checked against our pin:
   `ts_omit_appconnectors`, `ts_omit_c2n`. Keep the portmapper for NAT traversal.
 - Possible later addition: caller-supplied `hostinfo` OS version/device model (they report `linux` by default).
 
+## Default network seam iteration (2026-11-08)
+
+- **Found:** with no host report, pinned Android netmon's default-route interface is always empty, so
+  every change delta has `DefaultInterfaceMaybeViable` false and never `RebindLikelyRequired`. Nodes
+  would not rebind UDP sockets, re-STUN for a new path, or close DERP connections bound to the old
+  network (`maybeCloseDERPsOnRebind` also uses the default interface's addresses) until timeouts.
+  The probe confirms the empty default route on both nodes before any report.
+- **Added** public static `TsnetNode.setDefaultNetwork(@Nullable String, @Nullable Inet4Address)`. It
+  calls upstream's process-global `UpdateLastKnownDefaultGateway` and
+  `UpdateLastKnownDefaultRouteInterface`, then `InjectEvent` on the monitor of every started node. A small
+  registry (`default_network.go`) records monitors only after `Up`/Start returns, so reports never read
+  `Server.Sys()` while startup assigns it; nodes unregister before Close. Updates and registration share
+  one lock, and registration injects once to catch a report that raced startup. The public API
+  cannot start nodes yet, so in release the registry is empty and the call only sets the values a
+  future node will read at startup. Callback registration, `onLost` handling and lifetime stay with the
+  caller; the README shows the `ConnectivityManager` pattern. Names longer than `IFNAMSIZ - 1` bytes are
+  rejected in Java; JNI copies exact UTF-8 bytes into a fixed buffer, and the gateway crosses as an int.
+  IPv6 gateways are not accepted: upstream uses the gateway only for IPv4 NAT port mapping.
+- Upstream logs both updates with Go's standard `log.Printf`. The library now discards the standard
+  logger once at load (`log.SetOutput(io.Discard)`), extending the existing no-log policy.
+- Refactored the loopback tailnet probe into a reusable `loopbackTailnet` (start, exchange, path
+  check, ordered close) shared by the existing direct/DERP probe and the new network-change probe.
+
+New `NetworkChangeTest` acts as the consuming app: it starts the loopback two-node tailnet, registers a
+default-network callback that forwards to the public API, and requires both nodes to deliver a change
+delta with the Wi-Fi interface and `RebindLikelyRequired`, at least two more magicsock rebinds, a
+256 KiB exchange and a re-established direct path. It then disables Wi-Fi through the shell, waits for
+the cellular interface (`eth0` on these emulators) and requires the same again. It re-enables Wi-Fi and
+waits until Wi-Fi is default again; without that wait, every second run started on cellular.
+
+Verification:
+
+- `./gradlew build :tsnet:publishReleasePublicationToLocalBuildRepository` passes; repeating `build`
+  reuses the configuration cache with all four Go builds up to date. The release libraries export the
+  new JNI entry point and no probe bridge; alignment and notice checks pass. No dependency changed.
+- Instrumentation JUnit XML records **twelve passed tests, zero failures/errors/skips per device**: eleven
+  library tests (one new) plus the R8-minified demo test, on dedicated emulators at API 34 / x86_64 /
+  4,096-byte pages and API 37.2 / x86_64 / 16,384-byte pages, both SELinux Enforcing. Reports are under
+  each module's `build/reports/device-verification/netchange-api34/` and `netchange-api37/`. The new test
+  then passed five further runs per device (`netchange-repeat-*`, 10 passes, about 10–12 s each).
+- Negative controls on API 34 failed as expected with `no rebind`: making the Java method a no-op
+  (`netchange-negative-api34/`), and keeping the upstream updates but skipping `InjectEvent`
+  (`netchange-negative-noinject-api34/`), which shows the ten-minute Android poll is not a substitute.
+
+Release sizes (no dependency or toolchain changes):
+
+| Entry | Before raw | After raw | Before ZIP | After ZIP |
+|---|---:|---:|---:|---:|
+| arm64-v8a library | 17,053,840 | 17,058,864 | 6,630,972 | 6,631,706 |
+| x86_64 library | 18,496,688 | 18,501,808 | 7,293,055 | 7,294,651 |
+
+Complete release AAR: **14,004,430 bytes**, up **2,880 bytes (0.02%)**. Debug AAR: **16,376,122 bytes**.
+
+This proves the seam drives upstream's rebind path on a real Android default-network change. Both
+nodes share the emulator's interfaces and talk over loopback, so it does not prove path recovery across
+real networks, NAT traversal, DERP reconnection to a remote server, or behavior on hardware/arm64.
+
 ## Next increments
 
 1. **Prove a real Android node.** Interface discovery, monitor initialization, file-free startup,
-   loopback two-node direct/DERP dialing and platform TLS roots are proven above. Remaining: DNS
-   bootstrap and verifying a real certificate chain, a host notification seam for network changes
-   (default interface name, gateway, `InjectEvent`; see the tailsocks notes, with a test that changes
-   the default network), and cross-device or NAT-traversing paths. Keep tests credential-free until an
+   loopback two-node direct/DERP dialing, platform TLS roots and the default-network seam are proven
+   above. Remaining: DNS bootstrap and verifying a real certificate chain, and cross-device or
+   NAT-traversing paths, including recovery after a real network change. Keep tests credential-free until an
    explicit live-tailnet proof; the loopback harness can host the network-change test.
 2. **Add only the lifecycle/configuration needed by that proof.** Explicit no-backup state directory and
    hostname; cancellable start/login/status; deliberate logout. No credential-bearing default log sinks

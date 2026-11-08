@@ -4,15 +4,23 @@
 #include <stdlib.h>
 #include "_cgo_export.h"
 
+enum probe { STARTUP, TAILNET, TAILNET_RELAY_ONLY, NETCHANGE_START, NETCHANGE_AWAIT };
+
 // Java supplies standard UTF-8, including supplementary characters in paths.
 // Probes return fixed ASCII diagnostics, so JNI modified UTF-8 is sufficient for results.
-static jstring probe_directory(JNIEnv *env, jbyteArray directory, int relay_only, int tailnet) {
-    jsize length = (*env)->GetArrayLength(env, directory);
-    jbyte *bytes = (*env)->GetByteArrayElements(env, directory, NULL);
+static jstring probe_bytes(JNIEnv *env, jbyteArray argument, enum probe probe) {
+    jsize length = (*env)->GetArrayLength(env, argument);
+    jbyte *bytes = (*env)->GetByteArrayElements(env, argument, NULL);
     if (bytes == NULL) return NULL; // Pending allocation exception.
-    char *report = tailnet ? klethron_tailnet_probe((char *) bytes, length, relay_only)
-                           : klethron_startup_probe((char *) bytes, length);
-    (*env)->ReleaseByteArrayElements(env, directory, bytes, JNI_ABORT);
+    char *chars = (char *) bytes, *report;
+    switch (probe) {
+        case STARTUP: report = klethron_startup_probe(chars, length); break;
+        case TAILNET: report = klethron_tailnet_probe(chars, length, 0); break;
+        case TAILNET_RELAY_ONLY: report = klethron_tailnet_probe(chars, length, 1); break;
+        case NETCHANGE_START: report = klethron_netchange_probe_start(chars, length); break;
+        case NETCHANGE_AWAIT: report = klethron_netchange_probe_await(chars, length); break;
+    }
+    (*env)->ReleaseByteArrayElements(env, argument, bytes, JNI_ABORT);
     jstring result = (*env)->NewStringUTF(env, report);
     free(report);
     return result;
@@ -20,10 +28,25 @@ static jstring probe_directory(JNIEnv *env, jbyteArray directory, int relay_only
 
 JNIEXPORT jstring JNICALL
 Java_com_klethron_tsnet_StartupTest_nativeProbe(JNIEnv *env, jclass type, jbyteArray directory) {
-    return probe_directory(env, directory, 0, 0);
+    return probe_bytes(env, directory, STARTUP);
 }
 
 JNIEXPORT jstring JNICALL
 Java_com_klethron_tsnet_TailnetTest_nativeProbe(JNIEnv *env, jclass type, jbyteArray directory, jboolean relayOnly) {
-    return probe_directory(env, directory, relayOnly == JNI_TRUE, 1);
+    return probe_bytes(env, directory, relayOnly == JNI_TRUE ? TAILNET_RELAY_ONLY : TAILNET);
+}
+
+JNIEXPORT jstring JNICALL
+Java_com_klethron_tsnet_NetworkChangeTest_nativeProbeStart(JNIEnv *env, jclass type, jbyteArray directory) {
+    return probe_bytes(env, directory, NETCHANGE_START);
+}
+
+JNIEXPORT jstring JNICALL
+Java_com_klethron_tsnet_NetworkChangeTest_nativeProbeAwait(JNIEnv *env, jclass type, jbyteArray interfaceName) {
+    return probe_bytes(env, interfaceName, NETCHANGE_AWAIT);
+}
+
+JNIEXPORT void JNICALL
+Java_com_klethron_tsnet_NetworkChangeTest_nativeProbeStop(JNIEnv *env, jclass type) {
+    klethron_netchange_probe_stop();
 }

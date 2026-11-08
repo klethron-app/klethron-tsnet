@@ -7,7 +7,7 @@ Java package: `com.klethron.tsnet`. Maven coordinates: `com.klethron:tsnet:0.1.0
 Android interface discovery and network-monitor initialization are now verified under app restrictions.
 Debug-only tests also start a node against a rejecting loopback control endpoint, and connect two
 in-process nodes through a loopback test control and DERP server to exchange TCP data over direct
-and relay-only paths. These nodes write no files. Public startup, login, peer discovery and dialing
+and relay-only paths, and to rebind when the device's default network changes. These nodes write no files. Public startup, login, peer discovery and dialing
 are not implemented, and no real tailnet has been used. No package registry release exists yet.
 See [PLAN.md](PLAN.md) for the next implementation steps and verification status.
 
@@ -54,6 +54,13 @@ on Android 14+, without roots the user disabled in Settings. Stock Go would read
 copy, missing root changes delivered by Google Play system updates. User-added CAs and the consuming
 app's network security configuration do not apply to native TLS. For its own control and DERP
 servers, Tailscale also accepts its built-in Let's Encrypt roots.
+
+Android does not let native code discover the default network, so the app reports it with
+`TsnetNode.setDefaultNetwork(interfaceName, ipv4Gateway)`, for example from a
+`ConnectivityManager.registerDefaultNetworkCallback` callback's `onLinkPropertiesChanged` and `onLost`.
+Without it, started nodes cannot recognize network changes, rebind sockets or reconnect DERP. The values
+are process-wide; registering and unregistering the callback is the caller's responsibility.
+The library discards Go's standard logger, which upstream uses directly for some messages.
 
 The engine runs inside the Android app process using Go goroutines and native threads. The library
 does not launch executables or subprocesses. Future blocking networking APIs must be called off the

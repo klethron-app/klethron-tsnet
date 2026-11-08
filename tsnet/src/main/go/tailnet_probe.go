@@ -57,46 +57,97 @@ func probeTailnet(dir string, relayOnly bool) string {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
+	tailnet, problem := startLoopbackTailnet(ctx, dir)
+	defer tailnet.close()
+	if problem != "" {
+		return problem
+	}
+	if problem := tailnet.exchange(ctx); problem != "" {
+		return problem
+	}
+	if problem := tailnet.awaitPath(ctx, relayOnly); problem != "" {
+		return problem
+	}
+	// Exchange again over the verified path.
+	if problem := tailnet.exchange(ctx); problem != "" {
+		return problem
+	}
+	return "ok"
+}
 
+// loopbackTailnet is a dialer and an echoing listener node, joined by in-process control and DERP servers.
+type loopbackTailnet struct {
+	dialer, listener *tsnet.Server
+	listenerIP       netip.Addr
+	closers          []func()
+}
+
+// startLoopbackTailnet returns a fixed diagnostic on failure. Close the result in either case.
+func startLoopbackTailnet(ctx context.Context, dir string) (*loopbackTailnet, string) {
+	t := new(loopbackTailnet)
 	derpMap, stopDERP, err := startLoopbackDERP()
 	if err != nil {
-		return "loopback derp failed"
+		return t, "loopback derp failed"
 	}
-	defer stopDERP()
+	t.closers = append(t.closers, stopDERP)
 	control := &testcontrol.Server{DERPMap: derpMap, Logf: logger.Discard}
 	control.HTTPTestServer = httptest.NewUnstartedServer(control)
 	control.HTTPTestServer.Config.ErrorLog = log.New(io.Discard, "", 0)
 	control.HTTPTestServer.Start()
-	defer control.HTTPTestServer.Close()
+	t.closers = append(t.closers, control.HTTPTestServer.Close)
 
-	// Deferred closes run before the servers above stop.
-	listener, listenerIP, problem := startTailnetNode(ctx, dir, control.HTTPTestServer.URL, "klethron-listener")
-	defer listener.Close()
-	if problem != "" {
-		return problem
+	var problem string
+	if t.listener, t.listenerIP, problem = t.startNode(ctx, dir, control.HTTPTestServer.URL, "klethron-listener"); problem != "" {
+		return t, problem
 	}
-	dialer, _, problem := startTailnetNode(ctx, dir, control.HTTPTestServer.URL, "klethron-dialer")
-	defer dialer.Close()
-	if problem != "" {
-		return problem
+	if t.dialer, _, problem = t.startNode(ctx, dir, control.HTTPTestServer.URL, "klethron-dialer"); problem != "" {
+		return t, problem
 	}
-	ln, err := listener.Listen("tcp", ":7070")
+	ln, err := t.listener.Listen("tcp", ":7070")
 	if err != nil {
-		return "tailnet listen failed"
+		return t, "tailnet listen failed"
 	}
-	defer ln.Close()
+	t.closers = append(t.closers, func() { _ = ln.Close() })
 	go serveEcho(ln)
-	address := netip.AddrPortFrom(listenerIP, 7070).String()
+	return t, ""
+}
 
-	if problem := exchange(ctx, dialer, address); problem != "" {
-		return problem
+// close stops nodes before the servers they use.
+func (t *loopbackTailnet) close() {
+	for i := len(t.closers) - 1; i >= 0; i-- {
+		t.closers[i]()
 	}
-	client, err := dialer.LocalClient()
+}
+
+func (t *loopbackTailnet) startNode(ctx context.Context, dir, controlURL, hostname string) (*tsnet.Server, netip.Addr, string) {
+	server := newServer()
+	server.Dir = dir
+	server.Hostname = hostname
+	server.ControlURL = controlURL
+	server.Store = new(mem.Store)
+	server.Ephemeral = true
+	t.closers = append(t.closers, func() { _ = server.Close() })
+	status, err := server.Up(ctx)
+	if err != nil {
+		return server, netip.Addr{}, "node up failed"
+	}
+	t.closers = append(t.closers, watchDefaultNetwork(server))
+	for _, ip := range status.TailscaleIPs {
+		if ip.Is4() {
+			return server, ip, ""
+		}
+	}
+	return server, netip.Addr{}, "no tailnet IPv4 address"
+}
+
+// awaitPath waits until a disco ping uses a direct UDP path, or only DERP if relayOnly.
+func (t *loopbackTailnet) awaitPath(ctx context.Context, relayOnly bool) string {
+	client, err := t.dialer.LocalClient()
 	if err != nil {
 		return "local client failed"
 	}
 	for {
-		result, err := client.Ping(ctx, listenerIP, tailcfg.PingDisco)
+		result, err := client.Ping(ctx, t.listenerIP, tailcfg.PingDisco)
 		if err != nil || result.Err != "" {
 			return "disco ping failed"
 		}
@@ -104,7 +155,7 @@ func probeTailnet(dir string, relayOnly bool) string {
 			return "unexpected direct path"
 		}
 		if relayOnly || (result.Endpoint != "" && result.DERPRegionID == 0) {
-			break
+			return ""
 		}
 		select {
 		case <-ctx.Done():
@@ -112,30 +163,6 @@ func probeTailnet(dir string, relayOnly bool) string {
 		case <-time.After(100 * time.Millisecond):
 		}
 	}
-	// Exchange again over the verified path.
-	if problem := exchange(ctx, dialer, address); problem != "" {
-		return problem
-	}
-	return "ok"
-}
-
-func startTailnetNode(ctx context.Context, dir, controlURL, hostname string) (*tsnet.Server, netip.Addr, string) {
-	server := newServer()
-	server.Dir = dir
-	server.Hostname = hostname
-	server.ControlURL = controlURL
-	server.Store = new(mem.Store)
-	server.Ephemeral = true
-	status, err := server.Up(ctx)
-	if err != nil {
-		return server, netip.Addr{}, "node up failed"
-	}
-	for _, ip := range status.TailscaleIPs {
-		if ip.Is4() {
-			return server, ip, ""
-		}
-	}
-	return server, netip.Addr{}, "no tailnet IPv4 address"
 }
 
 func serveEcho(ln net.Listener) {
@@ -152,8 +179,8 @@ func serveEcho(ln net.Listener) {
 }
 
 // exchange sends enough data to need many segments and window updates, then requires an exact echo.
-func exchange(ctx context.Context, node *tsnet.Server, address string) string {
-	conn, err := node.Dial(ctx, "tcp", address)
+func (t *loopbackTailnet) exchange(ctx context.Context) string {
+	conn, err := t.dialer.Dial(ctx, "tcp", netip.AddrPortFrom(t.listenerIP, 7070).String())
 	if err != nil {
 		return "tailnet dial failed"
 	}

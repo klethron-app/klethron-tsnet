@@ -6,12 +6,20 @@ package main
 import "C"
 
 import (
+	"io"
+	"log"
 	"runtime/cgo"
 	"runtime/debug"
 
 	"tailscale.com/tsnet"
 	"tailscale.com/types/logger"
 )
+
+func init() {
+	// Some upstream paths use Go's standard logger directly, for example when the host reports
+	// a network change. This library never logs; discard them rather than writing to stderr.
+	log.SetOutput(io.Discard)
+}
 
 func newServer() *tsnet.Server {
 	usePlatformRoots()
