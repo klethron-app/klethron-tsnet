@@ -107,6 +107,7 @@ Instrumentation runs, all SELinux Enforcing, zero failures/errors/skips:
 | 2026-11-09 | Emulators API 34 / x86_64 / 4 KiB and API 37.2 / x86_64 / 16 KiB; Pixel 11 Pro XL API 37 / arm64-v8a / 4 KiB (USB) | 27 library | `revocation-api34-4k`, `revocation-api37.2-16k`, `hardware-pixel11-api37-4k-usb-revocation` |
 | 2026-11-09 | Emulator API 37.2 / x86_64 / 16 KiB | 2 R8-minified demo | `demo/…/thread-annotations-api37.2-16k` |
 | 2026-11-09, pin `62d055f4c38b` | Emulator API 37.2 / x86_64 / 16 KiB; Pixel 11 Pro XL API 37 / arm64-v8a / 4 KiB (USB) | 23 library each, 2 demo on the emulator | `upstream-62d055-api37.2-16k`, `upstream-62d055-pixel11-api37-4k-usb`, `demo/…/upstream-62d055-api37.2-16k` |
+| 2026-11-09 | Emulators API 34 / x86_64 / 4 KiB and API 37.2 / x86_64 / 16 KiB | 2 demo each, including rotation with a pending login; it fails without `configChanges` | `demo/…/recreation-emulator-5556`, `recreation-emulator-5558`, `recreation-negative-noconfigchanges-emulator-5558` |
 
 `NetworkChangeTest` switches the physical default network, so on hardware run it over USB, not
 wireless ADB. `ControlPlaneTest` and the demo's live-start test need internet.
@@ -133,10 +134,17 @@ peer, and path evidence from the peer's own status (`demo/build/reports/device-v
   `NEEDS_LOGIN (KEY_EXPIRED)` within 5 s and `NEEDS_LOGIN (NODE_REMOVED)` at the next sample, without a
   login URL or error. Access ended as for logout; re-login kept the node ID after expiry and gave a new
   ID and IPv4 after removal. Streams stayed open 15 min and 1 h 50 min on steady Wi-Fi.
+- `live-recreation-api34-4k` (API 34 x86_64 emulator, 4 KiB, Chrome with Google sign-in): Android's
+  cached-app freezer froze the demo 70–170 s after it left the foreground. A login approved meanwhile
+  completed within 2 s of returning. Before `configChanges`, the deferred rotation relaunched the
+  screen at that moment and the approved login was lost. With it, a kept-open stream survived five
+  rotations, dark mode and font scale on one peer connection. After process death, Recents restored
+  the screen and Start resumed the login without the browser.
 
-**Not verified:** a DERP-to-direct upgrade, NATs that prevent direct paths, subnet routes, IPv6 peers,
-throughput, outages longer than seconds, tailnet-period key expiry, revocation while not running,
-arm64 with 16 KiB pages, a non-blocking consumer, or Play split delivery.
+**Not verified:** the live demo on 16 KiB (emulator Chrome dropped typed sign-in characters), a
+DERP-to-direct upgrade, NATs that prevent direct paths, subnet routes, IPv6 peers, throughput, outages
+longer than seconds, tailnet-period key expiry, revocation while not running, arm64 with 16 KiB pages,
+a non-blocking consumer, or Play split delivery.
 
 Seen once, unexplained: an API 37.2 logout test saw no status change after `STOPPED` for 30 s and the
 next close took 10 s. Watch for recurrence.
@@ -149,7 +157,8 @@ next close took 10 s. Watch for recurrence.
   kept-open stream; dial and exchange are each bounded at 10 s. Nothing it handles is logged.
 - Work runs on one serial worker, checked by lint's `ThreadConstraint` (verified 2026-11-09 by
   injecting wrong-thread calls; lint infers no thread for listener or `Handler.post` lambdas).
-  Destroying the screen queues close; Start resumes the saved identity. No service.
+  Configuration changes are handled in place; destroying the screen queues close, and Start resumes
+  the saved identity. No service, so the node is frozen with the app in the background.
 - The procedure and evidence rules are in [README.md](README.md#live-tailnet-test).
 
 ### Current sizes (release, `tsnet/build/reports/native/sizes.tsv`)
@@ -170,7 +179,7 @@ Complete release AAR: 13,766,362 bytes. Debug AAR: 14,869,962 bytes. Notices add
 3. **Validate `dial` with Klethron's** non-blocking session loop (`Os.poll`/`MessageQueue`), including
    backpressure with a slow reader and interactive latency. Add peer listing with stable node IDs only
    with that caller. Keep Go panic and allocation failure handling explicit.
-4. **Verify the live demo on API 34 and 16 KiB devices**, including browser return and activity recreation.
+4. **Verify the live demo on a 16 KiB device**, including browser return and activity recreation.
 5. **Revalidate feature exclusions** on a real tailnet. Reconsider `useexitnode`/`useproxy` only for a
    caller; omit `serve` once upstream fixes the build. Update the licence inventory for the final set.
 6. **Release readiness.** Complete the licence review (per-file attributions, generated data, embedded
@@ -178,7 +187,8 @@ Complete release AAR: 13,766,362 bytes. Debug AAR: 14,869,962 bytes. Notices add
 7. **Publish immutable versions** to Maven Central: verify the `com.klethron` namespace, signing, protected
    credentials, POM/source/Javadoc metadata, publish from tags. Record the upstream commit per release.
 8. **Integrate into Klethron** separately: update its TAILSCALE-PLAN.md, add the artifact only to
-   `:klethron_tailscale`, test Play split loading and the SSH transport seam.
+   `:klethron_tailscale`, test Play split loading and the SSH transport seam. Without a foreground
+   service, Android freezes a backgrounded process and its node; decide that lifetime there.
 
 ## Updating upstream
 

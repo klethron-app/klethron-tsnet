@@ -86,7 +86,7 @@ exist only in debug builds; `verifyNativeAar` rejects them in release.
 - `ControlPlaneTest` (needs internet) registers with Tailscale's real control plane until it offers a
   login URL, which never leaves native code.
 - The R8-minified release demo's tests load the library and start its live screen until browser
-  authorization is offered, without opening it.
+  authorization is offered, without opening it, then require a rotation to keep the screen and node.
 
 ## Live tailnet test
 
@@ -94,8 +94,9 @@ The demo's opt-in **Live tailnet test** screen exercises the API on a real tailn
 you own; never use an auth key.
 
 1. `./gradlew :demo:installRelease`, then open **Klethron tsnet demo → Live tailnet test → Start / resume node**.
-2. Tap **Authorize in browser**, approve the node, return and wait for **RUNNING / Login saved**. Do not
-   close while authorization is pending. Never copy the URL or node state into reports.
+2. Tap **Authorize in browser**, approve the node, return and wait for **RUNNING / Login saved**. Android
+   freezes the demo in the background, so the login completes only after you return. Do not close while
+   authorization is pending. Never copy the URL or node state into reports.
 3. On another peer, allow TCP 7070 from the node and run this echo server with that peer's Tailscale IPv4
    address:
 

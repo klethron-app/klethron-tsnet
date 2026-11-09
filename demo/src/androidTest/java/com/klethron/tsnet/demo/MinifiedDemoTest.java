@@ -6,6 +6,8 @@ import static org.junit.Assert.assertTrue;
 import android.app.Activity;
 import android.app.Instrumentation;
 import android.content.Intent;
+import android.content.pm.ActivityInfo;
+import android.content.res.Configuration;
 import android.os.SystemClock;
 import android.widget.Button;
 import android.widget.TextView;
@@ -15,7 +17,7 @@ import org.junit.Test;
 
 public final class MinifiedDemoTest {
     @Test
-    public void startsAndRestartsLiveNodeThroughMinifiedConsumer() {
+    public void startsRotatesAndRestartsLiveNodeThroughMinifiedConsumer() {
         Instrumentation instrumentation = InstrumentationRegistry.getInstrumentation();
         var context = instrumentation.getTargetContext();
         Intent intent = new Intent().setClassName(context, "com.klethron.tsnet.demo.LiveActivity")
@@ -28,14 +30,27 @@ public final class MinifiedDemoTest {
                 int authorize = context.getResources().getIdentifier("authorize", "id", context.getPackageName());
                 instrumentation.runOnMainSync(() -> activity.findViewById(start).performClick());
                 boolean[] ready = {false};
+                Runnable check = () -> {
+                    String text = ((TextView) activity.findViewById(status)).getText().toString();
+                    // Never open or inspect the authorization URL, or change an existing login.
+                    ready[0] = activity.findViewById(authorize).isEnabled()
+                            || text.startsWith("RUNNING") || text.startsWith("NEEDS_MACHINE_AUTH");
+                };
                 for (long deadline = SystemClock.uptimeMillis() + 45000; !ready[0]; SystemClock.sleep(50)) {
                     assertTrue("No control-plane status from live demo", SystemClock.uptimeMillis() < deadline);
-                    instrumentation.runOnMainSync(() -> {
-                        String text = ((TextView) activity.findViewById(status)).getText().toString();
-                        // Never open or inspect the authorization URL, or change an existing login.
-                        ready[0] = activity.findViewById(authorize).isEnabled()
-                                || text.startsWith("RUNNING") || text.startsWith("NEEDS_MACHINE_AUTH");
-                    });
+                    instrumentation.runOnMainSync(check);
+                }
+                if (i == 0) {
+                    // A configuration change must keep the screen, and with it the node and a pending login.
+                    instrumentation.runOnMainSync(() ->
+                            activity.setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE));
+                    for (long deadline = SystemClock.uptimeMillis() + 10000; context.getResources().getConfiguration()
+                            .orientation != Configuration.ORIENTATION_LANDSCAPE; SystemClock.sleep(50)) {
+                        assertTrue("Live demo did not rotate", SystemClock.uptimeMillis() < deadline);
+                    }
+                    instrumentation.waitForIdleSync();
+                    instrumentation.runOnMainSync(check);
+                    assertTrue("Rotation recreated the live demo", ready[0] && !activity.isDestroyed());
                 }
             } finally {
                 instrumentation.runOnMainSync(activity::finish);
