@@ -59,9 +59,14 @@ or workaround once upstream fixes it. Patches are hash-checked in `BuildGoLibrar
   keeps its creation-time URL anyway. Workaround: `login()` uses LocalAPI `Start` with tsnet's prefs.
   **To report upstream.**
 - **`LoginFinished` precedes saving the new node key.** `controlclient.Auto` reports `Persist` only with a
-  network map, so closing promptly after `LoginFinished` loses the new key (2 of 2 runs). Workaround: clear
-  the login URL only once a `SelfChange` brings a different node key. Affects every tsnet embedder.
-  **To report upstream.**
+  network map. Closing after `LoginFinished` but before that map is processed can lose the completed
+  login, even with a clean `Server.Close()`. Confirmed twice with the first map response deliberately
+  delayed; this establishes the failure mode, not its frequency in normal use. Embedders that close at
+  this boundary can be affected; those that stay running long enough to save the key avoid this loss.
+  Workaround: clear the login URL only once a `SelfChange` brings a different node key.
+  Tracked by [#19149](https://github.com/tailscale/tailscale/issues/19149); proposed fix
+  [PR #19150](https://github.com/tailscale/tailscale/pull/19150) is open and draft. Our tsnet reproduction
+  is additional evidence for that issue.
 - **`NeedsLogin` is reported shortly before the network map is cleared** after logout, so a status can
   briefly show old addresses. Documented as eventual.
 - **`Start` is not context-aware, and concurrent `Start`/`Close` is forbidden.** Workaround: per-node mutex
