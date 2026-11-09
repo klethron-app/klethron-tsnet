@@ -13,6 +13,13 @@ or workaround once upstream fixes it. Patches are hash-checked in `BuildGoLibrar
   with, a retry is a silent no-op and a restart asks for a new login. Reproduced in about one of three
   runs. Patch: clear the key only after a successful logout (`control/controlclient/direct.go`).
   **To report upstream.**
+- **A netmap in flight can undo a logout.** `setControlClientStatusLocked` ignores an old control
+  client's status only on entry, then unlocks for `tkaSyncIfNeeded` while handling a netmap. A logout
+  that resets the profile in that window has the old netmap installed on the logged-out profile:
+  `NeedsLogin -> Stopped (nm=true)` with the old addresses, and a re-login then reports `Starting` with
+  them. A netmap is often in flight as a node reaches Running. Seen in 4 of 16 Pixel runs; on a host,
+  in 5 of 10 runs with that window widened by 300 ms. Patch: re-check the client after relocking
+  (`ipn/ipnlocal/local.go`). **To report upstream.**
 
 ## Worked around
 
@@ -65,8 +72,6 @@ or workaround once upstream fixes it. Patches are hash-checked in `BuildGoLibrar
   `NoState`, which starts a new profile, as after logout).
 - **A watch that falls behind ends with an `ErrMessage`** that is not a backend error. Workaround: drop
   that exact text (unexported `watchIPNBusFellBehindMessage`) before reporting `error()`.
-- **`NeedsLogin` is reported shortly before the network map is cleared** after logout, so a status can
-  briefly show old addresses. Documented as eventual.
 - **`Start` is not context-aware, and concurrent `Start`/`Close` is forbidden.** Workaround: per-node mutex
   in Go; `close` waits at most for local initialization.
 - **Netmap cache persists peer data.** With control's `CacheNetworkMaps` capability, upstream writes peer

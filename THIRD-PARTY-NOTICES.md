@@ -4,7 +4,7 @@ Notices ship in the AAR under `assets/klethron-tsnet/licenses/`, from
 `tsnet/src/main/assets/klethron-tsnet/licenses/` (both variants) and `tsnet/src/debug/…` (debug only):
 
 - Tailscale (BSD-3-Clause), pinned to `62d055f4c38b610d63a8cee7fa4a7e65b01564eb`: licence, patent notice
-  and `TAILSCALE-MODIFICATIONS`, which documents the one local patch.
+  and `TAILSCALE-MODIFICATIONS`, which documents the two local patches.
 - Go's runtime licence and patent notice, also covering Tailscale's Go-derived `tempfork` sources.
 - JSpecify 1.0.1 (Apache-2.0): a transitive Maven dependency, not bundled; its
   [licence](https://github.com/jspecify/jspecify/blob/v1.0.1/LICENSE) is included as `JSPECIFY-LICENSE`.
@@ -102,7 +102,7 @@ For an intentional native dependency change:
 2. Run `go mod verify` in `tsnet/src/main/go`, locate each source with `go mod download -json module@version`,
    review its notices and nested directories, and copy notice bytes unedited. Update the inventory.
 3. Repeat the [per-file review](#per-file-review) and update `FILE-NOTICES`.
-4. Review the patch in `BuildGoLibrary.kt` against the new pin; update its source hash and
+4. Review the patches in `BuildGoLibrary.kt` against the new pin; update their source hashes and
    `TAILSCALE-MODIFICATIONS` together. Never just accept a new hash.
 5. Recheck Go notices when updating Go, the CRT notices when updating the NDK, and JSpecify's when
    updating JSpecify.

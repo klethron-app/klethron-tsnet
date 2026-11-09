@@ -29,7 +29,8 @@ Upstream bugs and workarounds that shape this plan are in [UPSTREAM.md](UPSTREAM
   configuration-cache compatible; shared build caching stays disabled until toolchains are hermetic.
 - Release libraries: `-trimpath`, stripped, 16 KiB aligned. `verifyNativeAar` checks architecture,
   alignment and that no debug probe exports or JNI bindings ship in release.
-- One upstream patch is applied to an isolated, hash-checked build copy (UPSTREAM.md). Two earlier
+- Two upstream patches are applied to an isolated, hash-checked build copy (UPSTREAM.md): a failed
+  logout keeps the node key, and a netmap still being handled cannot undo a logout. Two earlier
   logtail patches and the `ts_omit_acme` build fix were merged upstream (2026-11-08).
 - Maven publishing goes only to `build/maven/`.
 
@@ -134,6 +135,7 @@ Instrumentation runs, all SELinux Enforcing, zero failures/errors/skips:
 | 2026-11-09 | Emulators API 34 / x86_64 / 4 KiB and API 37.2 / x86_64 / 16 KiB | 2 demo each, including rotation with a pending login; it fails without `configChanges` | `demo/…/recreation-emulator-5556`, `recreation-emulator-5558`, `recreation-negative-noconfigchanges-emulator-5558` |
 | 2026-11-09 | Emulators API 34 / x86_64 / 4 KiB and API 37.2 / x86_64 / 16 KiB; Pixel 11 Pro XL API 37 / arm64-v8a / 4 KiB (USB) | 26 library each; both backpressure tests fail with an unbounded relay | `nonblocking-emulator-5556`, `nonblocking-emulator-5558`, `nonblocking-pixel11-api37-4k-usb`, `nonblocking-negative-unbounded-emulator-5558` |
 | 2026-11-09 | Emulators API 34 / x86_64 / 4 KiB and API 37.2 / x86_64 / 16 KiB; Pixel 11 Pro XL API 37 / arm64-v8a / 4 KiB (USB) | 29 library each, including 3 crash tests; both panic tests fail with `SetTraceback("single")` | `crash-api34-4k`, `crash-api37.2-16k`, `crash-pixel11-api37-4k-usb`, `crash-negative-traceback-pixel11-api37-4k-usb` |
+| 2026-11-09, logout patch | Emulator API 37.2 / x86_64 / 16 KiB; Pixel 11 Pro XL API 37 / arm64-v8a / 4 KiB (USB) | 29 library each; on the Pixel, 32 more runs of `logoutRequiresANewLogin` (`am instrument`), all OK, against 4 failures in 16 before | `logout-race-fixed-api37.2-16k`, `logout-race-fixed-pixel11-api37-4k-usb` (with `repeat/`) |
 
 Non-blocking use of a dialed descriptor, against the loopback peer: an empty read fails with `EAGAIN`,
 and `Os.poll` and `MessageQueue` descriptor events report readiness. Unread data stalled the writer
@@ -179,12 +181,13 @@ DERP-to-direct upgrade, NATs that prevent direct paths, subnet routes, IPv6 peer
 longer than seconds, tailnet-period key expiry, revocation while not running, arm64 with 16 KiB pages,
 backpressure or interactive latency on a real tailnet, or Play split delivery.
 
-**Logout race, unexplained:** 4 of 16 Pixel runs of `logoutRequiresANewLogin` (2026-11-09) saw
-`STOPPED` with the old addresses after `logout` returned: twice within 500 ms after `NEEDS_LOGIN`
-with no addresses, twice instead of it, until the wait timed out
-(`crash-pixel11-api37-4k-usb-logout-flake`, `logout-race-pixel11-api37-4k-usb`). An earlier API 37.2
-run, stuck after `STOPPED` for 30 s with a 10 s close, looks the same. Whether the node can still
-reach peers then is unknown.
+**Logout race, fixed 2026-11-09:** 4 of 16 Pixel runs of `logoutRequiresANewLogin` saw `STOPPED` with
+the old addresses after `logout` returned (`crash-pixel11-api37-4k-usb-logout-flake`,
+`logout-race-pixel11-api37-4k-usb`). The cause was upstream: a netmap being handled while the backend was
+unlocked for tailnet lock was installed on the logged-out profile (UPSTREAM.md). On a host, with that
+window widened by 300 ms, 5 of 10 runs failed the same way without the patch and none of 20 with it. In
+that state `dial` waits for `RUNNING`, and a re-login reported `STARTING` with the old addresses. The
+test now asserts that `NEEDS_LOGIN` after a logout has no addresses.
 
 ### Live-test harness
 
@@ -202,24 +205,20 @@ reach peers then is unknown.
 
 | Entry | Raw bytes | ZIP bytes |
 |---|---:|---:|
-| arm64-v8a library | 16,729,616 | 6,518,976 |
-| x86_64 library | 18,151,216 | 7,165,526 |
+| arm64-v8a library | 16,729,744 | 6,519,181 |
+| x86_64 library | 18,151,376 | 7,165,557 |
 
-Complete release AAR: 13,770,941 bytes. Debug AAR: 14,878,863 bytes. Notices add about 67 KiB to the
+Complete release AAR: 13,771,514 bytes. Debug AAR: 14,878,673 bytes. Notices add about 67 KiB to the
 release demo APK (59,526 compressed bytes plus ZIP headers).
 
 ## Future
 
 In order: Klethron consumes a pinned Maven Central release, so release readiness comes first.
 
-1. **Next: fix the logout race** above. Find what brings back `STOPPED` and the old addresses after
-   `logout` returns (a late network map from the still-running map poll is the first suspect), whether
-   dials then still reach peers, and make the end state `NEEDS_LOGIN` without addresses. Record an
-   upstream cause in UPSTREAM.md.
-2. **Publish immutable versions** to Maven Central: verify the `com.klethron` namespace, signing,
+1. **Next: publish immutable versions** to Maven Central: verify the `com.klethron` namespace, signing,
    protected credentials, POM/source/Javadoc metadata, publish from tags. Record the upstream commit per
    release.
-3. **Integrate into Klethron** separately: update its TAILSCALE-PLAN.md, add the artifact only to
+2. **Integrate into Klethron** separately: update its TAILSCALE-PLAN.md, add the artifact only to
    `:klethron_tailscale`, test Play split loading and the SSH transport seam. Its `SessionLoop` runs a
    `java.nio` `Selector`, which has no public API to register a `ParcelFileDescriptor`: the adapter needs
    an `Os.poll` helper thread or `MessageQueue` descriptor events (both verified here), waking the

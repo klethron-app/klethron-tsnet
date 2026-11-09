@@ -73,8 +73,8 @@ check the constructor or try-with-resources' implicit `close()`.
 
 Both variants omit 19 upstream features with build tags (`tsnet/build.gradle.kts`), including SSH, the web
 client, ACME certificates, logtail, debug hooks, PeerAPI, exit nodes, environment proxies, OAuth secrets, MDM policy and the
-on-disk netmap cache. One upstream patch keeps the login after a failed logout; see
-[UPSTREAM.md](UPSTREAM.md).
+on-disk netmap cache. Two upstream patches keep the login after a failed logout and stop a netmap in
+flight from undoing a logout; see [UPSTREAM.md](UPSTREAM.md).
 
 ## Tests
 

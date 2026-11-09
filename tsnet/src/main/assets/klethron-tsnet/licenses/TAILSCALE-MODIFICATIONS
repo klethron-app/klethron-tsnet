@@ -1,13 +1,14 @@
-Klethron tsnet modifies one tailscale.com source file in an isolated build copy.
+Klethron tsnet modifies two tailscale.com source files in an isolated build copy.
 Upstream revision: 62d055f4c38b610d63a8cee7fa4a7e65b01564eb
 Original file SHA-256:
 control/controlclient/direct.go: a28e97e2a6822604182cdcfdd319ea9bb10c29b17e8b4592289c1cf2278160a9
+ipn/ipnlocal/local.go: 5b1c594eb106c6f54718dca250601bf245d4e632a6e6ce52f587cf6d203cd6b8
 
-The build verifies upstream modules and rejects changes to this source file.
+The build verifies upstream modules and rejects changes to these source files.
 The shared Go module cache remains unchanged. A temporary go.mod replaces
 tailscale.com with ./tailscale; binary build metadata records that replacement.
-The inventory's Tailscale checksum identifies the upstream module before this
-patch, not the modified copy. BuildGoLibrary.kt applies this change:
+The inventory's Tailscale checksum identifies the upstream module before these
+patches, not the modified copy. BuildGoLibrary.kt applies these changes:
 
 --- a/control/controlclient/direct.go
 +++ b/control/controlclient/direct.go
@@ -25,3 +26,19 @@ TryLogout forgets the node key only when control confirmed the logout. Upstream
 also forgets it after a failed request; the map poll continues and saves the
 empty key over the stored login, leaving the node registered at control with no
 local key with which to log out again.
+
+--- a/ipn/ipnlocal/local.go
++++ b/ipn/ipnlocal/local.go
+@@ -2081,1 +2081,6 @@
+ 		b.mu.Lock()
++		if b.cc != c {
++			// A logout or profile change replaced the client while unlocked.
++			b.logf("Ignoring SetControlClientStatus from old client")
++			return
++		}
+
+setControlClientStatusLocked unlocks while handling a network map for tailnet
+lock. A logout in that window deletes the profile and replaces the control
+client; upstream then installs the old network map on the logged-out profile,
+which reports Stopped with the old addresses. The status is now ignored, as
+upstream already does for an old client's status on entry.

@@ -108,8 +108,7 @@ public final class LoginTest {
 
             assertThrows(SocketTimeoutException.class, () -> node.logout(Duration.ZERO));
             node.logout(WAIT);
-            // Upstream reports NEEDS_LOGIN shortly before it clears the network map.
-            status = await(node, s -> s.state() == TsnetStatus.State.NEEDS_LOGIN && s.addresses().isEmpty());
+            status = await(node, s -> s.state() == TsnetStatus.State.NEEDS_LOGIN);
             assertNull(status.loginUrl());
             assertNull("A logout is not a revocation", status.revocation());
             assertTrue(status.addresses().isEmpty());
@@ -129,7 +128,7 @@ public final class LoginTest {
             // Control keeps the logged-out registration: testcontrol ignores the logout's expiry.
             assertEquals("klethron-logout-test\nklethron-logout-test", nativeProbeHostnames());
             node.logout(WAIT);
-            await(node, s -> s.state() == TsnetStatus.State.NEEDS_LOGIN && s.addresses().isEmpty());
+            assertTrue(await(node, s -> s.state() == TsnetStatus.State.NEEDS_LOGIN).addresses().isEmpty());
         }
         assertOnlyStateFile();
 
@@ -181,7 +180,7 @@ public final class LoginTest {
             assertThrows(IOException.class, () -> node.logout(WAIT));
             nativeProbeRejectRegistrations(false);
             node.logout(WAIT);
-            status = await(node, s -> s.state() == TsnetStatus.State.NEEDS_LOGIN && s.addresses().isEmpty());
+            status = await(node, s -> s.state() == TsnetStatus.State.NEEDS_LOGIN);
             assertNull(status.loginUrl());
             assertTrue(status.addresses().isEmpty());
         }
