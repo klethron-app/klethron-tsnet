@@ -40,6 +40,7 @@ android {
 
 dependencies {
     implementation(project(":tsnet"))
+    compileOnly(libs.androidx.annotation)
     androidTestImplementation(libs.android.test.runner)
     androidTestImplementation(libs.junit)
 }

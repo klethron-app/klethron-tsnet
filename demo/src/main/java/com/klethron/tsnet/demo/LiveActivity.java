@@ -18,6 +18,10 @@ import android.system.StructTimeval;
 import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.TextView;
+import androidx.annotation.AnyThread;
+import androidx.annotation.MainThread;
+import androidx.annotation.UiThread;
+import androidx.annotation.WorkerThread;
 import com.klethron.tsnet.TsnetNode;
 import com.klethron.tsnet.TsnetStatus;
 import java.io.File;
@@ -39,15 +43,18 @@ public final class LiveActivity extends Activity {
     private static final Duration TIMEOUT = Duration.ofSeconds(10);
     private final Handler ui = new Handler(Looper.getMainLooper());
     private volatile boolean destroyed;
-    private @Nullable TsnetNode node; // Only accessed on WORKER.
-    private @Nullable ParcelFileDescriptor held; // Kept-open connection; only accessed on WORKER.
-    private int heldExchanges; // Only accessed on WORKER.
-    private @Nullable TsnetStatus status; // Only accessed on the UI thread; never saved in a Bundle.
+    // Only accessed on WORKER: lint checks the methods' thread annotations, not field access.
+    private @Nullable TsnetNode node;
+    private @Nullable ParcelFileDescriptor held; // Kept-open connection.
+    private int heldExchanges;
+    // Only accessed on the UI thread.
+    private @Nullable TsnetStatus status; // Never saved in a Bundle.
     private boolean busy;
     private boolean started;
     private boolean registered;
 
     private final ConnectivityManager.NetworkCallback networkCallback = new ConnectivityManager.NetworkCallback() {
+        @MainThread // Registered with the main-looper handler `ui`.
         @Override
         public void onLinkPropertiesChanged(Network network, LinkProperties properties) {
             if (destroyed) return;
@@ -61,12 +68,14 @@ public final class LiveActivity extends Activity {
             TsnetNode.setDefaultNetwork(properties.getInterfaceName(), gateway);
         }
 
+        @MainThread
         @Override
         public void onLost(Network network) {
             if (!destroyed) TsnetNode.setDefaultNetwork(null, null);
         }
     };
 
+    @MainThread
     @Override
     public void onCreate(@Nullable Bundle savedState) {
         super.onCreate(savedState);
@@ -99,6 +108,7 @@ public final class LiveActivity extends Activity {
         findViewById(R.id.close_node).setOnClickListener(view -> finish());
     }
 
+    @UiThread
     private void startNode() {
         busy = true;
         render();
@@ -125,6 +135,7 @@ public final class LiveActivity extends Activity {
         });
     }
 
+    @WorkerThread
     private void watch(TsnetNode current) {
         TsnetStatus previous = null;
         try {
@@ -142,6 +153,7 @@ public final class LiveActivity extends Activity {
         }
     }
 
+    @UiThread
     private void exchange() {
         String host = ((EditText) findViewById(R.id.peer_host)).getText().toString().trim();
         int port;
@@ -177,6 +189,7 @@ public final class LiveActivity extends Activity {
         });
     }
 
+    @WorkerThread
     private static void echo(ParcelFileDescriptor connection, byte[] sent) throws Exception {
         byte[] received = new byte[sent.length];
         long deadline = SystemClock.elapsedRealtime() + TIMEOUT.toMillis();
@@ -193,6 +206,7 @@ public final class LiveActivity extends Activity {
         if (!Arrays.equals(sent, received)) throw new IOException("Echo mismatch");
     }
 
+    @WorkerThread
     private void closeHeld() {
         heldExchanges = 0;
         if (held == null) return;
@@ -213,9 +227,11 @@ public final class LiveActivity extends Activity {
     }
 
     private interface Operation {
+        @WorkerThread
         String run(TsnetNode current) throws Exception;
     }
 
+    @UiThread
     private void runOperation(Operation operation) {
         busy = true;
         render();
@@ -231,6 +247,7 @@ public final class LiveActivity extends Activity {
         });
     }
 
+    @AnyThread
     private void complete(String message) {
         ui.post(() -> {
             if (destroyed) return;
@@ -240,6 +257,7 @@ public final class LiveActivity extends Activity {
         });
     }
 
+    @UiThread
     private void render() {
         findViewById(R.id.start_node).setEnabled(!busy && !started);
         findViewById(R.id.login).setEnabled(!busy && started);
@@ -257,10 +275,12 @@ public final class LiveActivity extends Activity {
         }
     }
 
+    @UiThread
     private void result(String message) {
         ((TextView) findViewById(R.id.result)).setText(message);
     }
 
+    @MainThread
     @Override
     public void onDestroy() {
         destroyed = true;

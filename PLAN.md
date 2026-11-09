@@ -225,6 +225,9 @@ Upstream bugs and workarounds that shape this plan are in [UPSTREAM.md](UPSTREAM
   startup/restart through the live screen, reaching browser-authorization readiness without opening
   or capturing a login URL. The latter needs internet. Browser login and real-tailnet TCP echo are
   covered separately by the manual and ADB-driven checks above, not by these JUnit tests.
+  After the demo's thread annotations, 2026-11-09, both passed on API 37.2 / x86_64 / 16 KiB, SELinux
+  Enforcing (2 tests, zero failures/errors/skips, JUnit XML):
+  `demo/build/reports/device-verification/thread-annotations-api37.2-16k/`.
 - **Not verified:** a DERP-to-direct upgrade, traversal across NATs that prevent direct paths, subnet
   routes, IPv6 peers, throughput, open-stream survival of outages longer than seconds, arm64 with
   16 KiB pages, a non-blocking consumer, or Play split delivery.
@@ -239,9 +242,15 @@ Upstream bugs and workarounds that shape this plan are in [UPSTREAM.md](UPSTREAM
 - One destination (tailnet IP or MagicDNS name) and port; a fresh 52-byte challenge must echo exactly.
   Dial and exchange each have a 10-second bound. **Keep connection open** reuses one stream across
   echoes until unticked, a failed echo or close. No URL, credential or peer payload is logged.
-- Node creation, operations and cleanup run off the UI thread. Browser navigation keeps the node alive;
-  destroying the screen queues close. Reopening requires Start, which resumes saved identity. Serial
-  cleanup prevents overlapping access to the state directory on activity recreation. No service.
+- Node creation, operations and cleanup run off the UI thread. Demo methods carry AndroidX thread
+  annotations (`compileOnly`), checked by lint's `ThreadConstraint`; field confinement stays in comments.
+  Verified 2026-11-09 by injecting wrong-thread calls: release lint reported each direct call between
+  `@MainThread`/`@UiThread` and `@WorkerThread` methods (demo and library, both directions, including
+  `Operation.run` lambdas) and mixed-thread statements within one lambda. It infers no thread for a
+  listener or `Handler.post` lambda, so a lone `view -> closeHeld()` passes. Browser navigation keeps
+  the node alive; destroying the screen queues close. Reopening requires Start, which resumes saved
+  identity. Serial cleanup prevents overlapping access to the state directory on activity recreation.
+  No service.
 - [README.md](README.md#live-tailnet-test) has the peer echo setup, manual sequence and evidence matrix.
   The authorized cross-device scenarios recorded above passed; the cases under Not verified remain.
 

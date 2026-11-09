@@ -10,6 +10,7 @@ import android.os.SystemClock;
 import android.widget.Button;
 import android.widget.TextView;
 import androidx.test.platform.app.InstrumentationRegistry;
+import org.jspecify.annotations.Nullable;
 import org.junit.Test;
 
 public final class MinifiedDemoTest {
@@ -57,7 +58,7 @@ public final class MinifiedDemoTest {
             for (int i = 0; i < 2; i++) {
                 instrumentation.runOnMainSync(button::performClick);
                 // The node is created on a background thread; the button is re-enabled with the result.
-                String[] result = new String[1];
+                @Nullable String[] result = new String[1];
                 for (long deadline = SystemClock.uptimeMillis() + 10000; result[0] == null; SystemClock.sleep(20)) {
                     assertTrue("No result from the demo", SystemClock.uptimeMillis() < deadline);
                     instrumentation.runOnMainSync(() -> result[0] = button.isEnabled() ? button.getText().toString() : null);
