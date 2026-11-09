@@ -12,9 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"tailscale.com/net/netmon"
 	"tailscale.com/tsnet"
-	"tailscale.com/util/clientmetric"
 )
 
 // The instrumentation test changes the device's default network between these debug-only calls,
@@ -23,9 +21,7 @@ var networkProbe struct {
 	sync.Mutex
 	tailnet *loopbackTailnet
 	// Interface named by each node's latest rebinding change.
-	rebound map[*netmon.Monitor]string
-	// Process-global magicsock rebinds at the last checkpoint.
-	rebinds int64
+	rebound *sync.Map // *tsnet.Server -> string
 }
 
 //export klethron_netchange_probe_start
@@ -40,7 +36,10 @@ func startNetworkProbe(dir string) string {
 	tailnetProbeMu.Lock()
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	tailnet, problem := startLoopbackTailnet(ctx, dir)
+	rebound := new(sync.Map)
+	tailnet, problem := startLoopbackTailnet(ctx, dir, func(node *tsnet.Server, name string) {
+		rebound.Store(node, name)
+	})
 	// The first exchange waits for the peer; then require a direct path.
 	if problem == "" {
 		problem = tailnet.exchange(ctx)
@@ -56,19 +55,9 @@ func startNetworkProbe(dir string) string {
 	networkProbe.Lock()
 	defer networkProbe.Unlock()
 	networkProbe.tailnet = tailnet
-	rebound := make(map[*netmon.Monitor]string)
 	networkProbe.rebound = rebound
-	networkProbe.rebinds = rebindCount()
 	for _, node := range []*tsnet.Server{tailnet.dialer, tailnet.listener} {
 		monitor := node.Sys().NetMon.Get()
-		rebound[monitor] = ""
-		tailnet.closers = append(tailnet.closers, monitor.RegisterChangeCallback(func(delta *netmon.ChangeDelta) {
-			if delta.RebindLikelyRequired {
-				networkProbe.Lock()
-				defer networkProbe.Unlock()
-				rebound[monitor] = delta.DefaultRouteInterface
-			}
-		}))
 		// Without a host report, Android netmon has no default route and never rebinds.
 		if monitor.InterfaceState().DefaultRouteInterface != "" {
 			problem = "unreported default route"
@@ -81,8 +70,8 @@ func startNetworkProbe(dir string) string {
 	return "ok"
 }
 
-// Waits until both nodes rebound for a change to the named default interface, then requires
-// the magicsock rebinds and a tailnet exchange over a direct path re-established afterwards.
+// Waits for both nodes to finish rebinding to the named default interface, then exchanges
+// tailnet data and requires a re-established direct path.
 //
 //export klethron_netchange_probe_await
 func klethron_netchange_probe_await(name *C.char, length C.int) *C.char {
@@ -98,13 +87,10 @@ func awaitNetworkChange(name string) string {
 			networkProbe.Unlock()
 			return "not started"
 		}
-		// Both nodes' engines rebind; other paths may add rebinds, but not remove them.
-		done := rebindCount() >= networkProbe.rebinds+2
-		for monitor, rebound := range networkProbe.rebound {
-			done = done && rebound == name && monitor.InterfaceState().DefaultRouteInterface == name
-		}
-		if done {
-			networkProbe.rebinds = rebindCount()
+		done := true
+		for _, node := range []*tsnet.Server{networkProbe.tailnet.dialer, networkProbe.tailnet.listener} {
+			rebound, ok := networkProbe.rebound.Load(node)
+			done = done && ok && rebound == name && node.Sys().NetMon.Get().InterfaceState().DefaultRouteInterface == name
 		}
 		tailnet := networkProbe.tailnet
 		networkProbe.Unlock()
@@ -123,15 +109,6 @@ func awaitNetworkChange(name string) string {
 		case <-time.After(50 * time.Millisecond):
 		}
 	}
-}
-
-func rebindCount() int64 {
-	for _, metric := range clientmetric.Metrics() {
-		if metric.Name() == "magicsock_rebind_calls" {
-			return metric.Value()
-		}
-	}
-	return 0
 }
 
 //export klethron_netchange_probe_stop

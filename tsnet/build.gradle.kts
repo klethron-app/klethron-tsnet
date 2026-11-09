@@ -38,7 +38,7 @@ val omittedFeatures = listOf(
     // The node only connects out: no PeerAPI server, advertised routes or exit node, nor exit node use.
     "peerapiserver", "advertiseroutes", "advertiseexitnode", "useexitnode", "exitnodehealth",
     // No log upload/buffering, debug hooks (including SSLKEYLOGFILE), metrics or on-disk netmap cache.
-    "logtail", "debug", "usermetrics", "cachenetmap",
+    "logtail", "debug", "usermetrics", "clientmetrics", "cachenetmap",
     // Ignore host-process environment and policy: proxy variables, OAuth secrets, MDM settings.
     "useproxy", "oauthkey", "syspolicy",
     // No TLS certificates for this node's own listeners.

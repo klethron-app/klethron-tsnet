@@ -11,7 +11,7 @@ public final class TailnetNodeTest {
     @Test
     public void reportsLinkedTailscaleVersion() {
         assertTrue(TailnetNode.tailscaleVersion().startsWith("v1."));
-        assertTrue(TailnetNode.tailscaleVersion().endsWith("-62d055f4c38b"));
+        assertTrue(TailnetNode.tailscaleVersion().endsWith("-6372b9a43a5c"));
     }
 
     @Test

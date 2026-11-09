@@ -1,25 +1,25 @@
 # Upstream issues
 
-Upstream behaviour at the pinned revision (Tailscale `62d055f4c38b`, Go 1.27.3) that this library
+Upstream behaviour at the pinned revision (Tailscale
+[`6372b9a43a5c`](https://github.com/tailscale/tailscale/commit/6372b9a43a5cbc3628bf65bd0ec40b4823510d2d), Go 1.27.3) that this library
 patches, works around or is limited by. Recheck every entry on each upstream update, and drop a patch
 or workaround once upstream fixes it. Patches are hash-checked in `BuildGoLibrary.kt` and documented in
 `TAILSCALE-MODIFICATIONS`.
 
 ## Patched
 
-- **Failed logout destroys the local login.** `controlclient.Direct.TryLogout` clears the in-memory node
+- **Failed logout destroys the local login** ([#22248](https://github.com/tailscale/tailscale/issues/22248)). `controlclient.Direct.TryLogout` clears the in-memory node
   key even when control rejects the logout. The map poll keeps running, and the next netmap saves the
   empty (but `Valid`) `Persist` over the stored key: the device stays registered with no key to log out
   with, a retry is a silent no-op and a restart asks for a new login. Reproduced in about one of three
   runs. Patch: clear the key only after a successful logout (`control/controlclient/direct.go`).
-  **To report upstream.**
-- **A netmap in flight can undo a logout.** `setControlClientStatusLocked` ignores an old control
+- **A netmap in flight can undo a logout** ([#22274](https://github.com/tailscale/tailscale/issues/22274)). `setControlClientStatusLocked` ignores an old control
   client's status only on entry, then unlocks for `tkaSyncIfNeeded` while handling a netmap. A logout
   that resets the profile in that window has the old netmap installed on the logged-out profile:
   `NeedsLogin -> Stopped (nm=true)` with the old addresses, and a re-login then reports `Starting` with
   them. A netmap is often in flight as a node reaches Running. Seen in 4 of 16 Pixel runs; on a host,
   in 5 of 10 runs with that window widened by 300 ms. Patch: re-check the client after relocking
-  (`ipn/ipnlocal/local.go`). **To report upstream.**
+  (`ipn/ipnlocal/local.go`).
 
 ## Worked around
 
@@ -58,7 +58,8 @@ or workaround once upstream fixes it. Patches are hash-checked in `BuildGoLibrar
 - **Logout resets prefs.** The fresh profile after logout has default prefs (Tailscale's control URL, the
   device hostname); `EditPrefs` would send re-login to the wrong control server, and the control client
   keeps its creation-time URL anyway. Workaround: `login()` uses LocalAPI `Start` with tsnet's prefs.
-  **To report upstream.**
+  [PR #21857](https://github.com/tailscale/tailscale/pull/21857) adds login orchestration, but its
+  helper is private and not yet exposed through LocalAPI.
 - **`LoginFinished` precedes saving the new node key.** `controlclient.Auto` reports `Persist` only with a
   network map, so closing between `LoginFinished` and that map can lose the completed login, even with a
   clean `Server.Close()` (confirmed twice with the first map response deliberately delayed). Workaround:
@@ -93,12 +94,17 @@ or workaround once upstream fixes it. Patches are hash-checked in `BuildGoLibrar
 
 - **`ts_omit_serve` breaks the `tsnet` build** (`tsnet.go` calls `SetServeConfig`/`GetServeConfig`
   unconditionally), so serve stays linked. **To report upstream.**
-- `ts_omit_clientmetrics` breaks `util/syspolicy`; `ts_omit_tailnetlock` breaks the debug test servers.
+- `ts_omit_tailnetlock` breaks the debug test servers.
 - Test infrastructure: `testcontrol` ignores a logout's expiry (control-side deregistration is untested)
   and copies an expired node on re-login (a probe gives the new key a fresh expiry). It answers unknown
   nodes' map requests with 400, not control's 404, and keeps streaming to running nodes, so removal is
   simulated with a 404 for map requests that a node sees at its next start. `httptest.Server.Close` does
   not close hijacked Noise connections, so stopping it does not make control unreachable.
+
+## Resolved upstream
+
+- [PR #22253](https://github.com/tailscale/tailscale/pull/22253) fixes `ts_omit_clientmetrics` builds
+  through `util/syspolicy`. Both variants now omit client metrics.
 
 ## Updating upstream
 

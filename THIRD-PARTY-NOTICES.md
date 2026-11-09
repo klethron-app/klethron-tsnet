@@ -3,7 +3,7 @@
 Notices ship in the AAR under `assets/klethron-tsnet/licenses/`, from
 `tsnet/src/main/assets/klethron-tsnet/licenses/` (both variants) and `tsnet/src/debug/…` (debug only):
 
-- Tailscale (BSD-3-Clause), pinned to `62d055f4c38b610d63a8cee7fa4a7e65b01564eb`: licence, patent notice
+- Tailscale (BSD-3-Clause), pinned to `6372b9a43a5cbc3628bf65bd0ec40b4823510d2d`: licence, patent notice
   and `TAILSCALE-MODIFICATIONS`, which documents the two local patches.
 - Go's runtime licence and patent notice, also covering Tailscale's Go-derived `tempfork` sources.
 - JSpecify 1.0.1 (Apache-2.0): a transitive Maven dependency, not bundled; its
@@ -33,9 +33,11 @@ toolchain or module change requires a new per-file review. Reports are in
 
 ## Per-file review
 
-Reviewed 2026-11-09 for the release libraries: all 2,756 Go, assembly, C, header and embedded files that
+Reviewed 2026-11-09 for the release libraries: all 2,758 Go, assembly, C, header and embedded files that
 `go list -deps` selects for either ABI (1,385 from the standard library), searched for copyright, licence,
 SPDX, public-domain and "derived/adapted/copied from" text and for `Code generated` headers.
+The update to `6372b9a43a5c` and omission of client metrics add no notices or modules; the module
+licences, embedded resources and subprocess call sites are unchanged.
 
 - **Per-file notices** beyond the module licences are in `FILE-NOTICES`: Sun (FreeBSD msun) and Cephes
   code in Go's `math`, Inferno's MIT `memmove` (x86_64), gVisor's BSD-licensed `pkg/sync`, half-rs (MIT)

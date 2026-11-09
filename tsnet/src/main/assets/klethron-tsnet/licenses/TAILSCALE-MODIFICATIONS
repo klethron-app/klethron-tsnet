@@ -1,8 +1,8 @@
 Klethron tsnet modifies two tailscale.com source files in an isolated build copy.
-Upstream revision: 62d055f4c38b610d63a8cee7fa4a7e65b01564eb
+Upstream revision: 6372b9a43a5cbc3628bf65bd0ec40b4823510d2d
 Original file SHA-256:
 control/controlclient/direct.go: a28e97e2a6822604182cdcfdd319ea9bb10c29b17e8b4592289c1cf2278160a9
-ipn/ipnlocal/local.go: 5b1c594eb106c6f54718dca250601bf245d4e632a6e6ce52f587cf6d203cd6b8
+ipn/ipnlocal/local.go: b0ea8d84d9f2d2f7ea893d7be89c8bfcf40523825b07355d299446979db7ee37
 
 The build verifies upstream modules and rejects changes to these source files.
 The shared Go module cache remains unchanged. A temporary go.mod replaces
@@ -29,7 +29,7 @@ local key with which to log out again.
 
 --- a/ipn/ipnlocal/local.go
 +++ b/ipn/ipnlocal/local.go
-@@ -2081,1 +2081,6 @@
+@@ -2082,1 +2082,6 @@
  		b.mu.Lock()
 +		if b.cc != c {
 +			// A logout or profile change replaced the client while unlocked.

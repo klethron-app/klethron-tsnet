@@ -102,7 +102,7 @@ abstract class BuildGoLibrary @Inject constructor(
         // A netmap handled while unlocked for tailnet lock must not outlive a logout that replaced the
         // control client meanwhile: it would bring back the old addresses on the logged-out profile.
         val relock = "\t\tb.mu.Lock()\n\t\t// As we stepped outside of the lock, it's possible for b.cc\n"
-        patch("ipn/ipnlocal/local.go", "5b1c594eb106c6f54718dca250601bf245d4e632a6e6ce52f587cf6d203cd6b8", relock,
+        patch("ipn/ipnlocal/local.go", "b0ea8d84d9f2d2f7ea893d7be89c8bfcf40523825b07355d299446979db7ee37", relock,
             "\t\tb.mu.Lock()\n\t\tif b.cc != c {\n\t\t\t// A logout or profile change replaced the client while unlocked.\n" +
                 "\t\t\tb.logf(\"Ignoring SetControlClientStatus from old client\")\n\t\t\treturn\n\t\t}\n" +
                 relock.substringAfter("\n"))

@@ -79,7 +79,7 @@ func probeTailnet(dir string, relayOnly bool) string {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	tailnet, problem := startLoopbackTailnet(ctx, dir)
+	tailnet, problem := startLoopbackTailnet(ctx, dir, nil)
 	defer tailnet.close()
 	if problem != "" {
 		return problem
@@ -102,11 +102,12 @@ type loopbackTailnet struct {
 	dialer, listener *tsnet.Server
 	listenerIP       netip.Addr
 	closers          []func()
+	onRebind         func(*tsnet.Server, string)
 }
 
 // startLoopbackTailnet returns a fixed diagnostic on failure. Close the result in either case.
-func startLoopbackTailnet(ctx context.Context, dir string) (*loopbackTailnet, string) {
-	t := new(loopbackTailnet)
+func startLoopbackTailnet(ctx context.Context, dir string, onRebind func(*tsnet.Server, string)) (*loopbackTailnet, string) {
+	t := &loopbackTailnet{onRebind: onRebind}
 	derpMap, stopDERP, err := startLoopbackDERP()
 	if err != nil {
 		return t, "loopback derp failed"
@@ -143,6 +144,14 @@ func (t *loopbackTailnet) close() {
 
 func (t *loopbackTailnet) startNode(ctx context.Context, dir, controlURL, hostname string) (*tsnet.Server, netip.Addr, string) {
 	server := newServer()
+	if t.onRebind != nil {
+		server.Logf = func(format string, args ...any) {
+			// Observe successful UDP rebinding without formatting or retaining log messages.
+			if format == "Rebind; defIf=%q, ips=%v" {
+				t.onRebind(server, args[0].(string))
+			}
+		}
+	}
 	server.Dir = dir
 	server.Hostname = hostname
 	server.ControlURL = controlURL
