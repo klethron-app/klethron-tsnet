@@ -24,6 +24,7 @@
     <string name="login_pending">Browser authorization pending; wait before closing</string>
     <string name="login_requested">Login requested; waiting for control</string>
     <string name="logged_out">Logout confirmed</string>
+    <string name="backend_error">Backend error: %1$s</string>
     <string name="browser_missing">No browser is available</string>
     <string name="invalid_destination">Enter a peer and a port from 1 to 65535</string>
 </resources>

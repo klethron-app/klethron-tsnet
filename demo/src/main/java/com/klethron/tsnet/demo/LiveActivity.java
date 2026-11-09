@@ -249,6 +249,8 @@ public final class LiveActivity extends Activity {
         findViewById(R.id.exchange).setEnabled(!busy && started);
         if (status != null) {
             String text = status.state().name();
+            if (status.revocation() != null) text += " (" + status.revocation().name() + ")";
+            if (status.error() != null) text += "\n" + getString(R.string.backend_error, status.error());
             if (status.loginUrl() != null) text += "\n" + getString(R.string.login_pending);
             else if (status.state() == TsnetStatus.State.RUNNING) text += "\n" + getString(R.string.login_saved);
             ((TextView) findViewById(R.id.node_status)).setText(text);

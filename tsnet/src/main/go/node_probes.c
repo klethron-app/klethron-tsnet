@@ -101,6 +101,11 @@ Java_com_klethron_tsnet_LoginTest_nativeProbeRejectRegistrations(JNIEnv *env, jc
     klethron_login_probe_reject_registrations(reject == JNI_TRUE);
 }
 
+JNIEXPORT void JNICALL
+Java_com_klethron_tsnet_LoginTest_nativeProbeRemove(JNIEnv *env, jclass type, jboolean removed) {
+    klethron_login_probe_remove(removed == JNI_TRUE);
+}
+
 JNIEXPORT jint JNICALL
 Java_com_klethron_tsnet_LoginTest_nativeProbeExpire(JNIEnv *env, jclass type) {
     return klethron_login_probe_expire();

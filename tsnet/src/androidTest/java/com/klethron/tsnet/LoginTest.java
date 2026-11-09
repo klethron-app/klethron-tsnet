@@ -62,6 +62,8 @@ public final class LoginTest {
             assertThrows(IllegalStateException.class, () -> node.start(directory.toFile(), "again", controlUrl));
             TsnetStatus status = await(node, s -> s.loginUrl() != null);
             assertEquals(TsnetStatus.State.NEEDS_LOGIN, status.state());
+            assertNull(status.revocation());
+            assertNull(status.error());
             assertTrue(status.addresses().isEmpty());
             // Never print login URLs, even in test failures.
             assertTrue("Unexpected login URL", status.loginUrl().startsWith(controlUrl + "/auth/"));
@@ -109,6 +111,7 @@ public final class LoginTest {
             // Upstream reports NEEDS_LOGIN shortly before it clears the network map.
             status = await(node, s -> s.state() == TsnetStatus.State.NEEDS_LOGIN && s.addresses().isEmpty());
             assertNull(status.loginUrl());
+            assertNull("A logout is not a revocation", status.revocation());
             assertTrue(status.addresses().isEmpty());
             node.logout(WAIT); // Already logged out.
             assertEquals(status.version, node.awaitStatus(status, Duration.ofMillis(500)).version);
@@ -193,22 +196,28 @@ public final class LoginTest {
             assertTrue(nativeProbeComplete(status.loginUrl().getBytes(StandardCharsets.UTF_8)));
             addresses = await(node, s -> s.state() == TsnetStatus.State.RUNNING).addresses();
 
+            assertNull(status.revocation());
             assertEquals(1, nativeProbeExpire());
             status = await(node, s -> s.state() == TsnetStatus.State.NEEDS_LOGIN);
+            assertEquals(TsnetStatus.Revocation.KEY_EXPIRED, status.revocation());
             assertNull(status.loginUrl());
+            assertTrue(status.toString().contains("KEY_EXPIRED"));
             // No login URL arrives by itself, and the tailnet is unreachable.
             status = node.awaitStatus(status, Duration.ofSeconds(2));
             assertEquals(TsnetStatus.State.NEEDS_LOGIN, status.state());
+            assertEquals(TsnetStatus.Revocation.KEY_EXPIRED, status.revocation());
             assertNull(status.loginUrl());
             assertThrows(SocketTimeoutException.class, () -> node.dial(addresses.get(0).getHostAddress(), 7070, Duration.ofMillis(500)));
 
             node.login();
             status = await(node, s -> s.loginUrl() != null);
             assertEquals(TsnetStatus.State.NEEDS_LOGIN, status.state());
+            assertEquals(TsnetStatus.Revocation.KEY_EXPIRED, status.revocation());
             assertTrue("Unexpected login URL", status.loginUrl().startsWith(controlUrl + "/auth/"));
             assertTrue(nativeProbeComplete(status.loginUrl().getBytes(StandardCharsets.UTF_8)));
             status = await(node, s -> s.state() == TsnetStatus.State.RUNNING);
             assertNull(status.loginUrl());
+            assertNull(status.revocation());
             assertEquals(addresses, status.addresses());
 
             // Re-authenticating keeps the node running until the user opens the new URL.
@@ -234,6 +243,57 @@ public final class LoginTest {
             });
             assertEquals(addresses, status.addresses());
         }
+    }
+
+    @Test(timeout = 120000)
+    public void removedNodeRequiresANewLogin() throws Exception {
+        try (TsnetNode node = new TsnetNode()) {
+            node.start(directory.toFile(), "klethron-removal-test", controlUrl);
+            TsnetStatus status = await(node, s -> s.loginUrl() != null);
+            assertTrue(nativeProbeComplete(status.loginUrl().getBytes(StandardCharsets.UTF_8)));
+            await(node, s -> s.state() == TsnetStatus.State.RUNNING);
+        }
+        // testcontrol keeps streaming to a running node, so it notices at its next start.
+        nativeProbeRemove(true);
+        try (TsnetNode node = new TsnetNode()) {
+            node.start(directory.toFile(), "klethron-removal-test", controlUrl);
+            TsnetStatus status = await(node, s -> s.state() == TsnetStatus.State.NEEDS_LOGIN);
+            assertEquals(TsnetStatus.Revocation.NODE_REMOVED, status.revocation());
+            assertNull(status.loginUrl());
+
+            node.login();
+            status = await(node, s -> s.loginUrl() != null);
+            assertEquals(TsnetStatus.State.NEEDS_LOGIN, status.state());
+            assertEquals(TsnetStatus.Revocation.NODE_REMOVED, status.revocation());
+            nativeProbeRemove(false);
+            assertTrue(nativeProbeComplete(status.loginUrl().getBytes(StandardCharsets.UTF_8)));
+            status = await(node, s -> s.state() == TsnetStatus.State.RUNNING);
+            assertNull(status.revocation());
+            assertFalse(status.addresses().isEmpty());
+        }
+        assertOnlyStateFile();
+    }
+
+    @Test(timeout = 90000)
+    public void rejectedLoginReportsAnErrorUntilRunning() throws Exception {
+        nativeProbeRejectRegistrations(true);
+        try (TsnetNode node = new TsnetNode()) {
+            node.start(directory.toFile(), "klethron-rejection-test", controlUrl);
+            TsnetStatus status = await(node, s -> s.error() != null);
+            assertEquals("invalid authkey", status.error()); // testcontrol's text.
+            assertEquals(TsnetStatus.State.NEEDS_LOGIN, status.state());
+            assertNull(status.revocation());
+            assertFalse(status.toString().contains("authkey"));
+
+            // Upstream retries; the error remains while the user logs in.
+            nativeProbeRejectRegistrations(false);
+            status = await(node, s -> s.loginUrl() != null);
+            assertEquals("invalid authkey", status.error());
+            assertTrue(nativeProbeComplete(status.loginUrl().getBytes(StandardCharsets.UTF_8)));
+            status = await(node, s -> s.state() == TsnetStatus.State.RUNNING);
+            assertNull(status.error());
+        }
+        assertOnlyStateFile();
     }
 
     @Test(timeout = 90000)
@@ -321,6 +381,9 @@ public final class LoginTest {
     private static native boolean nativeProbeComplete(byte[] loginUrl);
 
     static native void nativeProbeStop();
+
+    /// Makes control answer map requests as for deleted nodes, or no longer.
+    private static native void nativeProbeRemove(boolean removed);
 
     /// Expires the keys of all registered nodes; returns their number.
     private static native int nativeProbeExpire();

@@ -67,6 +67,13 @@ or workaround once upstream fixes it. Patches are hash-checked in `BuildGoLibrar
   Tracked by [#19149](https://github.com/tailscale/tailscale/issues/19149); proposed fix
   [PR #19150](https://github.com/tailscale/tailscale/pull/19150) is open and draft. Our tsnet reproduction
   is additional evidence for that issue.
+- **Revocations are indistinguishable from logout on the IPN bus.** Upstream reports `NeedsLogin` after a
+  logout, key expiry and device removal alike, with no reason. Workaround: as upstream's state machine,
+  report removal while the `node-removed` health warning is set, read from the health tracker because
+  its bus notification can follow the state, otherwise expiry while the latest `SelfChange` key expiry
+  has passed (reset at `NoState`, which starts a new profile, as after logout).
+- **A watch that falls behind ends with an `ErrMessage`** that is not a backend error. Workaround: drop
+  that exact text (unexported `watchIPNBusFellBehindMessage`) before reporting `error()`.
 - **`NeedsLogin` is reported shortly before the network map is cleared** after logout, so a status can
   briefly show old addresses. Documented as eventual.
 - **`Start` is not context-aware, and concurrent `Start`/`Close` is forbidden.** Workaround: per-node mutex
@@ -81,6 +88,8 @@ or workaround once upstream fixes it. Patches are hash-checked in `BuildGoLibrar
   unconditionally), so `serve`/`acme` stay linked. **To report upstream.**
 - `ts_omit_clientmetrics` breaks `util/syspolicy`; `ts_omit_tailnetlock` breaks the debug test servers.
 - Test infrastructure: `testcontrol` ignores a logout's expiry (control-side deregistration is untested)
-  and copies an expired node on re-login (a probe gives the new key a fresh expiry);
+  and copies an expired node on re-login (a probe gives the new key a fresh expiry). It answers unknown
+  nodes' map requests with 400, not control's 404, and keeps streaming to running nodes, so removal is
+  simulated with a 404 for map requests that a node sees at its next start;
   `httptest.Server.Close` does not close hijacked Noise connections, so stopping it does not make control
   unreachable.

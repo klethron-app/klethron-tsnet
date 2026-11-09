@@ -10,8 +10,8 @@ interactive login, key expiry, device approval, resuming from saved state and di
 MagicDNS name. A user-run manual test of the R8-minified demo on arm64 hardware also passed real-tailnet
 browser login, TCP echo by IPv4 address and MagicDNS name, saved-login restart, and logout/re-login.
 An ADB-driven follow-up also verified fresh TCP echoes after Wi-Fi → cellular → Wi-Fi switches on
-the same running node, and echoes relayed only through Tailscale's DERP servers. Admin-initiated
-expiry/removal remains unverified. Debug-only tests also start nodes against
+the same running node, echoes relayed only through Tailscale's DERP servers, and admin-initiated key
+expiry and device removal. Debug-only tests also start nodes against
 a rejecting loopback control endpoint, connect two in-process nodes through a loopback test control
 and DERP server to exchange TCP data over direct and relay-only paths, and rebind when the device's
 default network changes. Another contacts Tailscale's real control plane without credentials,
@@ -84,10 +84,15 @@ stays in `NEEDS_LOGIN` without a login URL. To also forget the device key, close
 directory. A failed logout leaves the node `STOPPED` with its login intact, so it can be retried.
 
 `login` starts a new interactive login on a started node. Call it when the node reports `NEEDS_LOGIN`
-without a login URL: after a logout, or when control expired the node key (by default, Tailscale node
-keys expire periodically). Starting a node logs in by itself when needed. On a logged-in node, `login`
+without a login URL: after a logout, or when control revoked the login. The status then says why:
+`revocation()` is `KEY_EXPIRED` once the node key expired (by default, Tailscale node
+keys expire periodically, and administrators can expire them), or `NODE_REMOVED` once the device was
+removed from the tailnet; logging in again then adds a new device. It is `null` after a logout.
+Starting a node logs in by itself when needed. On a logged-in node, `login`
 re-authenticates it, renewing its key while it keeps running. A login URL stays in the status until the
 new login is saved; close the node only after that, or the next start asks to log in again.
+`error()` holds the latest backend error, such as control rejecting a registration, until the node next
+runs. Its text comes from upstream or control: show it to the user, but do not parse or log it.
 
 `start` returns once the node is initialized locally; `awaitStatus` returns the latest status after it
 changes, waking when the node is closed. Status records keep only the latest state, so intermediate
@@ -141,7 +146,8 @@ It requires a device with SELinux **Enforcing** (`adb shell getenforce`) to veri
 discovery failure. Native test bridges are present only in debug builds; the release AAR check rejects
 them. `LoginTest` starts nodes through the public API against a loopback test control server that requires
 interactive login, completes the login in place of a browser, and restarts from the saved state. It also
-expires node keys, requires device approval and rejects registrations at that control server.
+expires node keys, answers map requests as for removed devices, requires device approval and rejects
+registrations at that control server, checking the reported revocations and errors.
 `DialTest` dials an in-memory peer on a loopback test tailnet through the public API: a 1 MiB echo by
 address and MagicDNS name, peer end of stream, closing, refused, unroutable and timed-out dials.
 The automated tests do not prove authorized connectivity to a real tailnet. `ControlPlaneTest` needs internet access: it resolves and verifies

@@ -19,6 +19,7 @@ import (
 
 	"tailscale.com/client/local"
 	"tailscale.com/ipn"
+	"tailscale.com/tsconst"
 	"tailscale.com/tsnet"
 	"tailscale.com/types/key"
 )
@@ -36,17 +37,20 @@ type node struct {
 	ctx    context.Context // Cancelled when the node closes.
 	cancel context.CancelFunc
 
-	mu      sync.Mutex
-	selfKey key.NodePublic // Of the latest network map.
-	status  nodeStatus
-	version uint64
-	changed chan struct{} // Closed and replaced on every status change.
+	mu        sync.Mutex
+	selfKey   key.NodePublic // Of the latest network map.
+	keyExpiry time.Time      // Of the latest network map; zero without one or if the key never expires.
+	status    nodeStatus
+	version   uint64
+	changed   chan struct{} // Closed and replaced on every status change.
 }
 
 type nodeStatus struct {
-	state    ipn.State
-	loginURL string
-	ip4, ip6 netip.Addr
+	state      ipn.State
+	revocation string // A TsnetStatus.Revocation name while NeedsLogin, or "".
+	loginURL   string
+	ip4, ip6   netip.Addr
+	err        string // The latest backend error since the node last ran, as printable ASCII.
 }
 
 func newNode(server *tsnet.Server) *node {
@@ -136,12 +140,23 @@ func (n *node) watchStatus(ctx context.Context, client *local.Client) {
 
 func (n *node) publish(notify ipn.Notify) {
 	ip4, ip6 := n.server.TailscaleIPs()
+	// Set before upstream reports NeedsLogin for it; health notifications may arrive later.
+	_, removed := n.server.Sys().HealthTracker.Get().CurrentState().Warnings[tsconst.HealthWarnableNodeRemoved]
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	status := n.status
 	status.ip4, status.ip6 = ip4, ip6
 	if notify.State != nil {
 		status.state = *notify.State
+		switch status.state {
+		case ipn.NoState: // A new profile, as after a logout, has no network map yet.
+			n.keyExpiry = time.Time{}
+		case ipn.Running:
+			status.err = ""
+		}
+	}
+	if notify.ErrMessage != nil && *notify.ErrMessage != watchFellBehind {
+		status.err = printable(*notify.ErrMessage, 256)
 	}
 	if notify.BrowseToURL != nil {
 		status.loginURL = loginURL(*notify.BrowseToURL)
@@ -149,9 +164,21 @@ func (n *node) publish(notify ipn.Notify) {
 	// Every interactive login creates a new node key, which upstream saves before announcing the
 	// first network map with it. Closing the node at LoginFinished, which comes first, would lose the
 	// login. A re-authenticating node stays Running, so the state does not tell either.
-	if self := notify.SelfChange; self != nil && self.Key != n.selfKey {
-		n.selfKey = self.Key
-		status.loginURL = ""
+	if self := notify.SelfChange; self != nil {
+		n.keyExpiry = self.KeyExpiry
+		if self.Key != n.selfKey {
+			n.selfKey = self.Key
+			status.loginURL = ""
+		}
+	}
+	// As upstream's state machine, which reports NeedsLogin for these reasons too.
+	status.revocation = ""
+	if status.state == ipn.NeedsLogin {
+		if removed {
+			status.revocation = "NODE_REMOVED"
+		} else if !n.keyExpiry.IsZero() && n.keyExpiry.Before(time.Now()) {
+			status.revocation = "KEY_EXPIRED"
+		}
 	}
 	if status != n.status {
 		n.status = status
@@ -159,6 +186,21 @@ func (n *node) publish(notify ipn.Notify) {
 		close(n.changed)
 		n.changed = make(chan struct{})
 	}
+}
+
+// watchFellBehind is the final ErrMessage of a watch that upstream closes for falling behind
+// (ipnlocal.watchIPNBusFellBehindMessage). It is not a backend error, and watchStatus re-watches.
+const watchFellBehind = "IPN bus consumer fell behind; closing watch"
+
+// printable returns at most limit bytes of s, replacing bytes other than printable ASCII with '?'.
+func printable(s string, limit int) string {
+	b := []byte(s[:min(len(s), limit)])
+	for i, c := range b {
+		if c < ' ' || c > '~' {
+			b[i] = '?'
+		}
+	}
+	return string(b)
 }
 
 // loginURL returns raw if it is a printable ASCII absolute HTTP(S) URL, otherwise "".
@@ -381,7 +423,8 @@ var javaStates = map[ipn.State]string{
 	ipn.Running:          "RUNNING",
 }
 
-// record is "version\nSTATE\nloginURL\naddresses", with comma-separated address literals. All ASCII.
+// record is "version\nSTATE\nREVOCATION\nloginURL\naddresses\nerror", with comma-separated address
+// literals. All printable ASCII apart from the separators.
 func (s nodeStatus) record(version uint64) string {
 	state, ok := javaStates[s.state]
 	if !ok {
@@ -393,5 +436,5 @@ func (s nodeStatus) record(version uint64) string {
 			addresses = append(addresses, ip.String())
 		}
 	}
-	return fmt.Sprintf("%d\n%s\n%s\n%s", version, state, s.loginURL, strings.Join(addresses, ","))
+	return fmt.Sprintf("%d\n%s\n%s\n%s\n%s\n%s", version, state, s.revocation, s.loginURL, strings.Join(addresses, ","), s.err)
 }

@@ -39,6 +39,9 @@ Upstream bugs and workarounds that shape this plan are in [UPSTREAM.md](UPSTREAM
   `tailscaled.state` (0600, directory 0700). Refuses `TS_AUTHKEY`/`TS_AUTH_KEY` in the environment.
 - `awaitStatus(previous, timeout)`: latest state, login URL and addresses, bounded memory, no callbacks.
   The login URL is cleared only once the new node key is saved; callers close only after that.
+  `revocation()` tells `NEEDS_LOGIN` after key expiry (`KEY_EXPIRED`) or device removal
+  (`NODE_REMOVED`) from logout (`null`). `error()` keeps upstream's latest `Notify.ErrMessage`, as at
+  most 256 printable ASCII characters, until the next `RUNNING`; `toString()` omits its text.
 - `dial(host, port, timeout)`: tailnet address or MagicDNS name; returns a socket-pair
   `ParcelFileDescriptor` relayed to a netstack TCP connection. Never uses the device's network.
 - `logout(timeout)`, `login()` (after logout, key expiry, or to re-authenticate), `close()`.
@@ -100,6 +103,13 @@ Upstream bugs and workarounds that shape this plan are in [UPSTREAM.md](UPSTREAM
 - Device coverage: 26 instrumentation tests (25 library, 1 R8-minified demo), zero failures/errors/skips
   per device, on API 34 / x86_64 / 4 KiB pages and API 37.2 / x86_64 / 16 KiB pages, both SELinux
   Enforcing (before the live demo was added). Reports under each module's `build/reports/device-verification/`.
+- Revocation and error status, 2026-11-09: **27 library tests** passed, zero failures/errors/skips
+  (JUnit XML), on API 34 / x86_64 / 4 KiB, API 37.2 / x86_64 / 16 KiB and the Pixel 11 Pro XL
+  (API 37 / arm64-v8a / 4 KiB, USB), all SELinux Enforcing; `LoginTest` (9 tests) passed three more
+  times on the 16 KiB emulator. The 2 R8-minified demo tests passed on API 37.2 / 16 KiB. Reports:
+  `tsnet/build/reports/device-verification/{revocation-api34-4k,revocation-api37.2-16k,hardware-pixel11-api37-4k-usb-revocation}/`
+  and `demo/build/reports/device-verification/revocation-api37.2-16k/`. The typed reasons are tested
+  against the loopback control only; real expiry and removal were observed before they existed.
 - Hardware, 2026-11-08: Pixel 11 Pro XL, API 37 / arm64-v8a / 4 KiB pages, SELinux Enforcing:
   **24 library + 2 R8-minified demo tests**, zero failures/errors/skips, counted from JUnit XML.
   Reports: each module's `build/reports/device-verification/hardware-pixel11-api37-4k/`.
@@ -177,7 +187,8 @@ Upstream bugs and workarounds that shape this plan are in [UPSTREAM.md](UPSTREAM
   unacknowledged (FIN-WAIT-1) and fresh dials timed out (`SocketTimeoutException`). **Log in / renew
   key** plus browser restored direct echoes by address and MagicDNS name. After expiry the node kept
   its ID and address. After removal control asked to connect a new device, which got a new node ID and
-  tailnet IPv4. To the caller both look like logout; there is no typed reason yet (Future 2).
+  tailnet IPv4. To the caller both looked like logout then; `revocation()` was added afterwards and is
+  not yet observed on a real tailnet (Future 1).
   Incidentally, streams stayed open 15 min and 1 h 50 min on steady Wi-Fi. The longer one ended once,
   most likely because the ~15 s echo cadence matched the echo server's 15 s idle timeout. The next
   fresh dial passed.
@@ -187,7 +198,8 @@ Upstream bugs and workarounds that shape this plan are in [UPSTREAM.md](UPSTREAM
   DERP/STUN) with direct and DERP-only exchange; network-change rebinding on a real Wi-Fi/cellular
   switch; CA store parity with `AndroidCAStore`; real control-plane TLS and registration up to an
   unauthorized login URL (`ControlPlaneTest`, needs internet); public login, restart from state,
-  logout, failed logout, key expiry, re-login, device approval; public dial by address and MagicDNS,
+  logout, failed logout, key expiry and device removal with their revocations, re-login, device
+  approval, a rejected registration's error until running; public dial by address and MagicDNS,
   end of stream, close, refused/unroutable/timed-out dials, logout ending access.
 - The release demo uses R8/resource shrinking. Two tests exercise native lifecycle and public-API
   startup/restart through the live screen, reaching browser-authorization readiness without opening
@@ -202,8 +214,8 @@ Upstream bugs and workarounds that shape this plan are in [UPSTREAM.md](UPSTREAM
 ### Live-test harness
 
 - Opt-in demo screen starts the public API with identity under `getNoBackupFilesDir()`, opens the login
-  URL only on a browser-button tap, shows backend state and login persistence, and supports logout and
-  re-authentication. It forwards default-network changes through `ConnectivityManager`.
+  URL only on a browser-button tap, shows backend state, revocation, backend error and login
+  persistence, and supports logout and re-authentication. It forwards default-network changes through `ConnectivityManager`.
 - One destination (tailnet IP or MagicDNS name) and port; a fresh 52-byte challenge must echo exactly.
   Dial and exchange each have a 10-second bound. **Keep connection open** reuses one stream across
   echoes until unticked, a failed echo or close. No URL, credential or peer payload is logged.
@@ -217,22 +229,20 @@ Upstream bugs and workarounds that shape this plan are in [UPSTREAM.md](UPSTREAM
 
 | Entry | Raw bytes | ZIP bytes |
 |---|---:|---:|
-| arm64-v8a library | 17,565,008 | 6,854,761 |
-| x86_64 library | 19,071,024 | 7,536,474 |
+| arm64-v8a library | 17,566,096 | 6,855,879 |
+| x86_64 library | 19,072,240 | 7,537,312 |
 
-Complete release AAR: 14,472,683 bytes. Debug AAR: 15,442,185 bytes. Notices add about 55 KiB to an APK.
+Complete release AAR: 14,475,577 bytes. Debug AAR: 15,444,633 bytes. Notices add about 55 KiB to an APK.
 
 ## Future
 
 1. **Extend real-tailnet coverage.** Login, address/MagicDNS echo, saved-login restart, logout,
    admin key expiry and removal, Wi-Fi/cellular switches with an open stream, direct paths on LAN and
-   carrier NAT, real DERP and failing system DNS passed on hardware (see Verification). Next, if a
-   caller needs them: a DERP-to-direct upgrade, NATs that prevent direct paths, IPv6 peers, subnet
+   carrier NAT, real DERP and failing system DNS passed on hardware (see Verification). Next, repeat
+   admin key expiry and removal to observe `revocation()` on a real tailnet. Then, if a caller needs them: a DERP-to-direct upgrade, NATs that prevent direct paths, IPv6 peers, subnet
    routes, throughput and outages longer than seconds. Use browser authorization, never a checked-in
    or CI auth key. Record untested cases explicitly.
-2. **Finish the lifecycle.** Surface backend errors (`Notify.ErrMessage`), admin key expiry and
-   control's node removal as typed status; the latter two now look like logout (NEEDS_LOGIN). Decide
-   whether an ephemeral mode is needed before adding one. Keep auditing upstream initialization,
+2. **Finish the lifecycle.** Decide whether an ephemeral mode is needed before adding one. Keep auditing upstream initialization,
    filesystem/process behaviour and state permissions; retest the state format on every upstream
    update. Verify `@RequiresPermission` in a scratch consumer. Possibly let callers supply `hostinfo` OS
    version/device model.

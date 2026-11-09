@@ -11,11 +11,13 @@ import (
 	"context"
 	"io"
 	"log"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"tailscale.com/tailcfg"
@@ -34,6 +36,7 @@ var loginProbe struct {
 	stop    func()
 	greeted chan int64 // Bytes the peer's greeting port received before the dialer closed.
 	expired set.Set[key.NodePublic]
+	removed atomic.Bool // Map requests fail as for nodes deleted from the tailnet.
 }
 
 // klethron_login_probe_start returns the control URL, or "" on failure.
@@ -54,6 +57,13 @@ func klethron_login_probe_start(interactive C.int) *C.char {
 		control.DNSConfig = &tailcfg.DNSConfig{Proxied: true}
 		control.MagicDNSDomain = "tail-scale.ts.net" // As in upstream's tsnet tests.
 	}
+	// Real control answers map requests from deleted nodes with 404, as in upstream's tests.
+	control.MaybeRejectRequest = testcontrol.RejectRequestForPath("/machine/map", func() (int, string, string) {
+		if loginProbe.removed.Load() {
+			return http.StatusNotFound, "", "node not found"
+		}
+		return 0, "", ""
+	})
 	control.HTTPTestServer = httptest.NewUnstartedServer(control)
 	control.HTTPTestServer.Config.ErrorLog = log.New(io.Discard, "", 0)
 	control.HTTPTestServer.Start()
@@ -185,6 +195,14 @@ func klethron_login_probe_expire() C.int {
 	return C.int(len(nodes))
 }
 
+// klethron_login_probe_remove makes control answer map requests as for nodes deleted from the
+// tailnet, or no longer. A running node notices once it starts a new map request.
+//
+//export klethron_login_probe_remove
+func klethron_login_probe_remove(removed C.int) {
+	loginProbe.removed.Store(removed != 0)
+}
+
 // klethron_login_probe_reject_registrations makes control reject every registration request,
 // including logouts, with an error. Stopping the server would not: nodes keep their hijacked Noise
 // connection. testcontrol reads the field without locking; no registration is in flight here.
@@ -259,6 +277,7 @@ func klethron_login_probe_stop() {
 		loginProbe.control = nil
 		loginProbe.greeted = nil
 		loginProbe.expired = nil
+		loginProbe.removed.Store(false)
 	}
 }
 
