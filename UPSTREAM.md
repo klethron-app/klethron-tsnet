@@ -100,6 +100,8 @@ or workaround once upstream fixes it. Patches are hash-checked in `BuildGoLibrar
   nodes' map requests with 400, not control's 404, and keeps streaming to running nodes, so removal is
   simulated with a 404 for map requests that a node sees at its next start. `httptest.Server.Close` does
   not close hijacked Noise connections, so stopping it does not make control unreachable.
+  `AllNodes` includes staged rotation keys, including abandoned candidates; the hostname probe counts
+  devices by stable ID.
 
 ## Resolved upstream
 

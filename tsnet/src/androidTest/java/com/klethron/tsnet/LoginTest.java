@@ -214,6 +214,8 @@ public final class LoginTest {
             assertEquals(NodeStatus.State.NEEDS_LOGIN, status.state());
             assertEquals(NodeStatus.Revocation.KEY_EXPIRED, status.revocation());
             assertTrue("Unexpected login URL", status.loginUrl().startsWith(controlUrl + "/auth/"));
+            // Control stages the replacement key alongside the old key for the same device.
+            assertEquals("klethron-expiry-test", nativeProbeHostnames());
             assertTrue(nativeProbeComplete(status.loginUrl().getBytes(StandardCharsets.UTF_8)));
             status = await(node, s -> s.state() == NodeStatus.State.RUNNING);
             assertNull(status.loginUrl());
@@ -225,6 +227,7 @@ public final class LoginTest {
             status = await(node, s -> s.loginUrl() != null);
             assertEquals(NodeStatus.State.RUNNING, status.state());
             assertTrue("Unexpected login URL", status.loginUrl().startsWith(controlUrl + "/auth/"));
+            assertEquals("klethron-expiry-test", nativeProbeHostnames());
             assertTrue(nativeProbeComplete(status.loginUrl().getBytes(StandardCharsets.UTF_8)));
             // The URL is cleared once the new key is saved, so closing then keeps the login.
             status = await(node, s -> s.loginUrl() == null);

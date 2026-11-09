@@ -327,8 +327,16 @@ func klethron_login_probe_hostnames() *C.char {
 	defer loginProbe.Unlock()
 	var names []string
 	if loginProbe.control != nil {
+		seen := make(map[tailcfg.StableNodeID]string)
 		for _, node := range loginProbe.control.AllNodes() {
-			names = append(names, node.Hostinfo.Hostname())
+			name := node.Hostinfo.Hostname()
+			// Key rotation stages two keys for one device; AllNodes includes both.
+			// Keep distinct devices and conflicting hostnames visible to assertions.
+			if previous, ok := seen[node.StableID]; ok && previous == name {
+				continue
+			}
+			seen[node.StableID] = name
+			names = append(names, name)
 		}
 	}
 	slices.Sort(names)
