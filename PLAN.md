@@ -40,9 +40,10 @@ Upstream bugs and workarounds that shape this plan are in [UPSTREAM.md](UPSTREAM
 - Tag builds hand the publication to a `release` job in the protected `maven-central` environment that
   runs no Gradle. `.github/central-bundle.sh` checks the artifact set and checksums, signs in a temporary
   keyring and zips a Portal bundle; with a throwaway key, all signatures verified against only the public
-  key, and SNAPSHOT or mismatched versions, extra files, bad checksums and a wrong passphrase failed. The
-  job uploads a user-managed deployment and waits for validation; a maintainer publishes it. The upload
-  is untested until the Central account exists. Otherwise publishing goes only to `build/maven/`.
+  key, and SNAPSHOT or mismatched versions, extra files, bad checksums and a wrong passphrase failed.
+  Approving the job is the one human gate: from 0.1.1 it publishes automatically once Central validates
+  the upload (0.1.0 was uploaded for manual publication and validated on 2026-11-09). Otherwise
+  publishing goes only to `build/maven/`.
 
 ### Public API (`TsnetNode`, `TsnetStatus`)
 

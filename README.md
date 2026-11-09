@@ -152,12 +152,15 @@ A release is the commit of its tag, which the POM names (`<scm><tag>`); that com
 the NDK, and `TsnetNode.tailscaleVersion()` reports the linked Tailscale version. To release `X.Y.Z`:
 
 1. Commit `version=X.Y.Z` in `gradle.properties`, then push the tag `vX.Y.Z` on that commit.
-2. CI builds and verifies the publication as on `main`. The `release` job, in the protected
-   `maven-central` environment, signs it with `.github/central-bundle.sh` and uploads it to the Central
-   Portal as a user-managed deployment. It runs no Gradle, and the build job never sees the secrets.
-3. Compare the signed files, the run's `maven-release` artifact (`gh run download <run> -n maven-release`),
-   with a local build of the tag using the pinned toolchains. Then publish the deployment in the Portal
-   (irreversible) or drop it, and commit the next `-SNAPSHOT` version.
+2. CI builds and verifies the publication as on `main`, then the `release` job, in the protected
+   `maven-central` environment, waits for approval.
+3. Before approving, compare the files it will sign, the run's `maven-release` artifact
+   (`gh run download <run> -n maven-release`), with a local build of the tag using the pinned toolchains.
+   The POM and native libraries must be byte-identical and every archive's unpacked files identical;
+   compressed bytes differ between JDK builds (Temurin's bundled zlib and Homebrew's zlib-ng).
+4. Approving publishes irreversibly: the job signs the files with `.github/central-bundle.sh`, uploads
+   them and waits until Central has validated and published them. It runs no Gradle, and the build job
+   never sees the secrets. Commit the next `-SNAPSHOT` version.
 
 Releases are signed by `Klethron release signing <release@klethron.com>`, fingerprint
 `361C CF78 F83A DAED D8DC  6DA8 A32D AC0A CDC6 D35B`, in [`release-signing-key.asc`](release-signing-key.asc)
