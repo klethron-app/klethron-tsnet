@@ -161,7 +161,7 @@ the NDK, and `TsnetNode.tailscaleVersion()` reports the linked Tailscale version
 
 Releases are signed by `Klethron release signing <release@klethron.com>`, fingerprint
 `361C CF78 F83A DAED D8DC  6DA8 A32D AC0A CDC6 D35B`, in [`release-signing-key.asc`](release-signing-key.asc)
-and on `keys.openpgp.org`. Its ed25519 signing subkey `2F78 F885 F811 292A 6199  2A11 8C31 C50B B472 B529`
+and on `keys.openpgp.org` and `keyserver.ubuntu.com`. Its ed25519 signing subkey `2F78 F885 F811 292A 6199  2A11 8C31 C50B B472 B529`
 expires 2028-11-08; the primary key stays offline. Import the file, then check a download with
 `gpg --verify tsnet-X.Y.Z.aar.asc tsnet-X.Y.Z.aar`.
 
