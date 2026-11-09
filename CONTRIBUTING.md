@@ -17,10 +17,13 @@ ANDROID_SERIAL=<serial> ./gradlew :tsnet:connectedDebugAndroidTest
 ANDROID_SERIAL=<serial> ./gradlew :demo:connectedReleaseAndroidTest
 ```
 
+CI runs both device suites on x86_64 emulators with API 34/4 KiB pages and API 37.2/16 KiB pages for
+main, pull requests and release tags. Its `reports` artifact includes per-device results.
+
 Device tests require SELinux Enforcing. The network-change test requires Wi-Fi with a cellular
-fallback and toggles Wi-Fi; use USB ADB on hardware. Record JUnit XML test counts and device/API/ABI/page size in the commit message. Debug builds
-include local control-server and peer fixtures; release builds exclude them. The demo tests exercise
-an R8-minified consumer.
+fallback and toggles Wi-Fi; use USB ADB on hardware. Record JUnit XML test counts and device/API/ABI/page
+size in the commit message. Debug builds include local control-server and peer fixtures; release builds
+exclude them. The demo tests exercise an R8-minified consumer.
 
 The AAR is `tsnet/build/outputs/aar/tsnet-release.aar`; native sizes and alignment are in
 `tsnet/build/reports/native/sizes.tsv`. When changing native dependencies, compare both ABI library

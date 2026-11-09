@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+reports=build/emulator-tests/api-$1-pages-$2
+mkdir -p "$reports"
+api=$(adb shell getprop ro.build.version.sdk)
+abi=$(adb shell getprop ro.product.cpu.abi)
+pages=$(adb shell getconf PAGESIZE)
+selinux=$(adb shell getenforce)
+printf 'API=%s ABI=%s page_size=%s SELinux=%s\n' "$api" "$abi" "$pages" "$selinux" | tee "$reports/device.txt"
+[[ $api == "$1" && $abi == x86_64 && $pages == "$2" && $selinux == Enforcing ]]
+adb shell svc wifi enable
+adb shell svc data enable
+
+save_reports() {
+    for module in tsnet demo; do
+        mkdir -p "$reports/$module"
+        if [[ -d $module/build/reports/androidTests ]]; then
+            cp -R "$module/build/reports/androidTests" "$reports/$module/"
+        fi
+        if [[ -d $module/build/outputs/androidTest-results ]]; then
+            find "$module/build/outputs/androidTest-results" -name 'TEST-*.xml' -exec cp {} "$reports/$module/" \;
+        fi
+    done
+}
+trap save_reports EXIT
+./gradlew --no-daemon --continue :tsnet:connectedDebugAndroidTest :demo:connectedReleaseAndroidTest
