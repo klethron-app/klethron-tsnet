@@ -10,8 +10,8 @@ interactive login, key expiry, device approval, resuming from saved state and di
 MagicDNS name. A user-run manual test of the R8-minified demo on arm64 hardware also passed real-tailnet
 browser login, TCP echo by IPv4 address and MagicDNS name, saved-login restart, and logout/re-login.
 An ADB-driven follow-up also verified fresh TCP echoes after Wi-Fi → cellular → Wi-Fi switches on
-the same running node. Real DERP and admin-initiated expiry/removal remain unverified.
-Debug-only tests also start nodes against
+the same running node, and echoes relayed only through Tailscale's DERP servers. Admin-initiated
+expiry/removal remains unverified. Debug-only tests also start nodes against
 a rejecting loopback control endpoint, connect two in-process nodes through a loopback test control
 and DERP server to exchange TCP data over direct and relay-only paths, and rebind when the device's
 default network changes. Another contacts Tailscale's real control plane without credentials,
@@ -170,8 +170,9 @@ connection throughout (see PLAN.md). Wi-Fi was restored afterward. A third follo
 path status to confirm direct paths on Wi-Fi and through the carrier's NAT on LTE. It also showed that
 logout ends an open stream and fresh dials, and that browser re-login restores the echo. A fourth
 broke system DNS with an unresolvable strict Private DNS hostname: a fresh process still started with
-the saved login and echoed by address and MagicDNS name. To repeat the basic test, use a tailnet and
-peer you own.
+the saved login and echoed by address and MagicDNS name. A fifth used a peer that could not use UDP:
+fresh and kept-open echoes, on Wi-Fi and cellular, all went through Tailscale's DERP relay. To repeat
+the basic test, use a tailnet and peer you own.
 
 1. Install the minified consumer with `./gradlew :demo:installRelease` (set `ANDROID_SERIAL` when more
    than one device is attached). Open **Klethron tsnet demo → Live tailnet test → Start / resume node**.
@@ -220,7 +221,7 @@ Record only test outcomes, device/API/ABI/page size, network types and timings:
 | Login, address/MagicDNS echo, saved-login restart | RUNNING, Login saved, exact echo before and after restart |
 | Logout/re-login, admin key expiry/removal | Access ends; observe state; browser re-authentication restores echo |
 | Wi-Fi ↔ cellular, different NATs | Fresh and kept-open echoes succeed after each switch; the peer sees one unchanged connection for the latter (`ss -tn`); use USB ADB |
-| Direct and real DERP | Peer-side path evidence during exchange (`tailscale status` on the peer shows `direct` or `relay`), with UDP blocked only in a controlled test network for DERP; successful echo alone does not identify the path |
+| Direct and real DERP | Peer-side path evidence during exchange (`tailscale status` on the peer shows `direct` or `relay`); successful echo alone does not identify the path. For DERP, block the peer's UDP in a controlled test network, or run an ephemeral tsnet echo peer with `TS_DEBUG_ALWAYS_USE_DERP=true` (no root; it opens no UDP sockets) and log it out afterwards |
 | Fallback DNS | System DNS deliberately fails while control/DERP remain reachable (for example `adb shell settings put global private_dns_mode hostname` and `private_dns_specifier` set to an unresolvable name; delete both afterwards); a fresh process starts and a fresh connection succeeds |
 
 Do not claim forced-DERP or fallback-DNS coverage without those conditions. The demo does not expose
