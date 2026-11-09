@@ -385,11 +385,19 @@ public final class LoginTest {
     /// Without interactive login, nodes join at once and MagicDNS serves `tail-scale.ts.net`.
     static native String nativeProbeStart(boolean interactive);
 
-    /// Returns the IPv4 address of a peer that echoes on port 7070 and greets on port 7071.
+    /// Returns the IPv4 address of a peer that echoes on port 7070, greets on 7071, floods 48 MiB of a
+    /// pattern (byte `i` is `i % 251`) on 7073 and on 7074 reads that pattern once released.
     static native String nativeProbeStartPeer(byte[] directory);
 
-    /// Bytes the greeting port received before the dialer closed, -1 on error, -2 on timeout.
-    static native long nativeProbeAwaitGreeted(long timeoutMillis);
+    /// Bytes the greeting or released stalled port received before the dialer closed, -1 on error,
+    /// -2 on timeout, -3 if a stalled port received a byte outside the pattern.
+    static native long nativeProbeAwaitReceived(long timeoutMillis);
+
+    /// Bytes the flooding port has written.
+    static native long nativeProbeFlooded();
+
+    /// Lets the stalled port read.
+    static native void nativeProbeRelease();
 
     private static native boolean nativeProbeComplete(byte[] loginUrl);
 

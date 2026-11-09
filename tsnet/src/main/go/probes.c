@@ -77,8 +77,18 @@ Java_com_klethron_tsnet_LoginTest_nativeProbeStartPeer(JNIEnv *env, jclass type,
 }
 
 JNIEXPORT jlong JNICALL
-Java_com_klethron_tsnet_LoginTest_nativeProbeAwaitGreeted(JNIEnv *env, jclass type, jlong timeoutMillis) {
-    return klethron_login_probe_await_greeted(timeoutMillis);
+Java_com_klethron_tsnet_LoginTest_nativeProbeAwaitReceived(JNIEnv *env, jclass type, jlong timeoutMillis) {
+    return klethron_login_probe_await_received(timeoutMillis);
+}
+
+JNIEXPORT jlong JNICALL
+Java_com_klethron_tsnet_LoginTest_nativeProbeFlooded(JNIEnv *env, jclass type) {
+    return klethron_login_probe_flooded();
+}
+
+JNIEXPORT void JNICALL
+Java_com_klethron_tsnet_LoginTest_nativeProbeRelease(JNIEnv *env, jclass type) {
+    klethron_login_probe_release();
 }
 
 JNIEXPORT jboolean JNICALL

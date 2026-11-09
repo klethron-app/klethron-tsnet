@@ -91,10 +91,12 @@ public final class TsnetNode implements AutoCloseable {
     /// uses the device's own network, and other addresses fail with [NoRouteToHostException].
     ///
     /// The result is a connected Unix stream socket relaying the connection. Read and write it as a
-    /// blocking stream, or make it non-blocking and poll it with [android.system.Os]. End of stream
-    /// means the peer closed its side; the connection stays writable. Closing the descriptor or
-    /// shutting down its output closes the connection: half-closing towards the peer is not
-    /// supported. Closing the node closes all of its connections.
+    /// blocking stream, or make it non-blocking and poll it with [android.system.Os] or
+    /// [android.os.MessageQueue]. Buffering is bounded: a side that stops reading soon stops the
+    /// other's writes. End of stream means the peer closed its side; the connection stays writable.
+    /// Closing the descriptor or shutting down its output closes the connection: half-closing
+    /// towards the peer is not supported. Closing the node closes all of its connections; writes
+    /// then fail with `EPIPE`.
     ///
     /// @param host a tailnet IP address literal or MagicDNS name, at most 255 UTF-8 bytes
     /// @return the connection, which the caller must close

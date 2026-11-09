@@ -79,7 +79,8 @@ exist only in debug builds; `verifyNativeAar` rejects them in release.
 
 - `LoginTest` and `DialTest` drive the public API against an in-process loopback test control server:
   interactive login, restart from state, logout, failed logout, key expiry, device removal, device
-  approval, rejected registration, and dialing an in-memory peer by address and MagicDNS name.
+  approval, rejected registration, and dialing an in-memory peer by address and MagicDNS name,
+  blocking and non-blocking, with backpressure in both directions.
 - `TailnetTest` exchanges data between two in-process nodes over a direct path and DERP only.
   `NetworkChangeTest` disables Wi-Fi and requires both nodes to rebind; on hardware, use USB ADB.
 - `NetworkInterfacesTest` and `TrustRootsTest` compare native interfaces and CA roots with Android's.

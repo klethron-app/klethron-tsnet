@@ -108,6 +108,14 @@ Instrumentation runs, all SELinux Enforcing, zero failures/errors/skips:
 | 2026-11-09 | Emulator API 37.2 / x86_64 / 16 KiB | 2 R8-minified demo | `demo/…/thread-annotations-api37.2-16k` |
 | 2026-11-09, pin `62d055f4c38b` | Emulator API 37.2 / x86_64 / 16 KiB; Pixel 11 Pro XL API 37 / arm64-v8a / 4 KiB (USB) | 23 library each, 2 demo on the emulator | `upstream-62d055-api37.2-16k`, `upstream-62d055-pixel11-api37-4k-usb`, `demo/…/upstream-62d055-api37.2-16k` |
 | 2026-11-09 | Emulators API 34 / x86_64 / 4 KiB and API 37.2 / x86_64 / 16 KiB | 2 demo each, including rotation with a pending login; it fails without `configChanges` | `demo/…/recreation-emulator-5556`, `recreation-emulator-5558`, `recreation-negative-noconfigchanges-emulator-5558` |
+| 2026-11-09 | Emulators API 34 / x86_64 / 4 KiB and API 37.2 / x86_64 / 16 KiB; Pixel 11 Pro XL API 37 / arm64-v8a / 4 KiB (USB) | 26 library each; both backpressure tests fail with an unbounded relay | `nonblocking-emulator-5556`, `nonblocking-emulator-5558`, `nonblocking-pixel11-api37-4k-usb`, `nonblocking-negative-unbounded-emulator-5558` |
+
+Non-blocking use of a dialed descriptor, against the loopback peer: an empty read fails with `EAGAIN`,
+and `Os.poll` and `MessageQueue` descriptor events report readiness. Unread data stalled the writer
+after 1.4–1.8 MiB in either direction (netstack grows its windows only as data is read; its 8 MiB
+receive and 6 MiB send buffers are the ceiling), and the stream then arrived intact. One-byte loopback
+round trips took a median of 64–125 µs on the emulators and 639–826 µs on the Pixel: relay overhead,
+not network latency. A write after the node closed threw `EPIPE`; no `SIGPIPE` ended the process.
 
 `NetworkChangeTest` switches the physical default network, so on hardware run it over USB, not
 wireless ADB. `ControlPlaneTest` and the demo's live-start test need internet.
@@ -144,7 +152,7 @@ peer, and path evidence from the peer's own status (`demo/build/reports/device-v
 **Not verified:** the live demo on 16 KiB (emulator Chrome dropped typed sign-in characters), a
 DERP-to-direct upgrade, NATs that prevent direct paths, subnet routes, IPv6 peers, throughput, outages
 longer than seconds, tailnet-period key expiry, revocation while not running, arm64 with 16 KiB pages,
-a non-blocking consumer, or Play split delivery.
+backpressure or interactive latency on a real tailnet, or Play split delivery.
 
 Seen once, unexplained: an API 37.2 logout test saw no status change after `STOPPED` for 30 s and the
 next close took 10 s. Watch for recurrence.
@@ -176,9 +184,11 @@ Complete release AAR: 13,766,362 bytes. Debug AAR: 14,869,962 bytes. Notices add
    browser authorization, never a checked-in or CI auth key.
 2. **Keep the lifecycle audited.** On every upstream update, re-audit initialization, filesystem and
    subprocess reachability and state permissions (UPSTREAM.md), and retest the state format.
-3. **Validate `dial` with Klethron's** non-blocking session loop (`Os.poll`/`MessageQueue`), including
-   backpressure with a slow reader and interactive latency. Add peer listing with stable node IDs only
-   with that caller. Keep Go panic and allocation failure handling explicit.
+3. **Validate `dial` with Klethron's session loop.** Its `SessionLoop` runs a `java.nio` `Selector`,
+   which has no public API to register a `ParcelFileDescriptor`: its adapter needs an `Os.poll` helper
+   thread or `MessageQueue` descriptor events (both verified here), waking the selector. Measure SSH
+   backpressure and interactive latency there on a real tailnet. Add peer listing with stable node IDs
+   only with that caller. Keep Go panic and allocation failure handling explicit.
 4. **Verify the live demo on a 16 KiB device**, including browser return and activity recreation.
 5. **Revalidate feature exclusions** on a real tailnet. Reconsider `useexitnode`/`useproxy` only for a
    caller; omit `serve` once upstream fixes the build. Update the licence inventory for the final set.

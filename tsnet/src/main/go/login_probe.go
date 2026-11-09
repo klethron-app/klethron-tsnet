@@ -11,6 +11,7 @@ import (
 	"context"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -32,11 +33,13 @@ import (
 // with MagicDNS, and DialTest adds an in-memory peer. No real tailnet is involved.
 var loginProbe struct {
 	sync.Mutex
-	control *testcontrol.Server
-	stop    func()
-	greeted chan int64 // Bytes the peer's greeting port received before the dialer closed.
-	expired set.Set[key.NodePublic]
-	removed atomic.Bool // Map requests fail as for nodes deleted from the tailnet.
+	control  *testcontrol.Server
+	stop     func()
+	received chan int64    // Of the peer's greeting and stalled ports, per connection the dialer closed.
+	release  chan struct{} // Closed to let the peer's stalled port read.
+	flooded  atomic.Int64  // Bytes the peer's flooding port has written.
+	expired  set.Set[key.NodePublic]
+	removed  atomic.Bool // Map requests fail as for nodes deleted from the tailnet.
 }
 
 // klethron_login_probe_start returns the control URL, or "" on failure.
@@ -78,13 +81,16 @@ func klethron_login_probe_start(interactive C.int) *C.char {
 
 // klethron_login_probe_start_peer starts an in-memory peer that echoes on port 7070. On port 7071
 // it sends a greeting, closes its side, then reports how many bytes it received until the dialer
-// closed. It returns the peer's tailnet IPv4 address, or "" on failure.
+// closed. On port 7073 it writes floodBytes of the probe pattern, counting progress, then closes.
+// On port 7074 it reads nothing until released, then reports how many bytes of the probe pattern
+// it received until the dialer closed, or -3 at the first other byte. It returns the peer's
+// tailnet IPv4 address, or "" on failure.
 //
 //export klethron_login_probe_start_peer
 func klethron_login_probe_start_peer(path *C.char, length C.int) *C.char {
 	loginProbe.Lock()
 	defer loginProbe.Unlock()
-	if loginProbe.control == nil || loginProbe.control.RequireAuth || loginProbe.greeted != nil {
+	if loginProbe.control == nil || loginProbe.control.RequireAuth || loginProbe.received != nil {
 		return C.CString("")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -99,53 +105,114 @@ func klethron_login_probe_start_peer(path *C.char, length C.int) *C.char {
 	if problem != "" {
 		return C.CString("")
 	}
-	echo, err := server.Listen("tcp", ":7070")
-	if err != nil {
-		return C.CString("")
-	}
-	peer.closers = append(peer.closers, func() { _ = echo.Close() })
-	go serveEcho(echo)
-	greet, err := server.Listen("tcp", ":7071")
-	if err != nil {
-		return C.CString("")
-	}
-	peer.closers = append(peer.closers, func() { _ = greet.Close() })
-	greeted := make(chan int64, 16)
-	loginProbe.greeted = greeted
-	go func() {
-		for {
-			conn, err := greet.Accept()
-			if err != nil {
-				return
-			}
-			go func() {
-				defer conn.Close()
-				_, _ = conn.Write([]byte("klethron\n"))
-				_ = conn.(interface{ CloseWrite() error }).CloseWrite()
-				received, err := io.Copy(io.Discard, conn)
-				if err != nil {
-					received = -1
+	received := make(chan int64, 16)
+	release := make(chan struct{})
+	loginProbe.received, loginProbe.release = received, release
+	loginProbe.flooded.Store(0)
+	handlers := map[string]func(net.Conn){
+		":7070": func(conn net.Conn) { _, _ = io.Copy(conn, conn) },
+		":7071": func(conn net.Conn) {
+			_, _ = conn.Write([]byte("klethron\n"))
+			_ = conn.(interface{ CloseWrite() error }).CloseWrite()
+			received <- countReceived(conn, false)
+		},
+		":7073": func(conn net.Conn) {
+			chunk := make([]byte, 16<<10)
+			for written := 0; written < floodBytes; written += len(chunk) {
+				for i := range chunk {
+					chunk[i] = byte((written + i) % 251)
 				}
-				greeted <- received
-			}()
+				if _, err := conn.Write(chunk); err != nil {
+					return
+				}
+				loginProbe.flooded.Add(int64(len(chunk)))
+			}
+		},
+		":7074": func(conn net.Conn) {
+			<-release
+			received <- countReceived(conn, true)
+		},
+	}
+	for port, handle := range handlers {
+		ln, err := server.Listen("tcp", port)
+		if err != nil {
+			return C.CString("")
 		}
-	}()
+		peer.closers = append(peer.closers, func() { _ = ln.Close() })
+		go func() {
+			for {
+				conn, err := ln.Accept()
+				if err != nil {
+					return
+				}
+				go func() {
+					defer conn.Close()
+					handle(conn)
+				}()
+			}
+		}()
+	}
 	return C.CString(ip.String())
 }
 
-// klethron_login_probe_await_greeted returns the bytes received by the next greeting connection
-// that the dialer closed, -1 after a read error, or -2 if none closed within the timeout.
+// floodBytes exceeds what the dialer and peer can buffer for one connection: netstack's 8 MiB
+// receive and 6 MiB send buffers, plus the relay's socket pair.
+const floodBytes = 48 << 20
+
+// countReceived reads conn to its end, returning the bytes read, -1 after a read error, or with
+// pattern, -3 at the first byte that differs from the probe pattern.
+func countReceived(conn net.Conn, pattern bool) int64 {
+	buffer := make([]byte, 64<<10)
+	var total int64
+	for {
+		n, err := conn.Read(buffer)
+		for i, b := range buffer[:n] {
+			if pattern && b != byte((total+int64(i))%251) {
+				return -3
+			}
+		}
+		total += int64(n)
+		if err == io.EOF {
+			return total
+		}
+		if err != nil {
+			return -1
+		}
+	}
+}
+
+// klethron_login_probe_flooded returns the bytes the peer's flooding port has written.
 //
-//export klethron_login_probe_await_greeted
-func klethron_login_probe_await_greeted(timeoutMillis C.longlong) C.longlong {
+//export klethron_login_probe_flooded
+func klethron_login_probe_flooded() C.longlong {
+	return C.longlong(loginProbe.flooded.Load())
+}
+
+// klethron_login_probe_release lets the peer's stalled port read, once per peer.
+//
+//export klethron_login_probe_release
+func klethron_login_probe_release() {
 	loginProbe.Lock()
-	greeted := loginProbe.greeted
+	defer loginProbe.Unlock()
+	if loginProbe.release != nil {
+		close(loginProbe.release)
+		loginProbe.release = nil
+	}
+}
+
+// klethron_login_probe_await_received returns the count reported by the next greeting or stalled
+// connection that the dialer closed, or -2 if none closed within the timeout.
+//
+//export klethron_login_probe_await_received
+func klethron_login_probe_await_received(timeoutMillis C.longlong) C.longlong {
+	loginProbe.Lock()
+	reports := loginProbe.received
 	loginProbe.Unlock()
-	if greeted == nil {
+	if reports == nil {
 		return -2
 	}
 	select {
-	case received := <-greeted:
+	case received := <-reports:
 		return C.longlong(received)
 	case <-time.After(milliseconds(timeoutMillis)):
 		return -2
@@ -273,9 +340,12 @@ func klethron_login_probe_stop() {
 	loginProbe.Lock()
 	defer loginProbe.Unlock()
 	if loginProbe.control != nil {
+		if loginProbe.release != nil {
+			close(loginProbe.release) // Ends stalled handlers once their connections close.
+		}
 		loginProbe.stop()
 		loginProbe.control = nil
-		loginProbe.greeted = nil
+		loginProbe.received, loginProbe.release = nil, nil
 		loginProbe.expired = nil
 		loginProbe.removed.Store(false)
 	}

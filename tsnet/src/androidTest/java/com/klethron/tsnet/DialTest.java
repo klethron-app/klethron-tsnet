@@ -5,11 +5,17 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
+import android.os.HandlerThread;
+import android.os.MessageQueue;
+import android.os.MessageQueue.OnFileDescriptorEventListener;
+import android.os.ParcelFileDescriptor;
+import android.system.ErrnoException;
 import android.system.Os;
 import android.system.OsConstants;
 import android.system.StructPollfd;
-import android.os.ParcelFileDescriptor;
+import android.util.Log;
 import java.io.ByteArrayOutputStream;
+import java.io.FileDescriptor;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
@@ -21,6 +27,7 @@ import java.net.UnknownHostException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.Arrays;
 import java.util.Random;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
@@ -85,7 +92,92 @@ public final class DialTest {
             write(connection, "after".getBytes(StandardCharsets.US_ASCII));
             connection.close();
             // Closing the descriptor ends the peer's connection after delivering what was written.
-            assertEquals(5, LoginTest.nativeProbeAwaitGreeted(10000));
+            assertEquals(5, LoginTest.nativeProbeAwaitReceived(10000));
+        }
+    }
+
+    @Test(timeout = 60000)
+    public void servesANonBlockingConsumer() throws Exception {
+        try (TsnetNode node = startNode();
+                ParcelFileDescriptor connection = node.dial(peer, 7070, WAIT)) {
+            FileDescriptor fd = nonBlocking(connection);
+            byte[] one = new byte[1];
+            ErrnoException empty = assertThrows(ErrnoException.class, () -> Os.read(fd, one, 0, 1));
+            assertEquals(OsConstants.EAGAIN, empty.errno);
+            // Interactive round trips of one byte each.
+            long[] nanos = new long[200];
+            for (int i = 0; i < nanos.length; i++) {
+                long start = System.nanoTime();
+                assertEquals(1, Os.write(fd, new byte[] {(byte) i}, 0, 1));
+                awaitReady(fd, OsConstants.POLLIN);
+                assertEquals(1, Os.read(fd, one, 0, 1));
+                assertEquals((byte) i, one[0]);
+                nanos[i] = System.nanoTime() - start;
+            }
+            Arrays.sort(nanos);
+            Log.i("DialTest", "Loopback round trip µs: median " + nanos[nanos.length / 2] / 1000
+                    + ", max " + nanos[nanos.length - 1] / 1000);
+            // A Looper can wait for the descriptor too.
+            HandlerThread thread = new HandlerThread("dial-events");
+            thread.start();
+            try {
+                CompletableFuture<Integer> events = new CompletableFuture<>();
+                MessageQueue queue = thread.getLooper().getQueue();
+                queue.addOnFileDescriptorEventListener(fd, OnFileDescriptorEventListener.EVENT_INPUT, (descriptor, event) -> {
+                    events.complete(event);
+                    return 0; // Unregisters.
+                });
+                assertEquals(1, Os.write(fd, one, 0, 1));
+                assertEquals(OnFileDescriptorEventListener.EVENT_INPUT, (int) events.get(10, TimeUnit.SECONDS));
+                assertEquals(1, Os.read(fd, one, 0, 1));
+            } finally {
+                thread.quitSafely();
+            }
+        }
+    }
+
+    @Test(timeout = 120000)
+    public void slowsAPeerWhileTheAppDoesNotRead() throws Exception {
+        try (TsnetNode node = startNode();
+                ParcelFileDescriptor connection = node.dial(peer, 7073, WAIT)) {
+            // Until the peer has written and then made no progress for a second.
+            long flooded = 0;
+            for (long last = 0; flooded == 0 || flooded != last; Thread.sleep(1000)) {
+                last = flooded;
+                flooded = LoginTest.nativeProbeFlooded();
+            }
+            Log.i("DialTest", "Peer stalled after writing " + flooded + " unread bytes");
+            assertTrue("Peer was not slowed: " + flooded, flooded < FLOOD);
+            FileDescriptor fd = nonBlocking(connection);
+            byte[] buffer = new byte[64 << 10];
+            long received = 0;
+            for (int read; (read = readWhenReady(fd, buffer)) > 0; received += read) {
+                assertPattern(received, buffer, read);
+            }
+            assertEquals(FLOOD, received);
+        }
+    }
+
+    @Test(timeout = 120000)
+    public void slowsTheAppWhileThePeerDoesNotRead() throws Exception {
+        try (TsnetNode node = startNode();
+                ParcelFileDescriptor connection = node.dial(peer, 7074, WAIT)) {
+            FileDescriptor fd = nonBlocking(connection);
+            byte[] chunk = new byte[64 << 10];
+            long written = 0;
+            // Until the descriptor stays unwritable for a second.
+            while (written < FLOOD && poll(fd, OsConstants.POLLOUT, 1000)) {
+                written += Os.write(fd, pattern(written, chunk), 0, (int) Math.min(chunk.length, FLOOD - written));
+            }
+            Log.i("DialTest", "App stalled after writing " + written + " unread bytes");
+            assertTrue("App was not slowed: " + written, written < FLOOD);
+            LoginTest.nativeProbeRelease();
+            while (written < FLOOD) {
+                awaitReady(fd, OsConstants.POLLOUT);
+                written += Os.write(fd, pattern(written, chunk), 0, (int) Math.min(chunk.length, FLOOD - written));
+            }
+            connection.close();
+            assertEquals(FLOOD, LoginTest.nativeProbeAwaitReceived(30000));
         }
     }
 
@@ -115,6 +207,8 @@ public final class DialTest {
         try (ParcelFileDescriptor connection = node.dial(peer, 7070, WAIT)) {
             node.close();
             assertEquals(-1, new FileInputStream(connection.getFileDescriptor()).read());
+            // EPIPE, rather than a SIGPIPE that would end the process.
+            assertThrows(IOException.class, () -> new FileOutputStream(connection.getFileDescriptor()).write(1));
         }
         assertThrows(IllegalStateException.class, () -> node.dial(peer, 7070, WAIT));
     }
@@ -152,6 +246,50 @@ public final class DialTest {
         TsnetNode node = new TsnetNode();
         node.start(directory.resolve("node").toFile(), "klethron-dialer", controlUrl);
         return node;
+    }
+
+    /// Bytes of the probe pattern (byte `i` is `i % 251`) that the peer floods on port 7073 and
+    /// that its stalled port 7074 expects. More than both nodes can buffer for one connection.
+    private static final long FLOOD = 48 << 20;
+
+    /// Fills `bytes` with the probe pattern from stream offset `offset`.
+    private static byte[] pattern(long offset, byte[] bytes) {
+        for (int i = 0; i < bytes.length; i++) {
+            bytes[i] = (byte) ((offset + i) % 251);
+        }
+        return bytes;
+    }
+
+    private static void assertPattern(long offset, byte[] bytes, int length) {
+        for (int i = 0; i < length; i++) {
+            if (bytes[i] != (byte) ((offset + i) % 251)) {
+                throw new AssertionError("Unexpected byte at offset " + (offset + i));
+            }
+        }
+    }
+
+    private static FileDescriptor nonBlocking(ParcelFileDescriptor connection) throws ErrnoException {
+        FileDescriptor fd = connection.getFileDescriptor();
+        Os.fcntlInt(fd, OsConstants.F_SETFL, Os.fcntlInt(fd, OsConstants.F_GETFL, 0) | OsConstants.O_NONBLOCK);
+        return fd;
+    }
+
+    /// Returns whether `fd` became ready for `events` within `timeoutMillis`.
+    private static boolean poll(FileDescriptor fd, int events, int timeoutMillis) throws ErrnoException {
+        StructPollfd poll = new StructPollfd();
+        poll.fd = fd;
+        poll.events = (short) events;
+        return Os.poll(new StructPollfd[] {poll}, timeoutMillis) == 1;
+    }
+
+    private static void awaitReady(FileDescriptor fd, int events) throws ErrnoException {
+        assertTrue("Not ready within 10 s", poll(fd, events, 10000));
+    }
+
+    /// Reads once `fd` is readable, returning 0 at end of stream.
+    private static int readWhenReady(FileDescriptor fd, byte[] buffer) throws Exception {
+        awaitReady(fd, OsConstants.POLLIN);
+        return Os.read(fd, buffer, 0, buffer.length);
     }
 
     private static void write(ParcelFileDescriptor connection, byte[] bytes) {
