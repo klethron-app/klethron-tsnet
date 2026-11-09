@@ -166,8 +166,10 @@ direct versus DERP paths. An ADB-driven follow-up on 2026-11-09 verified fresh 5
 (50 ms), cellular (1,126 ms), and restored Wi-Fi (37 ms), without restarting the node. Those timings
 measure dial plus exchange, not network handoff. A second follow-up with **Keep connection open**
 verified that one TCP stream kept echoing across Wi-Fi → cellular → Wi-Fi, with the peer seeing the same
-connection throughout (see PLAN.md). Wi-Fi was restored afterward. To repeat the basic test, use a
-tailnet and peer you own.
+connection throughout (see PLAN.md). Wi-Fi was restored afterward. A third follow-up used the peer's
+path status to confirm direct paths on Wi-Fi and through the carrier's NAT on LTE. It also showed that
+logout ends an open stream and fresh dials, and that browser re-login restores the echo. To repeat the
+basic test, use a tailnet and peer you own.
 
 1. Install the minified consumer with `./gradlew :demo:installRelease` (set `ANDROID_SERIAL` when more
    than one device is attached). Open **Klethron tsnet demo → Live tailnet test → Start / resume node**.
@@ -200,8 +202,9 @@ tailnet and peer you own.
    Tick **Keep connection open between echoes** to reuse one stream instead (for network-change
    tests); untick it to close the stream. The server above closes connections idle for 15 seconds.
 5. Tap **Close node**, reopen the live screen and Start again. Expect RUNNING without browser login;
-   repeat the echo. Then **Log out of tailnet**, wait for confirmation, **Log in / renew key**, authorize
-   again and repeat. A failed logout retains the login; restore connectivity and retry it.
+   repeat the echo. Then **Log out of tailnet**, wait for confirmation and tap **Verify TCP echo**
+   again (with and without a kept-open stream): it must fail. **Log in / renew key**, authorize again
+   and repeat. A failed logout retains the login; restore connectivity and retry it.
 
 The node stays alive while its screen is behind the browser. Destroying the screen (including rotation)
 queues cleanup off the UI thread; Start resumes the saved state when reopened. The app has no service
@@ -215,7 +218,7 @@ Record only test outcomes, device/API/ABI/page size, network types and timings:
 | Login, address/MagicDNS echo, saved-login restart | RUNNING, Login saved, exact echo before and after restart |
 | Logout/re-login, admin key expiry/removal | Access ends; observe state; browser re-authentication restores echo |
 | Wi-Fi ↔ cellular, different NATs | Fresh and kept-open echoes succeed after each switch; the peer sees one unchanged connection for the latter (`ss -tn`); use USB ADB |
-| Direct and real DERP | Peer-side path evidence during exchange, with UDP blocked only in a controlled test network for DERP; successful echo alone does not identify the path |
+| Direct and real DERP | Peer-side path evidence during exchange (`tailscale status` on the peer shows `direct` or `relay`), with UDP blocked only in a controlled test network for DERP; successful echo alone does not identify the path |
 | Fallback DNS | System DNS deliberately fails on a controlled network while control/DERP remain reachable; a fresh connection succeeds |
 
 Do not claim forced-DERP or fallback-DNS coverage without those conditions. The demo does not expose

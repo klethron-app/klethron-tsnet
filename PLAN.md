@@ -134,6 +134,20 @@ Upstream bugs and workarounds that shape this plan are in [UPSTREAM.md](UPSTREAM
   After this demo change, the 2 R8-minified demo tests passed (zero failures/errors/skips, JUnit XML) on
   API 37.2 / x86_64 / 16 KiB pages, SELinux Enforcing. A first attempt failed the live-start test (no
   control-plane status within 45 s) while the host's internet was down; the rerun after it returned passed.
+- Paths and logout revocation, 2026-11-09, same Pixel/API/ABI/page size/SELinux, USB ADB, saved login.
+  Path evidence came from the peer's tailscaled status during each exchange. Fresh 52-byte echoes went
+  **direct** on Wi-Fi (LAN endpoint) and also on LTE: a public endpoint whose reverse DNS is the
+  carrier's, so this was direct traversal between a carrier NAT and the peer's home NAT. With
+  **Keep connection open**, an open stream plus a demo **Log out of tailnet** (confirmed within 6 s,
+  NEEDS_LOGIN) ended access. Echo on the open stream failed at the 10 s bound (`ErrnoException`), and
+  the peer's FIN on that connection was never acknowledged (FIN-WAIT-1). A fresh dial timed out
+  (`SocketTimeoutException`), and the peer saw the node offline. Browser re-login, driven over ADB
+  with an existing SSO session, restored direct echoes by address and MagicDNS name. DERP never
+  carried data.
+  Evidence: `demo/build/reports/device-verification/hardware-pixel11-api37-4k-usb-paths-logout/results.json`.
+  The demo now enables echo whenever a node is started, so a lost access shows as a failure. Its 2
+  R8-minified tests passed afterwards (zero failures/errors/skips, JUnit XML) on API 37.2 / x86_64 /
+  16 KiB pages, SELinux Enforcing.
 - Tests cover: native load and create/close cycles; interface parity with Java and a negative control
   showing stock Go discovery fails; file-free startup; a loopback two-node tailnet (testcontrol,
   DERP/STUN) with direct and DERP-only exchange; network-change rebinding on a real Wi-Fi/cellular
@@ -145,8 +159,8 @@ Upstream bugs and workarounds that shape this plan are in [UPSTREAM.md](UPSTREAM
   startup/restart through the live screen, reaching browser-authorization readiness without opening
   or capturing a login URL. The latter needs internet. Browser login and real-tailnet TCP echo are
   covered separately by the manual and ADB-driven checks above, not by these JUnit tests.
-- **Not verified:** admin-initiated key expiry/removal, access revocation during real logout,
-  real DERP, fallback DNS, direct traversal across different NATs, subnet routes, IPv6 peers, throughput,
+- **Not verified:** admin-initiated key expiry/removal, real DERP (data relayed through DERP),
+  fallback DNS, traversal across NATs that prevent direct paths, subnet routes, IPv6 peers, throughput,
   open-stream survival of outages longer than seconds, arm64 with 16 KiB pages, a non-blocking consumer, or Play split delivery.
 - Seen once, unexplained: an API 37.2 logout test saw no status change after `STOPPED` for 30 s and the
   next close took 10 s. Watch for recurrence.
@@ -178,11 +192,12 @@ Complete release AAR: 14,472,683 bytes. Debug AAR: 15,442,185 bytes. Notices add
 ## Future
 
 1. **Extend real-tailnet coverage.** Basic browser login, address/MagicDNS echo, saved-login restart,
-   logout/re-login, and both fresh dials and an open stream across Wi-Fi/cellular switches passed on
-   hardware. Next verify admin-initiated expiry/removal and access revocation during logout (open
-   stream and fresh dial). Distinguish direct and real
-   DERP paths with peer-side evidence; separately exercise fallback DNS and traversal across different
-   NATs. Use browser authorization, never a checked-in or CI auth key. Record untested cases explicitly.
+   logout/re-login, fresh dials and an open stream across Wi-Fi/cellular switches, direct paths on LAN
+   and carrier NAT, and logout ending an open stream and fresh dials passed on hardware. Next verify
+   admin-initiated expiry/removal (needs the admin console) with an open stream and a fresh dial. Force
+   real DERP by blocking UDP on a controlled network, with peer-side evidence; separately exercise
+   fallback DNS. Use browser authorization, never a checked-in or CI auth key. Record untested cases
+   explicitly.
 2. **Finish the lifecycle.** Surface backend errors (`Notify.ErrMessage`) and control's node-removed state
    as typed status. Decide whether an ephemeral mode is
    needed before adding one. Keep auditing upstream initialization, filesystem/process behaviour and

@@ -245,7 +245,8 @@ public final class LiveActivity extends Activity {
         findViewById(R.id.login).setEnabled(!busy && started);
         findViewById(R.id.logout).setEnabled(!busy && started);
         findViewById(R.id.authorize).setEnabled(status != null && status.loginUrl() != null);
-        findViewById(R.id.exchange).setEnabled(!busy && status != null && status.state() == TsnetStatus.State.RUNNING);
+        // Also enabled when not RUNNING, to verify that access ends, e.g. after logout.
+        findViewById(R.id.exchange).setEnabled(!busy && started);
         if (status != null) {
             String text = status.state().name();
             if (status.loginUrl() != null) text += "\n" + getString(R.string.login_pending);
