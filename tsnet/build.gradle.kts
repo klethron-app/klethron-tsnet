@@ -84,6 +84,7 @@ for (buildType in listOf("release", "debug")) {
         notices.set(layout.projectDirectory.dir("src/main/assets/klethron-tsnet/licenses"))
         if (buildType == "debug") debugNotices.set(layout.projectDirectory.dir("src/debug/assets/klethron-tsnet/licenses"))
         goVersion.set(libs.versions.go)
+        ndkVersion.set(libs.versions.ndk)
         report.set(layout.buildDirectory.file("reports/native/notices-$buildType.tsv"))
     }
     tasks.named("check") { dependsOn(verifyNotices) }

@@ -1,5 +1,6 @@
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.security.MessageDigest
 import java.util.zip.ZipFile
 import javax.inject.Inject
 import org.gradle.api.DefaultTask
@@ -35,6 +36,7 @@ abstract class VerifyNativeNotices @Inject constructor(private val exec: ExecOpe
     abstract val debugNotices: DirectoryProperty
 
     @get:Input abstract val goVersion: Property<String>
+    @get:Input abstract val ndkVersion: Property<String>
     @get:OutputFile abstract val report: RegularFileProperty
 
     @TaskAction
@@ -43,9 +45,15 @@ abstract class VerifyNativeNotices @Inject constructor(private val exec: ExecOpe
             if (!condition) throw GradleException("$message. Review THIRD-PARTY-NOTICES.md and the checked-in notices")
         }
         val directory = notices.get().asFile
-        for (path in listOf("GO-LICENSE", "GO-PATENTS", "JSPECIFY-LICENSE", "TAILSCALE-MODIFICATIONS")) {
+        for (path in listOf("GO-LICENSE", "GO-PATENTS", "JSPECIFY-LICENSE", "TAILSCALE-MODIFICATIONS", "FILE-NOTICES",
+            "UNICODE-LICENSE")) {
             requireNotice(directory.resolve(path).isFile && directory.resolve(path).length() > 0, "Missing notice $path")
         }
+        // Per-file notices come from a manual source review; any toolchain or module change invalidates it.
+        val inventoryHash = MessageDigest.getInstance("SHA-256").digest(directory.resolve("GO-MODULES.tsv").readBytes())
+            .joinToString("") { "%02x".format(it) }
+        val reviewed = "Reviewed for Go ${goVersion.get()}, NDK ${ndkVersion.get()} and GO-MODULES.tsv SHA-256\n$inventoryHash."
+        requireNotice(reviewed in directory.resolve("FILE-NOTICES").readText(), "FILE-NOTICES is not reviewed for this build")
         fun inventory(directory: File, name: String): List<List<String>> {
             val lines = directory.resolve(name).readLines()
             requireNotice(lines.firstOrNull() == "module\tversion\tsum\tnotices", "Malformed inventory header in $name")

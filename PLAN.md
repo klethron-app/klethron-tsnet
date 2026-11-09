@@ -92,7 +92,13 @@ Upstream bugs and workarounds that shape this plan are in [UPSTREAM.md](UPSTREAM
 ### Licences
 
 - `GO-MODULES.tsv` lists the 26 Go modules in release build metadata (31 in debug), with verbatim
-  notices; `build` checks both ABIs against it byte-for-byte. See `THIRD-PARTY-NOTICES.md`.
+  notices; `build` checks both ABIs against it byte-for-byte.
+- Per-file review, 2026-11-09: all 2,756 files compiled into the release libraries, generated data,
+  embedded resources and the linked C runtime. `FILE-NOTICES` adds what module licences miss: Sun,
+  Cephes and Inferno code in Go, gVisor's BSD `pkg/sync`, half-rs, FiniteStateEntropy and the NDK's
+  bionic `crtbegin_so.o`/`crtend_so.o` (the only statically linked NDK code); `UNICODE-LICENSE` covers
+  generated Unicode tables. `build` fails until the review is repeated for a new Go, NDK or module set.
+  Details in `THIRD-PARTY-NOTICES.md`.
 
 ### Verification
 
@@ -176,14 +182,17 @@ next close took 10 s. Watch for recurrence.
 | arm64-v8a library | 16,729,616 | 6,518,976 |
 | x86_64 library | 18,151,216 | 7,165,526 |
 
-Complete release AAR: 13,766,362 bytes. Debug AAR: 14,869,962 bytes. Notices add about 55 KiB to an APK.
+Complete release AAR: 13,770,941 bytes. Debug AAR: 14,878,863 bytes. Notices add about 67 KiB to the
+release demo APK (59,526 compressed bytes plus ZIP headers).
 
 ## Future
 
 In order: Klethron consumes a pinned Maven Central release, so release readiness comes first.
 
-1. **Next: release readiness.** Complete the licence review (per-file attributions, generated data,
-   embedded resources, C/NDK runtime). Keep native symbols separately if needed for crash reports.
+1. **Next: crash diagnostics.** The libraries have no symbol table, DWARF or GNU build ID, so tombstones,
+   `ndk-stack` and Play cannot symbolize native frames. `.gopclntab` survives stripping, and Go's
+   `runtime/write_err_android.go` writes fatal tracebacks to logcat; verify that on a device, check what
+   such output can expose, and keep unstripped symbols with a build ID only if a consumer needs them.
 2. **Publish immutable versions** to Maven Central: verify the `com.klethron` namespace, signing, protected
    credentials, POM/source/Javadoc metadata, publish from tags. Record the upstream commit per release.
 3. **Integrate into Klethron** separately: update its TAILSCALE-PLAN.md, add the artifact only to
@@ -214,4 +223,5 @@ Ongoing:
 
 Resolve `tailscale/tailscale` main to a full SHA; update the Go requirement and sums, the version
 assertions (`TsnetNodeTest`, `MinifiedDemoTest`) and the documented SHA; re-check patch hashes and every
-UPSTREAM.md entry; then rebuild both ABIs and repeat the device tests.
+UPSTREAM.md entry; update both notice inventories (THIRD-PARTY-NOTICES.md); then rebuild both ABIs and
+repeat the device tests.
