@@ -167,6 +167,21 @@ Upstream bugs and workarounds that shape this plan are in [UPSTREAM.md](UPSTREAM
   The test peer was then logged out and left the tailnet. UDP was refused by the peer, not blocked
   by a network or on the device, and a DERP-to-direct upgrade was not observed.
   Evidence: `demo/build/reports/device-verification/hardware-pixel11-api37-4k-usb-forced-derp/results.json`.
+- Admin key expiry and removal, 2026-11-09, same Pixel/API/ABI/page size/SELinux, USB ADB, Wi-Fi, saved
+  login. A kept-open stream to the computer echoed about every 15 s, direct per the peer's status, while
+  the user acted on the tailnet. The admin console offered no key expiry, so the user called the API's
+  device `expire` endpoint with a short-lived token. Within 10 s the demo showed NEEDS_LOGIN without a
+  login URL and the peer marked the node expired. Removal in the admin console gave the same demo
+  state and the node vanished from the peer's list. Both times the echo tapped at the moment of the
+  action passed. The next echo on the open stream failed (`ErrnoException`), the peer's FIN stayed
+  unacknowledged (FIN-WAIT-1) and fresh dials timed out (`SocketTimeoutException`). **Log in / renew
+  key** plus browser restored direct echoes by address and MagicDNS name. After expiry the node kept
+  its ID and address. After removal control asked to connect a new device, which got a new node ID and
+  tailnet IPv4. To the caller both look like logout; there is no typed reason yet (Future 2).
+  Incidentally, streams stayed open 15 min and 1 h 50 min on steady Wi-Fi. The longer one ended once,
+  most likely because the ~15 s echo cadence matched the echo server's 15 s idle timeout. The next
+  fresh dial passed.
+  Evidence: `demo/build/reports/device-verification/hardware-pixel11-api37-4k-usb-admin-expiry-removal/results.json`.
 - Tests cover: native load and create/close cycles; interface parity with Java and a negative control
   showing stock Go discovery fails; file-free startup; a loopback two-node tailnet (testcontrol,
   DERP/STUN) with direct and DERP-only exchange; network-change rebinding on a real Wi-Fi/cellular
@@ -178,9 +193,9 @@ Upstream bugs and workarounds that shape this plan are in [UPSTREAM.md](UPSTREAM
   startup/restart through the live screen, reaching browser-authorization readiness without opening
   or capturing a login URL. The latter needs internet. Browser login and real-tailnet TCP echo are
   covered separately by the manual and ADB-driven checks above, not by these JUnit tests.
-- **Not verified:** admin-initiated key expiry/removal, a DERP-to-direct upgrade, traversal across
-  NATs that prevent direct paths, subnet routes, IPv6 peers, throughput, open-stream survival of
-  outages longer than seconds, arm64 with 16 KiB pages, a non-blocking consumer, or Play split delivery.
+- **Not verified:** a DERP-to-direct upgrade, traversal across NATs that prevent direct paths, subnet
+  routes, IPv6 peers, throughput, open-stream survival of outages longer than seconds, arm64 with
+  16 KiB pages, a non-blocking consumer, or Play split delivery.
 - Seen once, unexplained: an API 37.2 logout test saw no status change after `STOPPED` for 30 s and the
   next close took 10 s. Watch for recurrence.
 
@@ -196,8 +211,7 @@ Upstream bugs and workarounds that shape this plan are in [UPSTREAM.md](UPSTREAM
   destroying the screen queues close. Reopening requires Start, which resumes saved identity. Serial
   cleanup prevents overlapping access to the state directory on activity recreation. No service.
 - [README.md](README.md#live-tailnet-test) has the peer echo setup, manual sequence and evidence matrix.
-  The basic authorized cross-device flow passed manually as recorded above; the remaining path and
-  failure scenarios still need explicit verification.
+  The authorized cross-device scenarios recorded above passed; the cases under Not verified remain.
 
 ### Current sizes (release, `tsnet/build/reports/native/sizes.tsv`)
 
@@ -210,17 +224,18 @@ Complete release AAR: 14,472,683 bytes. Debug AAR: 15,442,185 bytes. Notices add
 
 ## Future
 
-1. **Extend real-tailnet coverage.** Basic browser login, address/MagicDNS echo, saved-login restart,
-   logout/re-login, fresh dials and an open stream across Wi-Fi/cellular switches, direct paths on LAN
-   and carrier NAT, logout ending an open stream and fresh dials, startup plus echo with failing system
-   DNS, and fresh and kept-open echoes relayed only through real DERP passed on hardware. Next verify
-   admin-initiated expiry/removal (needs the admin console) with an open stream and a fresh dial.
-   Use browser authorization, never a checked-in or CI auth key. Record untested cases explicitly.
-2. **Finish the lifecycle.** Surface backend errors (`Notify.ErrMessage`) and control's node-removed state
-   as typed status. Decide whether an ephemeral mode is
-   needed before adding one. Keep auditing upstream initialization, filesystem/process behaviour and
-   state permissions; retest the state format on every upstream update. Verify `@RequiresPermission` in
-   a scratch consumer. Possibly let callers supply `hostinfo` OS version/device model.
+1. **Extend real-tailnet coverage.** Login, address/MagicDNS echo, saved-login restart, logout,
+   admin key expiry and removal, Wi-Fi/cellular switches with an open stream, direct paths on LAN and
+   carrier NAT, real DERP and failing system DNS passed on hardware (see Verification). Next, if a
+   caller needs them: a DERP-to-direct upgrade, NATs that prevent direct paths, IPv6 peers, subnet
+   routes, throughput and outages longer than seconds. Use browser authorization, never a checked-in
+   or CI auth key. Record untested cases explicitly.
+2. **Finish the lifecycle.** Surface backend errors (`Notify.ErrMessage`), admin key expiry and
+   control's node removal as typed status; the latter two now look like logout (NEEDS_LOGIN). Decide
+   whether an ephemeral mode is needed before adding one. Keep auditing upstream initialization,
+   filesystem/process behaviour and state permissions; retest the state format on every upstream
+   update. Verify `@RequiresPermission` in a scratch consumer. Possibly let callers supply `hostinfo` OS
+   version/device model.
 3. **Validate `dial` with Klethron.** Use it from Klethron's non-blocking session loop (`Os.poll`/
    `MessageQueue`, not `SocketChannel`), including backpressure with a slow reader and interactive
    latency. Add peer listing with stable node IDs only with that caller. Keep Go panic and allocation
