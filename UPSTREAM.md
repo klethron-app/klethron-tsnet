@@ -1,6 +1,6 @@
 # Upstream issues
 
-Upstream behaviour at the pinned revision (Tailscale `503010831ecd`, Go 1.27.3) that this library
+Upstream behaviour at the pinned revision (Tailscale `62d055f4c38b`, Go 1.27.3) that this library
 patches, works around or is limited by. Recheck every entry on each upstream update, and drop a patch
 or workaround once upstream fixes it. Patches are hash-checked in `BuildGoLibrary.kt` and documented in
 `TAILSCALE-MODIFICATIONS`.
@@ -13,19 +13,13 @@ or workaround once upstream fixes it. Patches are hash-checked in `BuildGoLibrar
   with, a retry is a silent no-op and a restart asks for a new login. Reproduced in about one of three
   runs. Patch: clear the key only after a successful logout (`control/controlclient/direct.go`).
   **To report upstream.**
-- **`tsnet.startLogger` creates `tailscaled.log.conf` even with `ts_omit_logtail`.** It still calls
-  `logpolicy.ConfigFromFile`/`NewConfig`/`Save`. Patch: return early when logtail is omitted
-  (`tsnet/tsnet.go`). Upstream only skips this under `testenv.InTest()`.
-- **`ipnlocal.NewLocalBackend` evaluates `logpolicy.LogsDir` even with `ts_omit_logtail`.** The sockstat
-  logger is a no-op, but its directory argument runs filesystem discovery that panics on Android. Patch:
-  skip it when logtail is omitted (`ipn/ipnlocal/local.go`).
 
 ## Worked around
 
 - **Android interface enumeration fails for app UIDs** ([#17311](https://github.com/tailscale/tailscale/issues/17311);
   proposed hook [PR #19455](https://github.com/tailscale/tailscale/pull/19455)). Go's discovery uses
-  `RTM_GETLINK`, which SELinux denies to apps (`permission denied`). Workaround: register a bionic
-  `getifaddrs` getter via `netmon.RegisterInterfaceGetter`. The `feature/androidbin` fallback
+  `RTM_GETLINK`, which SELinux denies to apps. Workaround: register a bionic `getifaddrs` getter via
+  `netmon.RegisterInterfaceGetter`. The `feature/androidbin` fallback
   ([#21129](https://github.com/tailscale/tailscale/issues/21129)) excludes `android && cgo` and its
   synthetic interface cannot describe multi-interface networks.
 - **Android netmon cannot see default-network changes.** It polls only every ten minutes and its
@@ -33,18 +27,18 @@ or workaround once upstream fixes it. Patches are hash-checked in `BuildGoLibrar
   `RebindLikelyRequired` (no UDP rebind, re-STUN or DERP reconnect). Workaround: public
   `setDefaultNetwork` calls `UpdateLastKnownDefaultRouteInterface`/`UpdateLastKnownDefaultGateway`, then
   `InjectEvent` on each started node's monitor (via the unstable `Server.Sys().NetMon`).
-- **Go `crypto/x509` reads the wrong Android CA store** (Go issue, not Tailscale). It reads only
+- **Go `crypto/x509` reads the wrong Android CA store** (a Go issue). It reads only
   `/system/etc/security/cacerts`, missing the Conscrypt APEX store used since Android 14 (updated by
-  Play system updates), and ignores roots the user disabled in Settings. Workaround: load the APEX (or
-  system) store minus `/data/misc/user/<user>/cacerts-removed` and install it with
-  `x509.SetFallbackRoots` plus `//go:debug x509usefallbackroots=1`.
+  Play system updates), and ignores roots the user disabled. Workaround: load the APEX (or system)
+  store minus `/data/misc/user/<user>/cacerts-removed` and install it with `x509.SetFallbackRoots` plus
+  `//go:debug x509usefallbackroots=1`.
 - **`tlsdial` falls back to baked-in Let's Encrypt roots** when the platform rejects a chain, bypassing
   user-disabled roots. Workaround: `ts_omit_bakedroots`.
 - **`tsnet.Server.Dial` falls back to the device's network.** `tsdial.UserDial` uses netstack only for
   addresses in the network map, then the routing table, then a plain `net.Dialer`. Workaround: resolve
   with `UserDialPlan`, require `UseNetstackForIP`, connect with `NetstackDialTCP`.
-- **`tsnet.Server.Dial` starts an unstarted server** with whatever configuration it has, bypassing
-  explicit settings. Workaround: `dial` requires a successful public `start`.
+- **`tsnet.Server.Dial` starts an unstarted server** with whatever configuration it has. Workaround:
+  `dial` requires a successful public `start`.
 - **`tsnet.Server` reads configuration from the process environment** (`TS_CONTROL_URL`,
   `TS_AUTHKEY`/`TS_AUTH_KEY`, OAuth/ID-token variables) whenever a field is empty. Workaround: set every
   field explicitly; refuse to start if an auth-key variable is set; omit `oauthkey`/`useproxy`.
@@ -59,45 +53,40 @@ or workaround once upstream fixes it. Patches are hash-checked in `BuildGoLibrar
   keeps its creation-time URL anyway. Workaround: `login()` uses LocalAPI `Start` with tsnet's prefs.
   **To report upstream.**
 - **`LoginFinished` precedes saving the new node key.** `controlclient.Auto` reports `Persist` only with a
-  network map. Closing after `LoginFinished` but before that map is processed can lose the completed
-  login, even with a clean `Server.Close()`. Confirmed twice with the first map response deliberately
-  delayed; this establishes the failure mode, not its frequency in normal use. Embedders that close at
-  this boundary can be affected; those that stay running long enough to save the key avoid this loss.
-  Workaround: clear the login URL only once a `SelfChange` brings a different node key.
-  Tracked by [#19149](https://github.com/tailscale/tailscale/issues/19149); proposed fix
-  [PR #19150](https://github.com/tailscale/tailscale/pull/19150) is open and draft. Our tsnet reproduction
-  is additional evidence for that issue.
+  network map, so closing between `LoginFinished` and that map can lose the completed login, even with a
+  clean `Server.Close()` (confirmed twice with the first map response deliberately delayed). Workaround:
+  clear the login URL only once a `SelfChange` brings a different node key. Tracked by
+  [#19149](https://github.com/tailscale/tailscale/issues/19149); draft fix
+  [PR #19150](https://github.com/tailscale/tailscale/pull/19150).
 - **Revocations are indistinguishable from logout on the IPN bus.** Upstream reports `NeedsLogin` after a
-  logout, key expiry and device removal alike, with no reason. Workaround: as upstream's state machine,
-  report removal while the `node-removed` health warning is set, read from the health tracker because
-  its bus notification can follow the state, otherwise expiry while the latest `SelfChange` key expiry
-  has passed (reset at `NoState`, which starts a new profile, as after logout).
+  logout, key expiry and device removal alike. Workaround, as upstream's state machine: removal while the
+  `node-removed` health warning is set (read from the health tracker, because its bus notification can
+  follow the state), otherwise expiry while the latest `SelfChange` key expiry has passed (reset at
+  `NoState`, which starts a new profile, as after logout).
 - **A watch that falls behind ends with an `ErrMessage`** that is not a backend error. Workaround: drop
   that exact text (unexported `watchIPNBusFellBehindMessage`) before reporting `error()`.
 - **`NeedsLogin` is reported shortly before the network map is cleared** after logout, so a status can
   briefly show old addresses. Documented as eventual.
 - **`Start` is not context-aware, and concurrent `Start`/`Close` is forbidden.** Workaround: per-node mutex
   in Go; `close` waits at most for local initialization.
-- **Netmap cache persists peer data.** With control's `CacheNetworkMaps` capability (requested by
-  capability version 149), upstream writes peer names, addresses and keys under `profile-data/`, even for
-  ephemeral in-memory nodes. Workaround: `ts_omit_cachenetmap`.
-
-- **Subprocess call sites are linked.** Tailscale packages in the release graph have 21 `os/exec` call sites. All but one are
-  unreachable here by build tag, `runtime.GOOS` (Android is not `linux`), an omitted feature, a
-  pref we never set, or a real TUN (tsnet uses a fake one). The exception: netstack relays ICMP echo
-  requests to subnet or 4via6 addresses by running `/system/bin/ping` on Android (`ProcessSubnets`,
-  which tsnet enables). It is reachable only if the packet filter accepts such a destination, which
-  needs an advertised route. Workaround: `ts_omit_advertiseroutes` and `ts_omit_appconnectors`, so the
-  filter accepts only the node's own and service addresses. Re-audit with `go list -deps` on each update.
+- **Netmap cache persists peer data.** With control's `CacheNetworkMaps` capability, upstream writes peer
+  names, addresses and keys under `profile-data/`, even for ephemeral in-memory nodes. Workaround:
+  `ts_omit_cachenetmap`.
+- **Subprocess call sites are linked.** Tailscale packages in the release graph have 21 `os/exec` call
+  sites. All but one are unreachable here by build tag, `runtime.GOOS` (Android is not `linux`), an
+  omitted feature, a pref we never set, or a real TUN (tsnet uses a fake one). The exception: netstack
+  relays ICMP echo requests to subnet or 4via6 addresses by running `/system/bin/ping` (`ProcessSubnets`,
+  which tsnet enables), reachable only if the packet filter accepts such a destination. Workaround:
+  `ts_omit_advertiseroutes` and `ts_omit_appconnectors`, so the filter accepts only the node's own and
+  service addresses. Re-audit with `go list -deps` on each update.
 
 ## Limits
 
-- **`ts_omit_acme` breaks the `tsnet` build** (`tsnet.go` calls `local.Client.GetCertificate`
-  unconditionally), so `serve`/`acme` stay linked. **To report upstream.**
+- **`ts_omit_serve` breaks the `tsnet` build** (`tsnet.go` calls `SetServeConfig`/`GetServeConfig`
+  unconditionally), so serve stays linked. **To report upstream.**
 - `ts_omit_clientmetrics` breaks `util/syspolicy`; `ts_omit_tailnetlock` breaks the debug test servers.
 - Test infrastructure: `testcontrol` ignores a logout's expiry (control-side deregistration is untested)
   and copies an expired node on re-login (a probe gives the new key a fresh expiry). It answers unknown
   nodes' map requests with 400, not control's 404, and keeps streaming to running nodes, so removal is
-  simulated with a 404 for map requests that a node sees at its next start;
-  `httptest.Server.Close` does not close hijacked Noise connections, so stopping it does not make control
-  unreachable.
+  simulated with a 404 for map requests that a node sees at its next start. `httptest.Server.Close` does
+  not close hijacked Noise connections, so stopping it does not make control unreachable.

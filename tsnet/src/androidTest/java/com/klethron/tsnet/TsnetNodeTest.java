@@ -8,7 +8,7 @@ public final class TsnetNodeTest {
     @Test
     public void reportsLinkedTailscaleVersion() {
         assertTrue(TsnetNode.tailscaleVersion().startsWith("v1."));
-        assertTrue(TsnetNode.tailscaleVersion().endsWith("-503010831ecd"));
+        assertTrue(TsnetNode.tailscaleVersion().endsWith("-62d055f4c38b"));
     }
 
     @Test

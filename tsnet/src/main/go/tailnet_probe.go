@@ -18,11 +18,16 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"tailscale.com/derp/derpserver"
 	"tailscale.com/envknob"
+	"tailscale.com/feature/buildfeatures"
 	"tailscale.com/ipn/store/mem"
 	"tailscale.com/net/stun"
 	"tailscale.com/tailcfg"
@@ -31,6 +36,23 @@ import (
 	"tailscale.com/types/key"
 	"tailscale.com/types/logger"
 )
+
+// checkProbeEnvironment returns a fixed diagnostic, or "" if a probe may start nodes in dir.
+func checkProbeEnvironment(dir string) string {
+	if !utf8.ValidString(dir) || strings.ContainsRune(dir, 0) || !filepath.IsAbs(dir) {
+		return "invalid directory"
+	}
+	if buildfeatures.HasLogTail {
+		return "logtail must be disabled"
+	}
+	// Refuse ambient auth configuration instead of risking an OAuth exchange.
+	for _, name := range []string{"TS_AUTHKEY", "TS_AUTH_KEY", "TS_CLIENT_SECRET", "TS_CLIENT_ID", "TS_ID_TOKEN", "TS_AUDIENCE"} {
+		if os.Getenv(name) != "" {
+			return "unexpected authentication environment"
+		}
+	}
+	return ""
+}
 
 // The DERP-only knob is process-global, so tailnet probes never overlap.
 var tailnetProbeMu sync.Mutex

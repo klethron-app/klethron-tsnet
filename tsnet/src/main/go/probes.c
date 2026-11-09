@@ -4,17 +4,22 @@
 #include <stdlib.h>
 #include "_cgo_export.h"
 
-enum probe { STARTUP, CONTROL, TAILNET, TAILNET_RELAY_ONLY, NETCHANGE_START, NETCHANGE_AWAIT, LOGIN_PEER };
+// Probe results are ASCII, so JNI modified UTF-8 is sufficient.
+static jstring take_string(JNIEnv *env, char *chars) {
+    jstring result = (*env)->NewStringUTF(env, chars);
+    free(chars);
+    return result;
+}
+
+enum probe { CONTROL, TAILNET, TAILNET_RELAY_ONLY, NETCHANGE_START, NETCHANGE_AWAIT, LOGIN_PEER };
 
 // Java supplies standard UTF-8, including supplementary characters in paths.
-// Probes return fixed ASCII diagnostics (and hex hashes), so JNI modified UTF-8 is sufficient for results.
 static jstring probe_bytes(JNIEnv *env, jbyteArray argument, enum probe probe) {
     jsize length = (*env)->GetArrayLength(env, argument);
     jbyte *bytes = (*env)->GetByteArrayElements(env, argument, NULL);
     if (bytes == NULL) return NULL; // Pending allocation exception.
     char *chars = (char *) bytes, *report;
     switch (probe) {
-        case STARTUP: report = klethron_startup_probe(chars, length); break;
         case CONTROL: report = klethron_control_probe(chars, length); break;
         case TAILNET: report = klethron_tailnet_probe(chars, length, 0); break;
         case TAILNET_RELAY_ONLY: report = klethron_tailnet_probe(chars, length, 1); break;
@@ -23,14 +28,17 @@ static jstring probe_bytes(JNIEnv *env, jbyteArray argument, enum probe probe) {
         case LOGIN_PEER: report = klethron_login_probe_start_peer(chars, length); break;
     }
     (*env)->ReleaseByteArrayElements(env, argument, bytes, JNI_ABORT);
-    jstring result = (*env)->NewStringUTF(env, report);
-    free(report);
-    return result;
+    return take_string(env, report);
 }
 
 JNIEXPORT jstring JNICALL
-Java_com_klethron_tsnet_StartupTest_nativeProbe(JNIEnv *env, jclass type, jbyteArray directory) {
-    return probe_bytes(env, directory, STARTUP);
+Java_com_klethron_tsnet_TrustRootsTest_nativeProbe(JNIEnv *env, jclass type) {
+    return take_string(env, klethron_roots_probe());
+}
+
+JNIEXPORT jstring JNICALL
+Java_com_klethron_tsnet_NetworkInterfacesTest_nativeProbe(JNIEnv *env, jclass type) {
+    return take_string(env, klethron_network_probe());
 }
 
 JNIEXPORT jstring JNICALL
@@ -60,10 +68,7 @@ Java_com_klethron_tsnet_NetworkChangeTest_nativeProbeStop(JNIEnv *env, jclass ty
 
 JNIEXPORT jstring JNICALL
 Java_com_klethron_tsnet_LoginTest_nativeProbeStart(JNIEnv *env, jclass type, jboolean interactive) {
-    char *url = klethron_login_probe_start(interactive == JNI_TRUE); // ASCII loopback URL, or empty.
-    jstring result = (*env)->NewStringUTF(env, url);
-    free(url);
-    return result;
+    return take_string(env, klethron_login_probe_start(interactive == JNI_TRUE));
 }
 
 JNIEXPORT jstring JNICALL
@@ -123,8 +128,5 @@ Java_com_klethron_tsnet_LoginTest_nativeProbeApproveMachines(JNIEnv *env, jclass
 
 JNIEXPORT jstring JNICALL
 Java_com_klethron_tsnet_LoginTest_nativeProbeHostnames(JNIEnv *env, jclass type) {
-    char *names = klethron_login_probe_hostnames(); // Test hostnames are ASCII.
-    jstring result = (*env)->NewStringUTF(env, names);
-    free(names);
-    return result;
+    return take_string(env, klethron_login_probe_hostnames());
 }

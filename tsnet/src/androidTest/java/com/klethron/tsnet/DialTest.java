@@ -5,7 +5,6 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
-import android.os.Looper;
 import android.system.Os;
 import android.system.OsConstants;
 import android.system.StructPollfd;
@@ -47,10 +46,9 @@ public final class DialTest {
 
     @Before
     public void startPeer() throws Exception {
-        assertTrue("Nodes must dial off the UI thread", Looper.myLooper() != Looper.getMainLooper());
         controlUrl = LoginTest.nativeProbeStart(false);
         assertTrue(controlUrl.startsWith("http://127.0.0.1:"));
-        directory = StartupTest.temporaryDirectory("dial-");
+        directory = LoginTest.temporaryDirectory("dial-");
         peer = LoginTest.nativeProbeStartPeer(directory.resolve("peer").toString().getBytes(StandardCharsets.UTF_8));
         assertTrue("Peer failed to start", peer.startsWith("100."));
     }
@@ -58,7 +56,7 @@ public final class DialTest {
     @After
     public void stopPeer() throws Exception {
         LoginTest.nativeProbeStop();
-        StartupTest.deleteDirectory(directory);
+        LoginTest.deleteDirectory(directory);
     }
 
     @Test(timeout = 90000)

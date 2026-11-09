@@ -14,8 +14,7 @@ node lifetime and storage.
   arm64-v8a and x86_64 only, 16 KiB aligned.
 - Library owns tsnet and JNI. Consumers own UI, authorization flow, node lifetime, no-backup state
   directories and transport adapters. Klethron's base app must not load native code or start a node.
-- No SSH, SOCKS proxy, Android service, subprocess, downloaded executable or device-wide VPN. Native work
-  runs in the app process; blocking calls run off the UI thread.
+- No SSH, SOCKS proxy, Android service, subprocess, downloaded executable or device-wide VPN.
 
 Upstream bugs and workarounds that shape this plan are in [UPSTREAM.md](UPSTREAM.md).
 
@@ -23,59 +22,46 @@ Upstream bugs and workarounds that shape this plan are in [UPSTREAM.md](UPSTREAM
 
 ### Build
 
-- Pinned: Tailscale main `503010831ecd44ab3d86864e5e65ff9f8b969d88` (Go module
-  `v1.105.0-pre.0.20261107202901-503010831ecd`), Go 1.27.3, NDK 30.0.16248370, AGP 9.5.1, Gradle 9.9.0
+- Pinned: Tailscale main `62d055f4c38b610d63a8cee7fa4a7e65b01564eb` (Go module
+  `v1.105.0-pre.0.20261108232751-62d055f4c38b`), Go 1.27.3, NDK 30.0.16248370, AGP 9.5.1, Gradle 9.9.0
   (wrapper checksum pinned). CI validates the wrapper and runs actionlint before the build.
 - `:tsnet` packages Java, C JNI and a Go `c-shared` library into an AAR. Native tasks are incremental and
   configuration-cache compatible; shared build caching stays disabled until toolchains are hermetic.
 - Release libraries: `-trimpath`, stripped, 16 KiB aligned. `verifyNativeAar` checks architecture,
   alignment and that no debug probe exports or JNI bindings ship in release.
-- Three upstream patches are applied to an isolated, hash-checked build copy (see UPSTREAM.md).
-- Maven publishing goes only to `build/maven/`; no remote publication.
+- One upstream patch is applied to an isolated, hash-checked build copy (UPSTREAM.md). Two earlier
+  logtail patches and the `ts_omit_acme` build fix were merged upstream (2026-11-08).
+- Maven publishing goes only to `build/maven/`.
 
 ### Public API (`TsnetNode`, `TsnetStatus`)
 
-- `start(stateDirectory, hostname)`: explicit control URL and hostname; identity persists in
-  `tailscaled.state` (0600, directory 0700). Refuses `TS_AUTHKEY`/`TS_AUTH_KEY` in the environment.
-- `awaitStatus(previous, timeout)`: latest state, login URL and addresses, bounded memory, no callbacks.
-  The login URL is cleared only once the new node key is saved; callers close only after that.
-  `revocation()` tells `NEEDS_LOGIN` after key expiry (`KEY_EXPIRED`) or device removal
-  (`NODE_REMOVED`) from logout (`null`). `error()` keeps upstream's latest `Notify.ErrMessage`, as at
-  most 256 printable ASCII characters, until the next `RUNNING`; `toString()` omits its text.
-- `dial(host, port, timeout)`: tailnet address or MagicDNS name; returns a socket-pair
-  `ParcelFileDescriptor` relayed to a netstack TCP connection. Never uses the device's network.
-- `logout(timeout)`, `login()` (after logout, key expiry, or to re-authenticate), `close()`.
-  A failed logout keeps the login for retries. Device approval (`NEEDS_MACHINE_AUTH`) needs no extra API.
-- Static `setDefaultNetwork(interfaceName, ipv4Gateway)` lets the app report default-network changes so
-  started nodes rebind.
-- Go maps never-reused node IDs to servers; raw pointers never cross JNI. No finalizer: callers close.
-- Contracts: JSpecify `@NullMarked` (exported `api` dependency), Error Prone `@CheckReturnValue`,
-  AndroidX threading and `@RequiresPermission(INTERNET)` annotations (`compileOnly`; tools match by name).
-  Construction is `@WorkerThread`: the first node reads the CA store (10–20 ms cold).
-  Verified 2026-11-09 with AGP 9.5.1 lint in a scratch Java app using the published AAR: `start`
-  without INTERNET is a `MissingPermission` error (none once declared); method calls from `@MainThread`
-  are `ThreadConstraint` errors; an ignored `awaitStatus` is a `CheckResult` warning. Lint does not
-  check the `@WorkerThread` constructor or try-with-resources' implicit `close()`.
-- Decided, 2026-11-09: no ephemeral mode and no caller-supplied hostinfo until a caller needs them.
-  Klethron keeps a saved login; control removes an ephemeral node soon after it goes offline, so it
-  would need browser authorization again. Forgetting is logout plus deleting the directory. Hostinfo
-  on Android reports OS `android` only, with no OS version, device model, uname or cloud probe, which
-  is the minimal disclosure.
+- `start`, `awaitStatus`, `dial`, `logout`, `login`, `close` and static `setDefaultNetwork`; contracts
+  are in the Javadoc. Go maps never-reused node IDs to servers; raw pointers never cross JNI. No
+  finalizer: callers close.
+- `TsnetStatus.revocation()` tells key expiry and device removal from logout; `error()` keeps the latest
+  backend error (≤ 256 printable ASCII) until the next `RUNNING`. `toString()` omits URL and error text.
+- Annotations: JSpecify `@NullMarked` (exported `api` dependency), Error Prone `@CheckReturnValue`,
+  AndroidX thread and `@RequiresPermission(INTERNET)` (`compileOnly`; tools match by name). Verified
+  2026-11-09 with AGP 9.5.1 lint in a scratch app using the published AAR: missing INTERNET is
+  `MissingPermission`, calls from `@MainThread` are `ThreadConstraint` errors, an ignored `awaitStatus`
+  is a `CheckResult` warning. Lint does not check the constructor or try-with-resources' `close()`.
+- Decided 2026-11-09: no ephemeral mode and no caller-supplied hostinfo until a caller needs them.
+  Control removes an offline ephemeral node, forcing a new browser login; forgetting is logout plus
+  deleting the directory. Android hostinfo reports OS `android` only (no version, model or uname).
 
 ### Platform integration and privacy
 
 - Interface discovery via bionic `getifaddrs`; network changes via `setDefaultNetwork`.
-- TLS trusts only Android's system CA store (Conscrypt APEX, minus user-disabled roots). User-added CAs
-  and the app's network security configuration do not apply to native TLS.
-- All upstream loggers discard output; logtail, socket logs, log configuration and netmap cache write
-  no files. Only `tailscaled.state` is persisted.
-- No subprocesses: the 21 upstream `os/exec` call sites in the release graph are unreachable here,
-  including netstack's `/system/bin/ping` relay for subnet pings (UPSTREAM.md), audited 2026-11-09.
-- 18 upstream features are omitted in both variants (`tsnet/build.gradle.kts`). x86_64 ZIP savings,
-  measured individually (non-additive) on debug, or † on the earlier release scaffold:
+- TLS trusts only Android's system CA store (Conscrypt APEX, minus user-disabled roots).
+- All upstream loggers discard output; only `tailscaled.state` is persisted.
+- No subprocesses: the 21 upstream `os/exec` call sites in the release graph are unreachable here
+  (UPSTREAM.md), audited 2026-11-09.
+- 19 upstream features are omitted in both variants (`tsnet/build.gradle.kts`). x86_64 ZIP savings,
+  measured individually (non-additive) on debug, † on the earlier release scaffold, ‡ on release:
 
   | Omitted | ZIP saved | Reason |
   |---|---:|---|
+  | `acme` | 371,786 ‡ | No certificates: the node has no TLS listeners |
   | `debug` | 109,325 | Removes `SSLKEYLOGFILE` key logging and debug endpoints |
   | `syspolicy` | 97,115 | No MDM policy store in an embedded library |
   | `peerapiserver` | 88,451 | Outbound only; no PeerAPI listener |
@@ -96,7 +82,7 @@ Upstream bugs and workarounds that shape this plan are in [UPSTREAM.md](UPSTREAM
   | `webclient` | −596 † | Out of scope; enforces scope despite the small increase |
 
   Kept as core to a client: `dns`, `portmapper`, `health`, `gro`, `useroutes`, `tailnetlock`, `ipnbus`,
-  `c2n`, `netstack`. `acme`/`serve` cannot be omitted (UPSTREAM.md). Remeasure with:
+  `c2n`, `netstack`. `serve` cannot be omitted yet (UPSTREAM.md). Remeasure with:
 
   ```sh
   ./gradlew --no-configuration-cache -I gradle/native-feature-audit.init.gradle \
@@ -105,205 +91,97 @@ Upstream bugs and workarounds that shape this plan are in [UPSTREAM.md](UPSTREAM
 
 ### Licences
 
-- `GO-MODULES.tsv` lists the 26 Go modules in release build metadata (31 in debug, from test servers)
-  with versions, checksums and verbatim notices; `build` checks both ABIs against it byte-for-byte.
-  `TAILSCALE-MODIFICATIONS` documents the patches. See `THIRD-PARTY-NOTICES.md` for maintenance.
+- `GO-MODULES.tsv` lists the 26 Go modules in release build metadata (31 in debug), with verbatim
+  notices; `build` checks both ABIs against it byte-for-byte. See `THIRD-PARTY-NOTICES.md`.
 
 ### Verification
 
-- Device coverage: 26 instrumentation tests (25 library, 1 R8-minified demo), zero failures/errors/skips
-  per device, on API 34 / x86_64 / 4 KiB pages and API 37.2 / x86_64 / 16 KiB pages, both SELinux
-  Enforcing (before the live demo was added). Reports under each module's `build/reports/device-verification/`.
-- Revocation and error status, 2026-11-09: **27 library tests** passed, zero failures/errors/skips
-  (JUnit XML), on API 34 / x86_64 / 4 KiB, API 37.2 / x86_64 / 16 KiB and the Pixel 11 Pro XL
-  (API 37 / arm64-v8a / 4 KiB, USB), all SELinux Enforcing; `LoginTest` (9 tests) passed three more
-  times on the 16 KiB emulator. The 2 R8-minified demo tests passed on API 37.2 / 16 KiB. Reports:
-  `tsnet/build/reports/device-verification/{revocation-api34-4k,revocation-api37.2-16k,hardware-pixel11-api37-4k-usb-revocation}/`
-  and `demo/build/reports/device-verification/revocation-api37.2-16k/`. Both reasons were later observed
-  on a real tailnet (see below).
-- Hardware, 2026-11-08: Pixel 11 Pro XL, API 37 / arm64-v8a / 4 KiB pages, SELinux Enforcing:
-  **24 library + 2 R8-minified demo tests**, zero failures/errors/skips, counted from JUnit XML.
-  Reports: each module's `build/reports/device-verification/hardware-pixel11-api37-4k/`.
-  `NetworkChangeTest` was explicitly excluded because ADB was over Wi-Fi; use USB for that test.
-  This verifies arm64 runtime and real control-plane TLS/registration, not an authorized real tailnet.
-- USB follow-up, 2026-11-09, same Pixel/API/ABI/page size/SELinux: all **25 library tests** passed,
-  zero failures/errors/skips and no exclusions, counted from JUnit XML. Includes
-  `NetworkChangeTest.rebindsWhenDefaultNetworkChanges` (5.133 s), which switches the physical default
-  network while its loopback test tailnet exchanges data. Reports:
-  `tsnet/build/reports/device-verification/hardware-pixel11-api37-4k-usb/`.
-- Manual real-tailnet verification, 2026-11-08: the user reported all guided steps passing on the
-  same Pixel with the installed R8-minified release demo and a separate computer running a TCP echo
-  server. Browser login reached RUNNING / Login saved; 52-byte echo passed by tailnet IPv4 address
-  and full MagicDNS name; close/reopen resumed the saved login without browser authorization and
-  echoed again; logout confirmed, browser re-login succeeded, and echo passed again. This is
-  user-reported manual evidence, separate from the JUnit counts. Direct versus DERP was not observed.
-- Real-tailnet network recovery, 2026-11-09: ADB-driven UI test of the installed R8-minified demo on
-  the same Pixel, using its saved login and the same running node. Verified fresh 52-byte TCP echoes
-  to the computer on Wi-Fi (50 ms), after disabling Wi-Fi and confirming CELLULAR as the default
-  network (1,126 ms), and after restoring Wi-Fi as the default (37 ms). The demo process did not
-  restart, and Wi-Fi was restored. These are dial-plus-exchange timings, not handoff/outage durations.
-  Direct versus DERP was not observed. Evidence:
-  `demo/build/reports/device-verification/hardware-pixel11-api37-4k-usb-live/results.json`.
-- Open stream across network changes, 2026-11-09, same Pixel/API/ABI/page size/SELinux, USB ADB:
-  with **Keep connection open**, one TCP stream to the computer carried six exact 52-byte echoes:
-  two on Wi-Fi, two after Wi-Fi was disabled and CELLULAR became default (0.72 s), two after Wi-Fi was
-  re-enabled and became default (2.40 s). The first echo after each switch took 3,418 ms and 102 ms;
-  others 8–42 ms. `ss` on the peer showed the same single connection (unchanged source port) at every
-  stage, and its removal when the option was unticked. Switches were about 8 s apart, below the echo
-  server's 15 s idle timeout; longer outages were not tested. Direct versus DERP was not observed.
-  Evidence: `demo/build/reports/device-verification/hardware-pixel11-api37-4k-usb-open-stream/results.json`.
-  After this demo change, the 2 R8-minified demo tests passed (zero failures/errors/skips, JUnit XML) on
-  API 37.2 / x86_64 / 16 KiB pages, SELinux Enforcing. A first attempt failed the live-start test (no
-  control-plane status within 45 s) while the host's internet was down; the rerun after it returned passed.
-- Paths and logout revocation, 2026-11-09, same Pixel/API/ABI/page size/SELinux, USB ADB, saved login.
-  Path evidence came from the peer's tailscaled status during each exchange. Fresh 52-byte echoes went
-  **direct** on Wi-Fi (LAN endpoint) and also on LTE: a public endpoint whose reverse DNS is the
-  carrier's, so this was direct traversal between a carrier NAT and the peer's home NAT. With
-  **Keep connection open**, an open stream plus a demo **Log out of tailnet** (confirmed within 6 s,
-  NEEDS_LOGIN) ended access. Echo on the open stream failed at the 10 s bound (`ErrnoException`), and
-  the peer's FIN on that connection was never acknowledged (FIN-WAIT-1). A fresh dial timed out
-  (`SocketTimeoutException`), and the peer saw the node offline. Browser re-login, driven over ADB
-  with an existing SSO session, restored direct echoes by address and MagicDNS name. DERP never
-  carried data.
-  Evidence: `demo/build/reports/device-verification/hardware-pixel11-api37-4k-usb-paths-logout/results.json`.
-  The demo now enables echo whenever a node is started, so a lost access shows as a failure. Its 2
-  R8-minified tests passed afterwards (zero failures/errors/skips, JUnit XML) on API 37.2 / x86_64 /
-  16 KiB pages, SELinux Enforcing.
-- Fallback DNS, 2026-11-09, same Pixel/API/ABI/page size/SELinux, USB ADB, saved login, on Wi-Fi.
-  Strict Private DNS set over ADB to an unresolvable hostname made system DNS fail (`unknown host` for
-  the control host, other names and the peer's MagicDNS name), while IP connectivity remained. A fresh
-  demo process reached RUNNING / Login saved without a browser within 9.6 s of Start. Fresh 52-byte
-  echoes then passed by tailnet IPv4 address (12/18/11 ms) and full MagicDNS name (11/10 ms), direct on
-  the LAN per the peer's status. Android recreated the unvalidated Wi-Fi network several times
-  meanwhile. The original unset Private DNS settings were restored. Which internal fallback resolved
-  control is unobserved because upstream logs are discarded; DNS failure on cellular was not tested.
-  Evidence: `demo/build/reports/device-verification/hardware-pixel11-api37-4k-usb-fallback-dns/results.json`.
-- Real DERP, 2026-11-09, same Pixel/API/ABI/page size/SELinux, USB ADB, saved login. The peer was a
-  separate unprivileged, browser-authorized, ephemeral tsnet echo node on the computer (pinned module)
-  run with `TS_DEBUG_ALWAYS_USE_DERP=true`, so it opened no UDP sockets and no direct path could form.
-  Its own status for the demo node showed no direct address and relay `hel` throughout, with byte
-  counters growing during each exchange. Fresh 52-byte echoes passed on Wi-Fi by IPv4 address
-  (67/41/41 ms) and MagicDNS name (56/51 ms), and on cellular (107/96/93 ms). One kept-open stream
-  carried six echoes across Wi-Fi → cellular → Wi-Fi (the peer accepted it once; reuses 20–60 ms).
-  The test peer was then logged out and left the tailnet. UDP was refused by the peer, not blocked
-  by a network or on the device, and a DERP-to-direct upgrade was not observed.
-  Evidence: `demo/build/reports/device-verification/hardware-pixel11-api37-4k-usb-forced-derp/results.json`.
-- Admin key expiry and removal, 2026-11-09, same Pixel/API/ABI/page size/SELinux, USB ADB, Wi-Fi, saved
-  login. A kept-open stream to the computer echoed about every 15 s, direct per the peer's status, while
-  the user acted on the tailnet. The admin console offered no key expiry, so the user called the API's
-  device `expire` endpoint with a short-lived token. Within 10 s the demo showed NEEDS_LOGIN without a
-  login URL and the peer marked the node expired. Removal in the admin console gave the same demo
-  state and the node vanished from the peer's list. Both times the echo tapped at the moment of the
-  action passed. The next echo on the open stream failed (`ErrnoException`), the peer's FIN stayed
-  unacknowledged (FIN-WAIT-1) and fresh dials timed out (`SocketTimeoutException`). **Log in / renew
-  key** plus browser restored direct echoes by address and MagicDNS name. After expiry the node kept
-  its ID and address. After removal control asked to connect a new device, which got a new node ID and
-  tailnet IPv4. To the caller both looked like logout then, which led to `revocation()`.
-  Incidentally, streams stayed open 15 min and 1 h 50 min on steady Wi-Fi. The longer one ended once,
-  most likely because the ~15 s echo cadence matched the echo server's 15 s idle timeout. The next
-  fresh dial passed.
-  Evidence: `demo/build/reports/device-verification/hardware-pixel11-api37-4k-usb-admin-expiry-removal/results.json`.
-- Revocation reasons, 2026-11-09, same Pixel/API/ABI/page size/SELinux, USB ADB, Wi-Fi, saved login,
-  R8-minified release demo with `revocation()`. Repeating the API key expiry and the admin-console
-  removal against a kept-open direct stream (sampled every ~15 s), the demo showed
-  `NEEDS_LOGIN (KEY_EXPIRED)` within 5 s of the peer's recorded expiry, and `NEEDS_LOGIN (NODE_REMOVED)`
-  at the first sample after removal. Neither had a login URL; `error()` stayed null. The reason stayed
-  while browser re-authorization was pending and cleared at RUNNING. Access ended as before (open
-  stream `ErrnoException`, peer FIN-WAIT-1, fresh dials `SocketTimeoutException`). Re-login restored
-  direct echoes by address and MagicDNS name, with the same node ID after expiry and a new node ID and
-  IPv4 after removal. Not covered: tailnet-period expiry, cellular/DERP, revocation while not running.
-  Evidence: `demo/build/reports/device-verification/hardware-pixel11-api37-4k-usb-revocation-reasons/results.json`.
-- Tests cover: native load and create/close cycles; interface parity with Java and a negative control
-  showing stock Go discovery fails; file-free startup; a loopback two-node tailnet (testcontrol,
-  DERP/STUN) with direct and DERP-only exchange; network-change rebinding on a real Wi-Fi/cellular
-  switch; CA store parity with `AndroidCAStore`; real control-plane TLS and registration up to an
-  unauthorized login URL (`ControlPlaneTest`, needs internet); public login, restart from state,
-  logout, failed logout, key expiry and device removal with their revocations, re-login, device
-  approval, a rejected registration's error until running; public dial by address and MagicDNS,
-  end of stream, close, refused/unroutable/timed-out dials, logout ending access.
-- The release demo uses R8/resource shrinking. Two tests exercise native lifecycle and public-API
-  startup/restart through the live screen, reaching browser-authorization readiness without opening
-  or capturing a login URL. The latter needs internet. Browser login and real-tailnet TCP echo are
-  covered separately by the manual and ADB-driven checks above, not by these JUnit tests.
-  After the demo's thread annotations, 2026-11-09, both passed on API 37.2 / x86_64 / 16 KiB, SELinux
-  Enforcing (2 tests, zero failures/errors/skips, JUnit XML):
-  `demo/build/reports/device-verification/thread-annotations-api37.2-16k/`.
-- **Not verified:** a DERP-to-direct upgrade, traversal across NATs that prevent direct paths, subnet
-  routes, IPv6 peers, throughput, open-stream survival of outages longer than seconds, arm64 with
-  16 KiB pages, a non-blocking consumer, or Play split delivery.
-- Seen once, unexplained: an API 37.2 logout test saw no status change after `STOPPED` for 30 s and the
-  next close took 10 s. Watch for recurrence.
+Use an SELinux Enforcing device (`adb shell getenforce`): a permissive one hides the interface-discovery
+failure. Count tests from JUnit XML under `build/outputs/androidTest-results/connected/`. Reports are
+under each module's `build/reports/device-verification/<name>/`.
+
+Instrumentation runs, all SELinux Enforcing, zero failures/errors/skips:
+
+| Date | Device / API / ABI / page size | Tests | Report |
+|---|---|---|---|
+| 2026-11-09 | Emulators API 34 / x86_64 / 4 KiB and API 37.2 / x86_64 / 16 KiB; Pixel 11 Pro XL API 37 / arm64-v8a / 4 KiB (USB) | 27 library | `revocation-api34-4k`, `revocation-api37.2-16k`, `hardware-pixel11-api37-4k-usb-revocation` |
+| 2026-11-09 | Emulator API 37.2 / x86_64 / 16 KiB | 2 R8-minified demo | `demo/…/thread-annotations-api37.2-16k` |
+| 2026-11-09, pin `62d055f4c38b` | Emulator API 37.2 / x86_64 / 16 KiB; Pixel 11 Pro XL API 37 / arm64-v8a / 4 KiB (USB) | 23 library each, 2 demo on the emulator | `upstream-62d055-api37.2-16k`, `upstream-62d055-pixel11-api37-4k-usb`, `demo/…/upstream-62d055-api37.2-16k` |
+
+`NetworkChangeTest` switches the physical default network, so on hardware run it over USB, not
+wireless ADB. `ControlPlaneTest` and the demo's live-start test need internet.
+
+Real tailnet, on the Pixel above with the R8-minified release demo, a separate computer as the echo
+peer, and path evidence from the peer's own status (`demo/build/reports/device-verification/hardware-pixel11-api37-4k-usb-<name>/results.json`):
+
+- 2026-11-08, user-reported manual run: browser login, echo by IPv4 address and MagicDNS name,
+  saved-login restart without the browser, logout and re-login. Path not observed.
+- `live`: fresh echoes on Wi-Fi (50 ms), after switching to cellular (1,126 ms) and back (37 ms), with
+  the same node. Dial-plus-exchange timings, not handoff durations.
+- `open-stream`: one kept-open TCP stream carried six echoes across Wi-Fi → cellular → Wi-Fi; the peer
+  saw one unchanged connection. First echoes after the switches took 3,418 and 102 ms.
+- `paths-logout`: direct paths on Wi-Fi (LAN) and on LTE through the carrier's NAT. Logout ended the
+  open stream (`ErrnoException`, peer stuck in FIN-WAIT-1) and fresh dials (`SocketTimeoutException`);
+  browser re-login restored direct echoes.
+- `fallback-dns`: with system DNS broken by an unresolvable strict Private DNS host, a fresh process
+  reached RUNNING without the browser in 9.6 s and echoed by address and MagicDNS name. Which internal
+  fallback resolved control is unobserved; cellular was not tested.
+- `forced-derp`: an ephemeral tsnet peer with `TS_DEBUG_ALWAYS_USE_DERP=true` (no UDP sockets) relayed
+  everything through DERP `hel`: fresh echoes on Wi-Fi and cellular, and one kept-open stream across
+  Wi-Fi → cellular → Wi-Fi.
+- `admin-expiry-removal` and `revocation-reasons`: API key expiry and admin-console removal showed
+  `NEEDS_LOGIN (KEY_EXPIRED)` within 5 s and `NEEDS_LOGIN (NODE_REMOVED)` at the next sample, without a
+  login URL or error. Access ended as for logout; re-login kept the node ID after expiry and gave a new
+  ID and IPv4 after removal. Streams stayed open 15 min and 1 h 50 min on steady Wi-Fi.
+
+**Not verified:** a DERP-to-direct upgrade, NATs that prevent direct paths, subnet routes, IPv6 peers,
+throughput, outages longer than seconds, tailnet-period key expiry, revocation while not running,
+arm64 with 16 KiB pages, a non-blocking consumer, or Play split delivery.
+
+Seen once, unexplained: an API 37.2 logout test saw no status change after `STOPPED` for 30 s and the
+next close took 10 s. Watch for recurrence.
 
 ### Live-test harness
 
-- Opt-in demo screen starts the public API with identity under `getNoBackupFilesDir()`, opens the login
-  URL only on a browser-button tap, shows backend state, revocation, backend error and login
-  persistence, and supports logout and re-authentication. It forwards default-network changes through `ConnectivityManager`.
-- One destination (tailnet IP or MagicDNS name) and port; a fresh 52-byte challenge must echo exactly.
-  Dial and exchange each have a 10-second bound. **Keep connection open** reuses one stream across
-  echoes until unticked, a failed echo or close. No URL, credential or peer payload is logged.
-- Node creation, operations and cleanup run off the UI thread. Demo methods carry AndroidX thread
-  annotations (`compileOnly`), checked by lint's `ThreadConstraint`; field confinement stays in comments.
-  Verified 2026-11-09 by injecting wrong-thread calls: release lint reported each direct call between
-  `@MainThread`/`@UiThread` and `@WorkerThread` methods (demo and library, both directions, including
-  `Operation.run` lambdas) and mixed-thread statements within one lambda. It infers no thread for a
-  listener or `Handler.post` lambda, so a lone `view -> closeHeld()` passes. Browser navigation keeps
-  the node alive; destroying the screen queues close. Reopening requires Start, which resumes saved
-  identity. Serial cleanup prevents overlapping access to the state directory on activity recreation.
-  No service.
-- [README.md](README.md#live-tailnet-test) has the peer echo setup, manual sequence and evidence matrix.
-  The authorized cross-device scenarios recorded above passed; the cases under Not verified remain.
+- The demo's opt-in live screen starts a node under `getNoBackupFilesDir()`, opens the login URL only on a
+  browser-button tap, shows state, revocation, error and login persistence, logs out and in again, and
+  forwards default-network changes. It echoes a fresh 52-byte challenge from one peer, optionally on a
+  kept-open stream; dial and exchange are each bounded at 10 s. Nothing it handles is logged.
+- Work runs on one serial worker, checked by lint's `ThreadConstraint` (verified 2026-11-09 by
+  injecting wrong-thread calls; lint infers no thread for listener or `Handler.post` lambdas).
+  Destroying the screen queues close; Start resumes the saved identity. No service.
+- The procedure and evidence rules are in [README.md](README.md#live-tailnet-test).
 
 ### Current sizes (release, `tsnet/build/reports/native/sizes.tsv`)
 
 | Entry | Raw bytes | ZIP bytes |
 |---|---:|---:|
-| arm64-v8a library | 17,566,096 | 6,855,879 |
-| x86_64 library | 19,072,240 | 7,537,312 |
+| arm64-v8a library | 16,729,616 | 6,518,976 |
+| x86_64 library | 18,151,216 | 7,165,526 |
 
-Complete release AAR: 14,475,577 bytes. Debug AAR: 15,444,633 bytes. Notices add about 55 KiB to an APK.
+Complete release AAR: 13,766,362 bytes. Debug AAR: 14,869,962 bytes. Notices add about 55 KiB to an APK.
 
 ## Future
 
-1. **Extend real-tailnet coverage.** Login, address/MagicDNS echo, saved-login restart, logout,
-   admin key expiry and removal with their `revocation()` reasons, Wi-Fi/cellular switches with an open
-   stream, direct paths on LAN and carrier NAT, real DERP and failing system DNS passed on hardware (see
-   Verification). Next, if a caller needs them: a DERP-to-direct upgrade, NATs that prevent direct
-   paths, IPv6 peers, subnet routes, throughput and outages longer than seconds. Use browser
-   authorization, never a checked-in or CI auth key. Record untested cases explicitly.
+1. **Extend real-tailnet coverage** for the cases under Not verified, only as a caller needs them. Use
+   browser authorization, never a checked-in or CI auth key.
 2. **Keep the lifecycle audited.** On every upstream update, re-audit initialization, filesystem and
-   subprocess reachability (UPSTREAM.md) and state permissions, and retest the state format. Revisit
-   ephemeral mode and caller-supplied hostinfo only for a caller (see Public API).
-3. **Validate `dial` with Klethron.** Use it from Klethron's non-blocking session loop (`Os.poll`/
-   `MessageQueue`, not `SocketChannel`), including backpressure with a slow reader and interactive
-   latency. Add peer listing with stable node IDs only with that caller. Keep Go panic and allocation
-   failure handling explicit.
-4. **Verify the live demo on the remaining devices.** Repeat minified-consumer startup on API 34 and
-   16 KiB devices, then authorized networking. Verify browser return and activity recreation; a
-   destroyed screen intentionally needs Start again. No auth keys in tests or fork PRs.
-5. **Revalidate feature exclusions** against the release baseline now that Start and Dial are reachable,
-   on a real tailnet on API 34 and 16 KiB devices. Reconsider `useexitnode`/`useproxy` only for a real
-   caller; omit `acme` once upstream fixes the build. Update the licence inventory for the final set.
+   subprocess reachability and state permissions (UPSTREAM.md), and retest the state format.
+3. **Validate `dial` with Klethron's** non-blocking session loop (`Os.poll`/`MessageQueue`), including
+   backpressure with a slow reader and interactive latency. Add peer listing with stable node IDs only
+   with that caller. Keep Go panic and allocation failure handling explicit.
+4. **Verify the live demo on API 34 and 16 KiB devices**, including browser return and activity recreation.
+5. **Revalidate feature exclusions** on a real tailnet. Reconsider `useexitnode`/`useproxy` only for a
+   caller; omit `serve` once upstream fixes the build. Update the licence inventory for the final set.
 6. **Release readiness.** Complete the licence review (per-file attributions, generated data, embedded
-   resources, C/NDK runtime). Test R8 consumers with networking, arm64 hardware, cold-start loading.
-   Keep native symbols separately if needed for crash reports. Record per-ABI sizes on dependency changes.
+   resources, C/NDK runtime). Keep native symbols separately if needed for crash reports.
 7. **Publish immutable versions** to Maven Central: verify the `com.klethron` namespace, signing, protected
-   credentials, POM/source/Javadoc metadata, publish from tags. Version independently of upstream; record
-   the upstream commit per release. Never overwrite a release.
+   credentials, POM/source/Javadoc metadata, publish from tags. Record the upstream commit per release.
 8. **Integrate into Klethron** separately: update its TAILSCALE-PLAN.md, add the artifact only to
    `:klethron_tailscale`, test Play split loading and the SSH transport seam.
 
-## Commands and maintenance
+## Updating upstream
 
-```sh
-./gradlew build :tsnet:publishReleasePublicationToLocalBuildRepository
-ANDROID_SERIAL=emulator-5554 ./gradlew :tsnet:connectedDebugAndroidTest
-ANDROID_SERIAL=emulator-5554 ./gradlew :demo:connectedReleaseAndroidTest
-```
-
-Use an SELinux Enforcing device (`adb -s <serial> shell getenforce`); a permissive emulator hides the
-interface-discovery failure and fails its negative control.
-
-To update upstream: resolve `tailscale/tailscale` main to a full SHA, update the Go requirement and sums,
-the version assertion and documented SHA, re-check patch hashes and every UPSTREAM.md entry, then rebuild
-both ABIs and repeat the device tests.
+Resolve `tailscale/tailscale` main to a full SHA; update the Go requirement and sums, the version
+assertions (`TsnetNodeTest`, `MinifiedDemoTest`) and the documented SHA; re-check patch hashes and every
+UPSTREAM.md entry; then rebuild both ABIs and repeat the device tests.

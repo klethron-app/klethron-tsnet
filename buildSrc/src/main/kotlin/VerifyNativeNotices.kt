@@ -43,7 +43,7 @@ abstract class VerifyNativeNotices @Inject constructor(private val exec: ExecOpe
             if (!condition) throw GradleException("$message. Review THIRD-PARTY-NOTICES.md and the checked-in notices")
         }
         val directory = notices.get().asFile
-        for (path in listOf("GO-LICENSE", "GO-PATENTS", "JSPECIFY-LICENSE")) {
+        for (path in listOf("GO-LICENSE", "GO-PATENTS", "JSPECIFY-LICENSE", "TAILSCALE-MODIFICATIONS")) {
             requireNotice(directory.resolve(path).isFile && directory.resolve(path).length() > 0, "Missing notice $path")
         }
         fun inventory(directory: File, name: String): List<List<String>> {
@@ -104,7 +104,6 @@ abstract class VerifyNativeNotices @Inject constructor(private val exec: ExecOpe
                     row == listOf("=>", "./tailscale", "(devel)") && index > 0 &&
                         fields[index - 1].take(2) == listOf("dep", "tailscale.com")
                 }, "Unexpected Go module replacement; only the documented tsnet patch is allowed")
-                requireNotice(directory.resolve("TAILSCALE-MODIFICATIONS").isFile, "Missing Tailscale patch notice")
                 val upstreamTailscale = expected.single { it[0] == "tailscale.com" }
                 val actual = fields.filter { it.first() == "dep" }.map {
                     val dependency = it.drop(1)

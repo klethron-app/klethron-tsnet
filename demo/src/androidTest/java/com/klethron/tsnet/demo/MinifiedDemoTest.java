@@ -63,7 +63,7 @@ public final class MinifiedDemoTest {
                     assertTrue("No result from the demo", SystemClock.uptimeMillis() < deadline);
                     instrumentation.runOnMainSync(() -> result[0] = button.isEnabled() ? button.getText().toString() : null);
                 }
-                assertEquals("Loaded v1.105.0-pre.0.20261107202901-503010831ecd\n"
+                assertEquals("Loaded v1.105.0-pre.0.20261108232751-62d055f4c38b\n"
                                 + "Node created and closed. No network started.",
                         result[0]);
             }

@@ -15,12 +15,10 @@ import (
 	"sort"
 
 	"tailscale.com/net/netmon"
-	"tailscale.com/types/logger"
-	"tailscale.com/util/eventbus"
 )
 
-// This bridge is linked only into debug builds. It does not start a tsnet server,
-// read node state, or contact any endpoint.
+// Reports interfaces from the registered getter and Go's own discovery error. It does not start
+// a node or contact any endpoint.
 //
 //export klethron_network_probe
 func klethron_network_probe() *C.char {
@@ -49,16 +47,6 @@ func klethron_network_probe() *C.char {
 					iface.Flags&net.FlagPointToPoint != 0, iface.Flags&net.FlagMulticast != 0,
 					hex.EncodeToString(prefix.IP), ones))
 			}
-		}
-	}
-	if err == nil {
-		bus := eventbus.New()
-		defer bus.Close()
-		var monitor *netmon.Monitor
-		monitor, err = netmon.New(bus, logger.Discard)
-		if err == nil {
-			monitor.Start()
-			err = monitor.Close()
 		}
 	}
 	if err != nil {

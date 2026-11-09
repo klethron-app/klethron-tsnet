@@ -41,6 +41,8 @@ val omittedFeatures = listOf(
     "logtail", "debug", "usermetrics", "cachenetmap",
     // Ignore host-process environment and policy: proxy variables, OAuth secrets, MDM settings.
     "useproxy", "oauthkey", "syspolicy",
+    // No TLS certificates for this node's own listeners.
+    "acme",
     // TLS trusts only Android's system CA store, not Tailscale's baked-in Let's Encrypt roots.
     "bakedroots",
 )

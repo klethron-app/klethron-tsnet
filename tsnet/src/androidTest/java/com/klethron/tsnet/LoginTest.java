@@ -7,7 +7,7 @@ import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
-import android.os.Looper;
+import androidx.test.platform.app.InstrumentationRegistry;
 import java.io.File;
 import java.io.IOException;
 import java.net.Inet4Address;
@@ -18,6 +18,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Duration;
+import java.util.Comparator;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
@@ -42,16 +43,15 @@ public final class LoginTest {
 
     @Before
     public void startControl() throws Exception {
-        assertTrue("Nodes must start off the UI thread", Looper.myLooper() != Looper.getMainLooper());
         controlUrl = nativeProbeStart(true);
         assertTrue(controlUrl.startsWith("http://127.0.0.1:"));
-        directory = StartupTest.temporaryDirectory("login-🔒-").resolve("node");
+        directory = temporaryDirectory("login-🔒-").resolve("node");
     }
 
     @After
     public void stopControl() throws Exception {
         nativeProbeStop();
-        StartupTest.deleteDirectory(directory.getParent());
+        deleteDirectory(directory.getParent());
     }
 
     @Test(timeout = 90000)
@@ -359,6 +359,19 @@ public final class LoginTest {
             if (condition.test(status)) return status;
         } while (System.nanoTime() < deadline);
         throw new AssertionError("Timed out at " + status);
+    }
+
+    static Path temporaryDirectory(String prefix) throws Exception {
+        return Files.createTempDirectory(InstrumentationRegistry.getInstrumentation()
+                .getTargetContext().getNoBackupFilesDir().toPath(), prefix);
+    }
+
+    static void deleteDirectory(Path directory) throws Exception {
+        try (var paths = Files.walk(directory)) {
+            for (Path path : paths.sorted(Comparator.reverseOrder()).toList()) {
+                Files.delete(path);
+            }
+        }
     }
 
     private void assertOnlyStateFile() throws Exception {

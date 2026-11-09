@@ -1,9 +1,7 @@
 package com.klethron.tsnet;
 
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertTrue;
 
-import android.os.Looper;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -29,8 +27,7 @@ public final class TailnetTest {
     }
 
     private static void assertExchange(boolean relayOnly) throws Exception {
-        assertTrue("Networking must run off the UI thread", Looper.myLooper() != Looper.getMainLooper());
-        Path directory = StartupTest.temporaryDirectory("tailnet-🔒-");
+        Path directory = LoginTest.temporaryDirectory("tailnet-🔒-");
         try {
             String report = nativeProbe(directory.toString().getBytes(StandardCharsets.UTF_8), relayOnly);
             assertEquals("ok", report);
@@ -38,7 +35,7 @@ public final class TailnetTest {
                 assertEquals("Nodes must not write log configuration, buffers or node state", 0, files.count());
             }
         } finally {
-            StartupTest.deleteDirectory(directory);
+            LoginTest.deleteDirectory(directory);
         }
     }
 

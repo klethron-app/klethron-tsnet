@@ -4,7 +4,7 @@ go 1.27.3
 
 require (
 	golang.org/x/sys v0.49.0
-	tailscale.com v1.105.0-pre.0.20261107202901-503010831ecd
+	tailscale.com v1.105.0-pre.0.20261108232751-62d055f4c38b
 )
 
 require (

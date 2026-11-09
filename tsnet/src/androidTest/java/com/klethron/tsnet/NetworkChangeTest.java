@@ -40,7 +40,7 @@ public final class NetworkChangeTest {
         assertTrue("The default network must be Wi-Fi", awaitWifiDefault(connectivity));
 
         TsnetNode.setDefaultNetwork(null, null);
-        Path directory = StartupTest.temporaryDirectory("netchange-");
+        Path directory = LoginTest.temporaryDirectory("netchange-");
         LinkedBlockingQueue<String> names = new LinkedBlockingQueue<>();
         ConnectivityManager.NetworkCallback callback = new ConnectivityManager.NetworkCallback() {
             @Override
@@ -78,12 +78,13 @@ public final class NetworkChangeTest {
             if (registered) {
                 connectivity.unregisterNetworkCallback(callback);
             }
+            // Release the probe first: it holds the lock that other tailnet probes wait for.
+            nativeProbeStop();
+            TsnetNode.setDefaultNetwork(null, null);
+            LoginTest.deleteDirectory(directory);
             shell("svc wifi enable");
             // Leave the device as found; Wi-Fi reconnects asynchronously.
             boolean unused = awaitWifiDefault(connectivity); // Best effort: must not mask a test failure.
-            nativeProbeStop();
-            TsnetNode.setDefaultNetwork(null, null);
-            StartupTest.deleteDirectory(directory);
         }
     }
 
