@@ -82,6 +82,14 @@ or workaround once upstream fixes it. Patches are hash-checked in `BuildGoLibrar
   capability version 149), upstream writes peer names, addresses and keys under `profile-data/`, even for
   ephemeral in-memory nodes. Workaround: `ts_omit_cachenetmap`.
 
+- **Subprocess call sites are linked.** Tailscale packages in the release graph have 21 `os/exec` call sites. All but one are
+  unreachable here by build tag, `runtime.GOOS` (Android is not `linux`), an omitted feature, a
+  pref we never set, or a real TUN (tsnet uses a fake one). The exception: netstack relays ICMP echo
+  requests to subnet or 4via6 addresses by running `/system/bin/ping` on Android (`ProcessSubnets`,
+  which tsnet enables). It is reachable only if the packet filter accepts such a destination, which
+  needs an advertised route. Workaround: `ts_omit_advertiseroutes` and `ts_omit_appconnectors`, so the
+  filter accepts only the node's own and service addresses. Re-audit with `go list -deps` on each update.
+
 ## Limits
 
 - **`ts_omit_acme` breaks the `tsnet` build** (`tsnet.go` calls `local.Client.GetCertificate`

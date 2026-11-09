@@ -49,8 +49,11 @@ Construction is `@WorkerThread`, because the first node in a process reads Andro
 so are `start`, `awaitStatus`, `dial`, `logout`, `login` and `close`. `tailscaleVersion` and `setDefaultNetwork` are `@AnyThread`. Android lint (`ThreadConstraint`, `CheckResult`), Error Prone and
 Kotlin's opt-in `-Xreturn-value-checker` report misuse from Java and Kotlin. They read these annotations
 by name, so the AAR does not export `androidx.annotation` (which would add the Kotlin stdlib) or
-`error_prone_annotations`. `start` is `@RequiresPermission(INTERNET)`. Callers must close nodes
-explicitly; `close()` is idempotent, safe to call concurrently, and waits for shutdown.
+`error_prone_annotations`. Lint's `ThreadConstraint` checks explicit method calls from `@MainThread` or
+`@UiThread` code, but not the constructor or try-with-resources' implicit `close()`. `start` is
+`@RequiresPermission(INTERNET)`; lint reports `MissingPermission` when the app does not declare it.
+Callers must close nodes explicitly; `close()` is idempotent, safe to call concurrently, and waits for
+shutdown.
 
 ```java
 // On a background thread. The directory holds the node's private keys: keep it out of backups.

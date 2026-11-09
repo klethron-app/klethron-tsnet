@@ -52,6 +52,15 @@ Upstream bugs and workarounds that shape this plan are in [UPSTREAM.md](UPSTREAM
 - Contracts: JSpecify `@NullMarked` (exported `api` dependency), Error Prone `@CheckReturnValue`,
   AndroidX threading and `@RequiresPermission(INTERNET)` annotations (`compileOnly`; tools match by name).
   Construction is `@WorkerThread`: the first node reads the CA store (10–20 ms cold).
+  Verified 2026-11-09 with AGP 9.5.1 lint in a scratch Java app using the published AAR: `start`
+  without INTERNET is a `MissingPermission` error (none once declared); method calls from `@MainThread`
+  are `ThreadConstraint` errors; an ignored `awaitStatus` is a `CheckResult` warning. Lint does not
+  check the `@WorkerThread` constructor or try-with-resources' implicit `close()`.
+- Decided, 2026-11-09: no ephemeral mode and no caller-supplied hostinfo until a caller needs them.
+  Klethron keeps a saved login; control removes an ephemeral node soon after it goes offline, so it
+  would need browser authorization again. Forgetting is logout plus deleting the directory. Hostinfo
+  on Android reports OS `android` only, with no OS version, device model, uname or cloud probe, which
+  is the minimal disclosure.
 
 ### Platform integration and privacy
 
@@ -60,6 +69,8 @@ Upstream bugs and workarounds that shape this plan are in [UPSTREAM.md](UPSTREAM
   and the app's network security configuration do not apply to native TLS.
 - All upstream loggers discard output; logtail, socket logs, log configuration and netmap cache write
   no files. Only `tailscaled.state` is persisted.
+- No subprocesses: the 21 upstream `os/exec` call sites in the release graph are unreachable here,
+  including netstack's `/system/bin/ping` relay for subnet pings (UPSTREAM.md), audited 2026-11-09.
 - 18 upstream features are omitted in both variants (`tsnet/build.gradle.kts`). x86_64 ZIP savings,
   measured individually (non-additive) on debug, or † on the earlier release scaffold:
 
@@ -251,10 +262,9 @@ Complete release AAR: 14,475,577 bytes. Debug AAR: 15,444,633 bytes. Notices add
    Verification). Next, if a caller needs them: a DERP-to-direct upgrade, NATs that prevent direct
    paths, IPv6 peers, subnet routes, throughput and outages longer than seconds. Use browser
    authorization, never a checked-in or CI auth key. Record untested cases explicitly.
-2. **Finish the lifecycle.** Decide whether an ephemeral mode is needed before adding one. Keep auditing upstream initialization,
-   filesystem/process behaviour and state permissions; retest the state format on every upstream
-   update. Verify `@RequiresPermission` in a scratch consumer. Possibly let callers supply `hostinfo` OS
-   version/device model.
+2. **Keep the lifecycle audited.** On every upstream update, re-audit initialization, filesystem and
+   subprocess reachability (UPSTREAM.md) and state permissions, and retest the state format. Revisit
+   ephemeral mode and caller-supplied hostinfo only for a caller (see Public API).
 3. **Validate `dial` with Klethron.** Use it from Klethron's non-blocking session loop (`Os.poll`/
    `MessageQueue`, not `SocketChannel`), including backpressure with a slow reader and interactive
    latency. Add peer listing with stable node IDs only with that caller. Keep Go panic and allocation
