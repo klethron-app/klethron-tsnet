@@ -95,3 +95,12 @@ or workaround once upstream fixes it. Patches are hash-checked in `BuildGoLibrar
   nodes' map requests with 400, not control's 404, and keeps streaming to running nodes, so removal is
   simulated with a 404 for map requests that a node sees at its next start. `httptest.Server.Close` does
   not close hijacked Noise connections, so stopping it does not make control unreachable.
+
+## Updating upstream
+
+Resolve `tailscale/tailscale` main to a full SHA; update the Go requirement and sums, the version
+assertions (`TsnetNodeTest`, `MinifiedDemoTest`) and the documented SHA; re-check patch hashes and every
+entry above. Re-audit initialization, filesystem and subprocess reachability and state permissions, and
+retest the state format. Update both notice inventories (THIRD-PARTY-NOTICES.md), then rebuild both ABIs
+and repeat the device tests. Omit `serve` once upstream fixes its build; when the omitted feature set
+changes, revalidate it on a real tailnet with the user.

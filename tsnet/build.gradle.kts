@@ -31,7 +31,7 @@ android {
     packaging.jniLibs.keepDebugSymbols += "**/libklethron_tsnet.so"
 }
 
-// Upstream features this client never uses. See PLAN.md for the measured savings and reasons.
+// Upstream features this client never uses. gradle/native-feature-audit.init.gradle measures one's size.
 val omittedFeatures = listOf(
     // Out of scope: embedded SSH server, web UI, Taildrive, app connectors, self-update.
     "ssh", "webclient", "drive", "appconnectors", "clientupdate",

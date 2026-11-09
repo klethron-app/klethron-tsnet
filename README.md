@@ -11,7 +11,9 @@ Java package `com.klethron.tsnet`, Maven coordinates `com.klethron:tsnet:0.1.0`.
 
 **Early development:** login, status, dialing by address or MagicDNS name, logout and revocation are
 verified against loopback test servers and, on arm64 hardware, a real tailnet. The first release, 0.1.0,
-is on Maven Central. See [PLAN.md](PLAN.md) for verification status and next steps.
+is on Maven Central. Not yet verified: a live tailnet with 16 KiB pages, DERP-to-direct upgrades, NATs
+that prevent direct paths, subnet routes, IPv6 peers, throughput, outages longer than seconds,
+tailnet-period key expiry, revocation while stopped and Play split delivery.
 
 ## Build
 
