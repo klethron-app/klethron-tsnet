@@ -15,6 +15,7 @@ import android.os.SystemClock;
 import android.system.Os;
 import android.system.OsConstants;
 import android.system.StructTimeval;
+import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.TextView;
 import com.klethron.tsnet.TsnetNode;
@@ -39,6 +40,8 @@ public final class LiveActivity extends Activity {
     private final Handler ui = new Handler(Looper.getMainLooper());
     private volatile boolean destroyed;
     private @Nullable TsnetNode node; // Only accessed on WORKER.
+    private @Nullable ParcelFileDescriptor held; // Kept-open connection; only accessed on WORKER.
+    private int heldExchanges; // Only accessed on WORKER.
     private @Nullable TsnetStatus status; // Only accessed on the UI thread; never saved in a Bundle.
     private boolean busy;
     private boolean started;
@@ -90,6 +93,9 @@ public final class LiveActivity extends Activity {
             return getString(R.string.logged_out);
         }));
         findViewById(R.id.exchange).setOnClickListener(view -> exchange());
+        ((CheckBox) findViewById(R.id.keep_open)).setOnCheckedChangeListener((view, checked) -> {
+            if (!checked) WORKER.execute(this::closeHeld);
+        });
         findViewById(R.id.close_node).setOnClickListener(view -> finish());
     }
 
@@ -146,26 +152,56 @@ public final class LiveActivity extends Activity {
             result(getString(R.string.invalid_destination));
             return;
         }
+        boolean keepOpen = ((CheckBox) findViewById(R.id.keep_open)).isChecked();
         runOperation(current -> {
             byte[] sent = ("klethron-tsnet:" + UUID.randomUUID() + "\n").getBytes(StandardCharsets.US_ASCII);
-            byte[] received = new byte[sent.length];
             long start = SystemClock.elapsedRealtime();
-            try (ParcelFileDescriptor connection = current.dial(host, port, TIMEOUT)) {
-                long deadline = SystemClock.elapsedRealtime() + TIMEOUT.toMillis();
-                for (int offset = 0; offset < sent.length;) {
-                    socketTimeout(connection, OsConstants.SO_SNDTIMEO, deadline);
-                    offset += Os.write(connection.getFileDescriptor(), sent, offset, sent.length - offset);
+            if (!keepOpen) {
+                try (ParcelFileDescriptor connection = current.dial(host, port, TIMEOUT)) {
+                    echo(connection, sent);
                 }
-                for (int offset = 0; offset < received.length;) {
-                    socketTimeout(connection, OsConstants.SO_RCVTIMEO, deadline);
-                    int count = Os.read(connection.getFileDescriptor(), received, offset, received.length - offset);
-                    if (count == 0) throw new IOException("Peer closed before echo");
-                    offset += count;
-                }
-                if (!Arrays.equals(sent, received)) throw new IOException("Echo mismatch");
+                return getString(R.string.echo_verified, sent.length, SystemClock.elapsedRealtime() - start);
             }
-            return getString(R.string.echo_verified, sent.length, SystemClock.elapsedRealtime() - start);
+            // Reuses one stream across exchanges, e.g. to test survival of a network change.
+            boolean dialed = held == null;
+            if (dialed) held = current.dial(host, port, TIMEOUT);
+            try {
+                echo(held, sent);
+            } catch (Exception failure) {
+                closeHeld();
+                throw failure;
+            }
+            long elapsed = SystemClock.elapsedRealtime() - start;
+            return dialed ? getString(R.string.echo_verified, sent.length, elapsed)
+                    : getString(R.string.echo_verified_open, sent.length, ++heldExchanges, elapsed);
         });
+    }
+
+    private static void echo(ParcelFileDescriptor connection, byte[] sent) throws Exception {
+        byte[] received = new byte[sent.length];
+        long deadline = SystemClock.elapsedRealtime() + TIMEOUT.toMillis();
+        for (int offset = 0; offset < sent.length;) {
+            socketTimeout(connection, OsConstants.SO_SNDTIMEO, deadline);
+            offset += Os.write(connection.getFileDescriptor(), sent, offset, sent.length - offset);
+        }
+        for (int offset = 0; offset < received.length;) {
+            socketTimeout(connection, OsConstants.SO_RCVTIMEO, deadline);
+            int count = Os.read(connection.getFileDescriptor(), received, offset, received.length - offset);
+            if (count == 0) throw new IOException("Peer closed before echo");
+            offset += count;
+        }
+        if (!Arrays.equals(sent, received)) throw new IOException("Echo mismatch");
+    }
+
+    private void closeHeld() {
+        heldExchanges = 0;
+        if (held == null) return;
+        try {
+            held.close();
+        } catch (IOException ignored) {
+            // Closing a socket-pair end releases it even when close reports an error.
+        }
+        held = null;
     }
 
     private static void socketTimeout(ParcelFileDescriptor connection, int option, long deadline)
@@ -231,6 +267,7 @@ public final class LiveActivity extends Activity {
             TsnetNode.setDefaultNetwork(null, null);
         }
         WORKER.execute(() -> {
+            closeHeld();
             if (node != null) node.close();
             node = null;
         });

@@ -18,6 +18,8 @@
     <string name="working">Working…</string>
     <string name="operation_failed">Operation failed: %1$s</string>
     <string name="echo_verified">Echo verified: %1$d B, %2$d ms (dial + exchange).</string>
+    <string name="keep_open">Keep connection open between echoes</string>
+    <string name="echo_verified_open">Echo verified on open connection: %1$d B, reuse %2$d, %3$d ms.</string>
     <string name="login_saved">Login saved</string>
     <string name="login_pending">Browser authorization pending; wait before closing</string>
     <string name="login_requested">Login requested; waiting for control</string>

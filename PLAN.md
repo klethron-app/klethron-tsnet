@@ -120,9 +120,20 @@ Upstream bugs and workarounds that shape this plan are in [UPSTREAM.md](UPSTREAM
   the same Pixel, using its saved login and the same running node. Verified fresh 52-byte TCP echoes
   to the computer on Wi-Fi (50 ms), after disabling Wi-Fi and confirming CELLULAR as the default
   network (1,126 ms), and after restoring Wi-Fi as the default (37 ms). The demo process did not
-  restart, and Wi-Fi was restored. These are dial-plus-exchange timings, not handoff/outage durations;
-  an already-open TCP stream was not tested. Direct versus DERP was not observed. Evidence:
+  restart, and Wi-Fi was restored. These are dial-plus-exchange timings, not handoff/outage durations.
+  Direct versus DERP was not observed. Evidence:
   `demo/build/reports/device-verification/hardware-pixel11-api37-4k-usb-live/results.json`.
+- Open stream across network changes, 2026-11-09, same Pixel/API/ABI/page size/SELinux, USB ADB:
+  with **Keep connection open**, one TCP stream to the computer carried six exact 52-byte echoes:
+  two on Wi-Fi, two after Wi-Fi was disabled and CELLULAR became default (0.72 s), two after Wi-Fi was
+  re-enabled and became default (2.40 s). The first echo after each switch took 3,418 ms and 102 ms;
+  others 8–42 ms. `ss` on the peer showed the same single connection (unchanged source port) at every
+  stage, and its removal when the option was unticked. Switches were about 8 s apart, below the echo
+  server's 15 s idle timeout; longer outages were not tested. Direct versus DERP was not observed.
+  Evidence: `demo/build/reports/device-verification/hardware-pixel11-api37-4k-usb-open-stream/results.json`.
+  After this demo change, the 2 R8-minified demo tests passed (zero failures/errors/skips, JUnit XML) on
+  API 37.2 / x86_64 / 16 KiB pages, SELinux Enforcing. A first attempt failed the live-start test (no
+  control-plane status within 45 s) while the host's internet was down; the rerun after it returned passed.
 - Tests cover: native load and create/close cycles; interface parity with Java and a negative control
   showing stock Go discovery fails; file-free startup; a loopback two-node tailnet (testcontrol,
   DERP/STUN) with direct and DERP-only exchange; network-change rebinding on a real Wi-Fi/cellular
@@ -136,8 +147,7 @@ Upstream bugs and workarounds that shape this plan are in [UPSTREAM.md](UPSTREAM
   covered separately by the manual and ADB-driven checks above, not by these JUnit tests.
 - **Not verified:** admin-initiated key expiry/removal, access revocation during real logout,
   real DERP, fallback DNS, direct traversal across different NATs, subnet routes, IPv6 peers, throughput,
-  survival of an already-open TCP stream across a network change,
-  arm64 with 16 KiB pages, a non-blocking consumer, or Play split delivery.
+  open-stream survival of outages longer than seconds, arm64 with 16 KiB pages, a non-blocking consumer, or Play split delivery.
 - Seen once, unexplained: an API 37.2 logout test saw no status change after `STOPPED` for 30 s and the
   next close took 10 s. Watch for recurrence.
 
@@ -147,7 +157,8 @@ Upstream bugs and workarounds that shape this plan are in [UPSTREAM.md](UPSTREAM
   URL only on a browser-button tap, shows backend state and login persistence, and supports logout and
   re-authentication. It forwards default-network changes through `ConnectivityManager`.
 - One destination (tailnet IP or MagicDNS name) and port; a fresh 52-byte challenge must echo exactly.
-  Dial and exchange each have a 10-second bound. No URL, credential or peer payload is logged.
+  Dial and exchange each have a 10-second bound. **Keep connection open** reuses one stream across
+  echoes until unticked, a failed echo or close. No URL, credential or peer payload is logged.
 - Node creation, operations and cleanup run off the UI thread. Browser navigation keeps the node alive;
   destroying the screen queues close. Reopening requires Start, which resumes saved identity. Serial
   cleanup prevents overlapping access to the state directory on activity recreation. No service.
@@ -167,9 +178,9 @@ Complete release AAR: 14,472,683 bytes. Debug AAR: 15,442,185 bytes. Notices add
 ## Future
 
 1. **Extend real-tailnet coverage.** Basic browser login, address/MagicDNS echo, saved-login restart,
-   logout/re-login and fresh TCP dials after Wi-Fi/cellular switches passed on hardware. Next verify
-   an already-open stream across network changes, admin-initiated expiry/removal and access revocation
-   during logout. Distinguish direct and real
+   logout/re-login, and both fresh dials and an open stream across Wi-Fi/cellular switches passed on
+   hardware. Next verify admin-initiated expiry/removal and access revocation during logout (open
+   stream and fresh dial). Distinguish direct and real
    DERP paths with peer-side evidence; separately exercise fallback DNS and traversal across different
    NATs. Use browser authorization, never a checked-in or CI auth key. Record untested cases explicitly.
 2. **Finish the lifecycle.** Surface backend errors (`Notify.ErrMessage`) and control's node-removed state

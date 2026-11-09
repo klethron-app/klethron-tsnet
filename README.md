@@ -164,8 +164,10 @@ steps below passing with the release demo and a separate computer as the echo pe
 IPv4/MagicDNS echo, saved-login restart, and logout/re-login. This manual result does not identify
 direct versus DERP paths. An ADB-driven follow-up on 2026-11-09 verified fresh 52-byte echoes on Wi-Fi
 (50 ms), cellular (1,126 ms), and restored Wi-Fi (37 ms), without restarting the node. Those timings
-measure dial plus exchange, not network handoff; an already-open stream was not tested. Wi-Fi was
-restored afterward. To repeat the basic test, use a tailnet and peer you own.
+measure dial plus exchange, not network handoff. A second follow-up with **Keep connection open**
+verified that one TCP stream kept echoing across Wi-Fi → cellular → Wi-Fi, with the peer seeing the same
+connection throughout (see PLAN.md). Wi-Fi was restored afterward. To repeat the basic test, use a
+tailnet and peer you own.
 
 1. Install the minified consumer with `./gradlew :demo:installRelease` (set `ANDROID_SERIAL` when more
    than one device is attached). Open **Klethron tsnet demo → Live tailnet test → Start / resume node**.
@@ -195,6 +197,8 @@ restored afterward. To repeat the basic test, use a tailnet and peer you own.
 4. Enter the peer address and port `7070`, then tap **Verify TCP echo**. Expect **Echo verified: 52 B**
    and elapsed time. Repeat with the peer's full MagicDNS name. Each exchange sends a fresh random
    challenge and checks every returned byte. Dial and exchange each time out after 10 seconds.
+   Tick **Keep connection open between echoes** to reuse one stream instead (for network-change
+   tests); untick it to close the stream. The server above closes connections idle for 15 seconds.
 5. Tap **Close node**, reopen the live screen and Start again. Expect RUNNING without browser login;
    repeat the echo. Then **Log out of tailnet**, wait for confirmation, **Log in / renew key**, authorize
    again and repeat. A failed logout retains the login; restore connectivity and retry it.
@@ -210,7 +214,7 @@ Record only test outcomes, device/API/ABI/page size, network types and timings:
 |---|---|
 | Login, address/MagicDNS echo, saved-login restart | RUNNING, Login saved, exact echo before and after restart |
 | Logout/re-login, admin key expiry/removal | Access ends; observe state; browser re-authentication restores echo |
-| Wi-Fi ↔ cellular, different NATs | Echo succeeds again after each switch; use USB ADB |
+| Wi-Fi ↔ cellular, different NATs | Fresh and kept-open echoes succeed after each switch; the peer sees one unchanged connection for the latter (`ss -tn`); use USB ADB |
 | Direct and real DERP | Peer-side path evidence during exchange, with UDP blocked only in a controlled test network for DERP; successful echo alone does not identify the path |
 | Fallback DNS | System DNS deliberately fails on a controlled network while control/DERP remain reachable; a fresh connection succeeds |
 
