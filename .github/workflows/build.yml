@@ -74,7 +74,12 @@ jobs:
           PLATFORM: ${{ steps.versions.outputs.platform }}
           BUILD_TOOLS: ${{ steps.versions.outputs.buildTools }}
           NDK: ${{ steps.versions.outputs.ndk }}
-        run: sdkmanager "platforms;$PLATFORM" "build-tools;$BUILD_TOOLS" "ndk;$NDK"
+          COMMAND_LINE_TOOLS: ${{ steps.versions.outputs.commandLineToolsBuild }}
+        run: |
+          sdkmanager "platforms;$PLATFORM" "build-tools;$BUILD_TOOLS" "ndk;$NDK"
+          # emulator-runner prepends this path; replace the runner's older tools with our pin.
+          mv "$ANDROID_HOME/cmdline-tools/latest" "$ANDROID_HOME/cmdline-tools/preinstalled"
+          ln -s "$COMMAND_LINE_TOOLS" "$ANDROID_HOME/cmdline-tools/latest"
       - name: Build and verify local publication
         run: ./gradlew --no-daemon build :tsnet:publishReleasePublicationToLocalBuildRepository
       - name: Verify incremental build and configuration cache
@@ -96,6 +101,8 @@ jobs:
           target: google_apis
           arch: x86_64
           profile: pixel_6
+          avd-name: api34
+          ram-size: 2048M
           emulator-build: 15507667 # 36.6.11
           script: .github/android-tests.sh 34 4096
       - name: Test Android 17 (API 37.2, 16 KiB pages)
@@ -106,6 +113,8 @@ jobs:
           target: google_apis_ps16k
           arch: x86_64
           profile: pixel_6
+          avd-name: api37_2_16k
+          ram-size: 2048M
           emulator-build: 15507667 # 36.6.11
           script: .github/android-tests.sh 37 16384
       - name: Save the release publication
