@@ -180,25 +180,35 @@ Complete release AAR: 13,766,362 bytes. Debug AAR: 14,869,962 bytes. Notices add
 
 ## Future
 
-1. **Extend real-tailnet coverage** for the cases under Not verified, only as a caller needs them. Use
-   browser authorization, never a checked-in or CI auth key.
-2. **Keep the lifecycle audited.** On every upstream update, re-audit initialization, filesystem and
-   subprocess reachability and state permissions (UPSTREAM.md), and retest the state format.
-3. **Validate `dial` with Klethron's session loop.** Its `SessionLoop` runs a `java.nio` `Selector`,
-   which has no public API to register a `ParcelFileDescriptor`: its adapter needs an `Os.poll` helper
-   thread or `MessageQueue` descriptor events (both verified here), waking the selector. Measure SSH
-   backpressure and interactive latency there on a real tailnet. Add peer listing with stable node IDs
-   only with that caller. Keep Go panic and allocation failure handling explicit.
-4. **Verify the live demo on a 16 KiB device**, including browser return and activity recreation.
-5. **Revalidate feature exclusions** on a real tailnet. Reconsider `useexitnode`/`useproxy` only for a
-   caller; omit `serve` once upstream fixes the build. Update the licence inventory for the final set.
-6. **Release readiness.** Complete the licence review (per-file attributions, generated data, embedded
-   resources, C/NDK runtime). Keep native symbols separately if needed for crash reports.
-7. **Publish immutable versions** to Maven Central: verify the `com.klethron` namespace, signing, protected
+In order: Klethron consumes a pinned Maven Central release, so release readiness comes first.
+
+1. **Next: release readiness.** Complete the licence review (per-file attributions, generated data,
+   embedded resources, C/NDK runtime). Keep native symbols separately if needed for crash reports.
+2. **Publish immutable versions** to Maven Central: verify the `com.klethron` namespace, signing, protected
    credentials, POM/source/Javadoc metadata, publish from tags. Record the upstream commit per release.
-8. **Integrate into Klethron** separately: update its TAILSCALE-PLAN.md, add the artifact only to
-   `:klethron_tailscale`, test Play split loading and the SSH transport seam. Without a foreground
-   service, Android freezes a backgrounded process and its node; decide that lifetime there.
+3. **Integrate into Klethron** separately: update its TAILSCALE-PLAN.md, add the artifact only to
+   `:klethron_tailscale`, test Play split loading and the SSH transport seam. Its `SessionLoop` runs a
+   `java.nio` `Selector`, which has no public API to register a `ParcelFileDescriptor`: the adapter needs
+   an `Os.poll` helper thread or `MessageQueue` descriptor events (both verified here), waking the
+   selector. Measure SSH backpressure and interactive latency there on a real tailnet. Add peer listing
+   with stable node IDs only with that caller. Without a foreground service, Android freezes a
+   backgrounded process and its node; decide that lifetime there.
+
+Blocked:
+
+- **Verify the live demo on a 16 KiB device**, including browser return and activity recreation. The
+  16 KiB emulator's Chrome drops typed sign-in characters; needs another browser path or hardware.
+- **Revalidate feature exclusions** on a real tailnet, with the user. Reconsider `useexitnode`/`useproxy`
+  only for a caller; omit `serve` once upstream fixes the build. Update the licence inventory for the
+  final set.
+
+Ongoing:
+
+- **Extend real-tailnet coverage** for the cases under Not verified, only as a caller needs them. Use
+  browser authorization, never a checked-in or CI auth key.
+- **Keep the lifecycle audited.** On every upstream update, re-audit initialization, filesystem and
+  subprocess reachability and state permissions (UPSTREAM.md), and retest the state format. Keep Go
+  panic and allocation failure handling explicit.
 
 ## Updating upstream
 
