@@ -180,7 +180,9 @@ the saved login and echoed by address and MagicDNS name. A fifth used a peer tha
 fresh and kept-open echoes, on Wi-Fi and cellular, all went through Tailscale's DERP relay. A sixth
 expired the node's key through the Tailscale API and later removed the node in the admin console: each
 time the demo showed NEEDS_LOGIN, the open stream and fresh dials failed, and browser re-login restored
-the echo (after removal as a new node). To repeat the basic test, use a tailnet and peer you own.
+the echo (after removal as a new node). A seventh repeated both with the typed status: the demo showed
+`NEEDS_LOGIN (KEY_EXPIRED)` and `NEEDS_LOGIN (NODE_REMOVED)` respectively. To repeat the basic test,
+use a tailnet and peer you own.
 
 1. Install the minified consumer with `./gradlew :demo:installRelease` (set `ANDROID_SERIAL` when more
    than one device is attached). Open **Klethron tsnet demo → Live tailnet test → Start / resume node**.
@@ -227,7 +229,7 @@ Record only test outcomes, device/API/ABI/page size, network types and timings:
 | Case | Evidence required |
 |---|---|
 | Login, address/MagicDNS echo, saved-login restart | RUNNING, Login saved, exact echo before and after restart |
-| Logout/re-login, admin key expiry/removal | Access ends; observe state; browser re-authentication restores echo. Key expiry needs the API (`POST /api/v2/device/{id}/expire` with a short-lived token the user runs and revokes); removal is in the admin console |
+| Logout/re-login, admin key expiry/removal | Access ends; observe state and `revocation()`; browser re-authentication restores echo. Key expiry needs the API (`POST /api/v2/device/{id}/expire` with a short-lived token the user runs and revokes); removal is in the admin console |
 | Wi-Fi ↔ cellular, different NATs | Fresh and kept-open echoes succeed after each switch; the peer sees one unchanged connection for the latter (`ss -tn`); use USB ADB |
 | Direct and real DERP | Peer-side path evidence during exchange (`tailscale status` on the peer shows `direct` or `relay`); successful echo alone does not identify the path. For DERP, block the peer's UDP in a controlled test network, or run an ephemeral tsnet echo peer with `TS_DEBUG_ALWAYS_USE_DERP=true` (no root; it opens no UDP sockets) and log it out afterwards |
 | Fallback DNS | System DNS deliberately fails while control/DERP remain reachable (for example `adb shell settings put global private_dns_mode hostname` and `private_dns_specifier` set to an unresolvable name; delete both afterwards); a fresh process starts and a fresh connection succeeds |

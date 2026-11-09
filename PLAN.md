@@ -108,8 +108,8 @@ Upstream bugs and workarounds that shape this plan are in [UPSTREAM.md](UPSTREAM
   (API 37 / arm64-v8a / 4 KiB, USB), all SELinux Enforcing; `LoginTest` (9 tests) passed three more
   times on the 16 KiB emulator. The 2 R8-minified demo tests passed on API 37.2 / 16 KiB. Reports:
   `tsnet/build/reports/device-verification/{revocation-api34-4k,revocation-api37.2-16k,hardware-pixel11-api37-4k-usb-revocation}/`
-  and `demo/build/reports/device-verification/revocation-api37.2-16k/`. The typed reasons are tested
-  against the loopback control only; real expiry and removal were observed before they existed.
+  and `demo/build/reports/device-verification/revocation-api37.2-16k/`. Both reasons were later observed
+  on a real tailnet (see below).
 - Hardware, 2026-11-08: Pixel 11 Pro XL, API 37 / arm64-v8a / 4 KiB pages, SELinux Enforcing:
   **24 library + 2 R8-minified demo tests**, zero failures/errors/skips, counted from JUnit XML.
   Reports: each module's `build/reports/device-verification/hardware-pixel11-api37-4k/`.
@@ -187,12 +187,21 @@ Upstream bugs and workarounds that shape this plan are in [UPSTREAM.md](UPSTREAM
   unacknowledged (FIN-WAIT-1) and fresh dials timed out (`SocketTimeoutException`). **Log in / renew
   key** plus browser restored direct echoes by address and MagicDNS name. After expiry the node kept
   its ID and address. After removal control asked to connect a new device, which got a new node ID and
-  tailnet IPv4. To the caller both looked like logout then; `revocation()` was added afterwards and is
-  not yet observed on a real tailnet (Future 1).
+  tailnet IPv4. To the caller both looked like logout then, which led to `revocation()`.
   Incidentally, streams stayed open 15 min and 1 h 50 min on steady Wi-Fi. The longer one ended once,
   most likely because the ~15 s echo cadence matched the echo server's 15 s idle timeout. The next
   fresh dial passed.
   Evidence: `demo/build/reports/device-verification/hardware-pixel11-api37-4k-usb-admin-expiry-removal/results.json`.
+- Revocation reasons, 2026-11-09, same Pixel/API/ABI/page size/SELinux, USB ADB, Wi-Fi, saved login,
+  R8-minified release demo with `revocation()`. Repeating the API key expiry and the admin-console
+  removal against a kept-open direct stream (sampled every ~15 s), the demo showed
+  `NEEDS_LOGIN (KEY_EXPIRED)` within 5 s of the peer's recorded expiry, and `NEEDS_LOGIN (NODE_REMOVED)`
+  at the first sample after removal. Neither had a login URL; `error()` stayed null. The reason stayed
+  while browser re-authorization was pending and cleared at RUNNING. Access ended as before (open
+  stream `ErrnoException`, peer FIN-WAIT-1, fresh dials `SocketTimeoutException`). Re-login restored
+  direct echoes by address and MagicDNS name, with the same node ID after expiry and a new node ID and
+  IPv4 after removal. Not covered: tailnet-period expiry, cellular/DERP, revocation while not running.
+  Evidence: `demo/build/reports/device-verification/hardware-pixel11-api37-4k-usb-revocation-reasons/results.json`.
 - Tests cover: native load and create/close cycles; interface parity with Java and a negative control
   showing stock Go discovery fails; file-free startup; a loopback two-node tailnet (testcontrol,
   DERP/STUN) with direct and DERP-only exchange; network-change rebinding on a real Wi-Fi/cellular
@@ -237,11 +246,11 @@ Complete release AAR: 14,475,577 bytes. Debug AAR: 15,444,633 bytes. Notices add
 ## Future
 
 1. **Extend real-tailnet coverage.** Login, address/MagicDNS echo, saved-login restart, logout,
-   admin key expiry and removal, Wi-Fi/cellular switches with an open stream, direct paths on LAN and
-   carrier NAT, real DERP and failing system DNS passed on hardware (see Verification). Next, repeat
-   admin key expiry and removal to observe `revocation()` on a real tailnet. Then, if a caller needs them: a DERP-to-direct upgrade, NATs that prevent direct paths, IPv6 peers, subnet
-   routes, throughput and outages longer than seconds. Use browser authorization, never a checked-in
-   or CI auth key. Record untested cases explicitly.
+   admin key expiry and removal with their `revocation()` reasons, Wi-Fi/cellular switches with an open
+   stream, direct paths on LAN and carrier NAT, real DERP and failing system DNS passed on hardware (see
+   Verification). Next, if a caller needs them: a DERP-to-direct upgrade, NATs that prevent direct
+   paths, IPv6 peers, subnet routes, throughput and outages longer than seconds. Use browser
+   authorization, never a checked-in or CI auth key. Record untested cases explicitly.
 2. **Finish the lifecycle.** Decide whether an ephemeral mode is needed before adding one. Keep auditing upstream initialization,
    filesystem/process behaviour and state permissions; retest the state format on every upstream
    update. Verify `@RequiresPermission` in a scratch consumer. Possibly let callers supply `hostinfo` OS
