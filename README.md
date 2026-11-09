@@ -10,7 +10,7 @@ yet. See [PLAN.md](PLAN.md) for verification status and next steps.
 
 ## Build
 
-Requires JDK 25, Go 1.27.3, an Android SDK (`ANDROID_HOME` or `local.properties`) with platform
+Requires JDK 25 (25.0.5 for byte-identical output), Go 1.27.3, an Android SDK (`ANDROID_HOME` or `local.properties`) with platform
 `android-37.2`, build-tools `37.0.0` and NDK `30.0.16248370`. Native builds support Linux x86_64 and
 macOS hosts; only Linux is verified.
 
@@ -142,8 +142,23 @@ lives while its screen exists, and uninstalling does not remove the machine from
 
 ## Distribution
 
-Maven Central is the intended destination, pending namespace verification and release setup. CI keeps
-verification reports but publishes nothing. Original code is Apache-2.0; Tailscale and its dependencies
-keep their own licences, with notices in the AAR (see [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)).
-Tailscale is pinned to [`62d055f4c38b`](https://github.com/tailscale/tailscale/commit/62d055f4c38b610d63a8cee7fa4a7e65b01564eb)
+Maven Central is the intended destination, pending namespace verification and release setup; nothing is
+published yet. Original code is Apache-2.0; Tailscale and its dependencies keep their own licences, with
+notices in the AAR (see [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)). Tailscale is pinned to
+[`62d055f4c38b`](https://github.com/tailscale/tailscale/commit/62d055f4c38b610d63a8cee7fa4a7e65b01564eb)
 in `tsnet/src/main/go/go.mod`; builds use `-mod=readonly`, never a moving branch.
+
+A release is the commit of its tag, which the POM names (`<scm><tag>`); that commit pins Tailscale, Go and
+the NDK, and `TsnetNode.tailscaleVersion()` reports the linked Tailscale version. To release `X.Y.Z`:
+
+1. Commit `version=X.Y.Z` in `gradle.properties`, then push the tag `vX.Y.Z` on that commit.
+2. CI builds and verifies the publication as on `main`. The `release` job, in the protected
+   `maven-central` environment, signs it with `.github/central-bundle.sh` and uploads it to the Central
+   Portal as a user-managed deployment. It runs no Gradle, and the build job never sees the secrets.
+3. Compare the signed files, the run's `maven-release` artifact (`gh run download <run> -n maven-release`),
+   with a local build of the tag using the pinned toolchains. Then publish the deployment in the Portal
+   (irreversible) or drop it, and commit the next `-SNAPSHOT` version.
+
+The environment needs a required reviewer, deployments from `v*` tags only, and the secrets `SIGNING_KEY`
+(an ASCII-armoured secret key whose public key is on a keyserver such as `keyserver.ubuntu.com`),
+`SIGNING_PASSPHRASE`, `CENTRAL_USERNAME` and `CENTRAL_PASSWORD` (a Central Portal user token).

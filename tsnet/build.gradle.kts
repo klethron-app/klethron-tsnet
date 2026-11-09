@@ -90,6 +90,27 @@ for (buildType in listOf("release", "debug")) {
     tasks.named("check") { dependsOn(verifyNotices) }
 }
 
+// AGP's Dokka-based Javadoc drops the code spans and links of Markdown doc comments; the JDK renders them.
+val javadoc = tasks.register<Javadoc>("releaseJavadoc") {
+    source("src/main/java")
+    setDestinationDir(layout.buildDirectory.dir("docs/javadoc").get().asFile)
+    (options as StandardJavadocDocletOptions).apply {
+        noTimestamp(true)
+        addBooleanOption("-no-fonts", true)
+        addBooleanOption("Xdoclint:all,-missing", true) // Parameters are described in the prose.
+        addBooleanOption("Werror", true)
+    }
+}
+androidComponents.onVariants(androidComponents.selector().withBuildType("release")) { variant ->
+    javadoc.configure { classpath = variant.compileClasspath + files(androidComponents.sdkComponents.bootClasspath) }
+}
+tasks.named("check") { dependsOn(javadoc) }
+val javadocJar = tasks.register<Jar>("releaseJavadocJar") {
+    archiveClassifier = "javadoc"
+    destinationDirectory = layout.buildDirectory.dir("libs")
+    from(javadoc)
+}
+
 dependencies {
     api(libs.jspecify)
     // Lint, Error Prone and Kotlin's return-value checker match these by name in our class files, so
@@ -105,16 +126,32 @@ publishing {
         register<MavenPublication>("release") {
             artifactId = "tsnet"
             afterEvaluate { from(components["release"]) }
+            artifact(javadocJar)
             pom {
                 name = "Klethron tsnet"
                 description = "Android JNI bindings for an embedded Tailscale tsnet node"
                 url = "https://github.com/klethron-app/klethron-tsnet"
-                scm { url = "https://github.com/klethron-app/klethron-tsnet" }
                 licenses {
                     license {
-                        name = "Apache License, Version 2.0 (wrapper); dependencies retain their licences"
-                        url = "https://github.com/klethron-app/klethron-tsnet/blob/main/THIRD-PARTY-NOTICES.md"
+                        name = "Apache-2.0"
+                        url = "https://www.apache.org/licenses/LICENSE-2.0.txt"
+                        comments = "This project's code. The native libraries bundle Tailscale, Go and other code " +
+                            "under their own licences, shipped in assets/klethron-tsnet/licenses/ (THIRD-PARTY-NOTICES.md)."
                     }
+                }
+                developers {
+                    developer {
+                        name = "Fredrik Fornwall"
+                        organization = "Klethron"
+                        organizationUrl = "https://github.com/klethron-app"
+                    }
+                }
+                scm {
+                    url = "https://github.com/klethron-app/klethron-tsnet"
+                    connection = "scm:git:https://github.com/klethron-app/klethron-tsnet.git"
+                    developerConnection = "scm:git:ssh://git@github.com/klethron-app/klethron-tsnet.git"
+                    // The tag pins the source, and with it the Tailscale commit, Go and NDK of a release.
+                    if (!version.toString().endsWith("-SNAPSHOT")) tag = "v$version"
                 }
             }
         }

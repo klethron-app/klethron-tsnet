@@ -3,6 +3,7 @@ name: Build
 on:
   push:
     branches: [main]
+    tags: ['v*']
   pull_request:
   workflow_dispatch:
 
@@ -61,6 +62,13 @@ jobs:
         run: ./gradlew --no-daemon build :tsnet:publishReleasePublicationToLocalBuildRepository
       - name: Verify incremental build and configuration cache
         run: ./gradlew --no-daemon build :tsnet:publishReleasePublicationToLocalBuildRepository
+      - name: Save the release publication
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: maven-release
+          path: build/maven/
+          if-no-files-found: error
       - name: Save reports
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -70,3 +78,44 @@ jobs:
             tsnet/build/reports/
             demo/build/reports/
           if-no-files-found: warn
+
+  # Release tags only. Secrets live in the protected maven-central environment, and this job runs no
+  # build code. Central validates the upload; a maintainer publishes it in the Portal, irreversibly.
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: maven-central
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: maven-release
+          path: maven
+      - name: Sign the bundle
+        env:
+          SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
+          SIGNING_PASSPHRASE: ${{ secrets.SIGNING_PASSPHRASE }}
+        run: .github/central-bundle.sh "${GITHUB_REF_NAME#v}" maven bundle.zip
+      - name: Upload to the Central Portal for manual publication
+        env:
+          CENTRAL_USERNAME: ${{ secrets.CENTRAL_USERNAME }}
+          CENTRAL_PASSWORD: ${{ secrets.CENTRAL_PASSWORD }}
+        run: |
+          api=https://central.sonatype.com/api/v1/publisher
+          auth="Authorization: Bearer $(printf %s "$CENTRAL_USERNAME:$CENTRAL_PASSWORD" | base64 -w0)"
+          central() { curl --fail-with-body --silent --show-error -H @<(printf '%s\n' "$auth") "$@"; }
+          id=$(central -F bundle=@bundle.zip "$api/upload?name=tsnet-${GITHUB_REF_NAME#v}&publishingType=USER_MANAGED")
+          for _ in $(seq 60); do
+            status=$(central -X POST "$api/status?id=$id")
+            case $(jq -r .deploymentState <<<"$status") in
+              VALIDATED) echo "Deployment $id validated: publish or drop it at https://central.sonatype.com/publishing/deployments"; exit 0 ;;
+              FAILED) jq .errors <<<"$status"; exit 1 ;;
+            esac
+            sleep 10
+          done
+          echo "Deployment $id still not validated" >&2
+          exit 1

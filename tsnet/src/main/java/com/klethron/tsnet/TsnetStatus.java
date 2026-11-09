@@ -75,6 +75,7 @@ public final class TsnetStatus {
                 List.copyOf(addresses), fields[5].isEmpty() ? null : fields[5]);
     }
 
+    /// The node's backend state.
     public State state() {
         return state;
     }

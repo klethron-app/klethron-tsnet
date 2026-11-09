@@ -24,7 +24,7 @@ Upstream bugs and workarounds that shape this plan are in [UPSTREAM.md](UPSTREAM
 
 - Pinned: Tailscale main `62d055f4c38b610d63a8cee7fa4a7e65b01564eb` (Go module
   `v1.105.0-pre.0.20261108232751-62d055f4c38b`), Go 1.27.3, NDK 30.0.16248370, AGP 9.5.1, Gradle 9.9.0
-  (wrapper checksum pinned). CI validates the wrapper and runs actionlint before the build.
+  (wrapper checksum pinned), JDK 25.0.5 in CI. CI validates the wrapper and runs actionlint before the build.
 - `:tsnet` packages Java, C JNI and a Go `c-shared` library into an AAR. Native tasks are incremental and
   configuration-cache compatible; shared build caching stays disabled until toolchains are hermetic.
 - Release libraries: `-trimpath`, stripped, 16 KiB aligned. `verifyNativeAar` checks architecture,
@@ -32,7 +32,17 @@ Upstream bugs and workarounds that shape this plan are in [UPSTREAM.md](UPSTREAM
 - Two upstream patches are applied to an isolated, hash-checked build copy (UPSTREAM.md): a failed
   logout keeps the node key, and a netmap still being handled cannot undo a logout. Two earlier
   logtail patches and the `ts_omit_acme` build fix were merged upstream (2026-11-08).
-- Maven publishing goes only to `build/maven/`.
+- Release publication, verified 2026-11-09: the POM carries Central's licence, developer and SCM
+  metadata, and `<scm><tag>` names the release tag, whose commit pins Tailscale, Go and the NDK. Sources
+  and a JDK Javadoc jar (119 KB) are attached; AGP's Dokka Javadoc dropped Markdown code spans and links.
+  `check` runs doclint. Two `-Pversion=0.1.0` builds from different checkout paths with separate Go build
+  caches gave byte-identical AAR, POM, module and jars (same host and toolchains).
+- Tag builds hand the publication to a `release` job in the protected `maven-central` environment that
+  runs no Gradle. `.github/central-bundle.sh` checks the artifact set and checksums, signs in a temporary
+  keyring and zips a Portal bundle; with a throwaway key, all signatures verified against only the public
+  key, and SNAPSHOT or mismatched versions, extra files, bad checksums and a wrong passphrase failed. The
+  job uploads a user-managed deployment and waits for validation; a maintainer publishes it. The upload
+  is untested until the Central account exists. Otherwise publishing goes only to `build/maven/`.
 
 ### Public API (`TsnetNode`, `TsnetStatus`)
 
@@ -208,16 +218,20 @@ test now asserts that `NEEDS_LOGIN` after a logout has no addresses.
 | arm64-v8a library | 16,729,744 | 6,519,181 |
 | x86_64 library | 18,151,376 | 7,165,557 |
 
-Complete release AAR: 13,771,514 bytes. Debug AAR: 14,878,673 bytes. Notices add about 67 KiB to the
+Complete release AAR: 13,771,517 bytes. Debug AAR: 14,878,667 bytes. Notices add about 67 KiB to the
 release demo APK (59,526 compressed bytes plus ZIP headers).
 
 ## Future
 
 In order: Klethron consumes a pinned Maven Central release, so release readiness comes first.
 
-1. **Next: publish immutable versions** to Maven Central: verify the `com.klethron` namespace, signing,
-   protected credentials, POM/source/Javadoc metadata, publish from tags. Record the upstream commit per
-   release.
+1. **Next: first Maven Central release, with the user.** Verify the `com.klethron` namespace (DNS TXT
+   record on `klethron.com`) and create a Portal user token; create a signing key and publish its public
+   key; create the `maven-central` environment (required reviewer, `v*` tags only) with the secrets in
+   [README.md](README.md#distribution); protect `v*` tags from moves and deletion. Then tag `v0.1.0` and
+   check that the CI-built publication matches a local build of the tag (cross-host reproducibility is
+   unverified: CI uses Temurin, the dev host Homebrew OpenJDK, both 25.0.5), that the Portal validates
+   the upload, and that a scratch app resolves the published artifact before Klethron depends on it.
 2. **Integrate into Klethron** separately: update its TAILSCALE-PLAN.md, add the artifact only to
    `:klethron_tailscale`, test Play split loading and the SSH transport seam. Its `SessionLoop` runs a
    `java.nio` `Selector`, which has no public API to register a `ParcelFileDescriptor`: the adapter needs
