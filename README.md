@@ -7,7 +7,10 @@ Java package: `com.klethron.tsnet`. Maven coordinates: `com.klethron:tsnet:0.1.0
 reports its login URL and backend status, opens TCP connections to tailnet peers, logs out or in again,
 and closes it. It is verified against an in-process loopback test control server and peer, including
 interactive login, key expiry, device approval, resuming from saved state and dialing by address or
-MagicDNS name, but not yet against a real tailnet.
+MagicDNS name. A user-run manual test of the R8-minified demo on arm64 hardware also passed real-tailnet
+browser login, TCP echo by IPv4 address and MagicDNS name, saved-login restart, and logout/re-login.
+An ADB-driven follow-up also verified fresh TCP echoes after Wi-Fi → cellular → Wi-Fi switches on
+the same running node. Real DERP and admin-initiated expiry/removal remain unverified.
 Debug-only tests also start nodes against
 a rejecting loopback control endpoint, connect two in-process nodes through a loopback test control
 and DERP server to exchange TCP data over direct and relay-only paths, and rebind when the device's
@@ -122,8 +125,10 @@ The library discards Go's standard logger, which upstream uses directly for some
 The engine runs inside the Android app process using Go goroutines and native threads. The library
 does not launch executables or subprocesses. Call blocking methods off the UI thread.
 
-The demo has one button that loads the library and creates/closes a node. It has no network permission,
-stores no identity and does not authenticate to Tailscale. JNI instrumentation tests interface discovery,
+The demo retains an offline button that loads the library and creates/closes a node. Its separate,
+opt-in live screen uses INTERNET and ACCESS_NETWORK_STATE permissions to start a persistent node,
+authorize in a browser and verify a TCP echo from a tailnet peer; see the manual test below.
+JNI instrumentation tests interface discovery,
 network monitors and unauthenticated startup, using INTERNET permission only in the test APK. The
 startup test uses an in-memory identity store and a temporary no-backup directory, requires that the
 directory remain empty, and contacts its own loopback control stub, which refuses key exchange.
@@ -139,16 +144,90 @@ interactive login, completes the login in place of a browser, and restarts from 
 expires node keys, requires device approval and rejects registrations at that control server.
 `DialTest` dials an in-memory peer on a loopback test tailnet through the public API: a 1 MiB echo by
 address and MagicDNS name, peer end of stream, closing, refused, unroutable and timed-out dials.
-Neither the demo nor these tests proves connectivity to a real tailnet or DNS/TLS bootstrap. `ControlPlaneTest` needs internet access: it resolves and verifies
+The automated tests do not prove authorized connectivity to a real tailnet. `ControlPlaneTest` needs internet access: it resolves and verifies
 `controlplane.tailscale.com` through the platform, then starts an ephemeral in-memory node until control
 returns a `login.tailscale.com` URL. The URL is validated in Go and never returned, logged or opened.
 
 The release demo enables R8 and resource shrinking and uses the local debug signing key solely for
 installation/testing. `build` assembles it and its instrumentation APK; `:demo:connectedReleaseAndroidTest`
-exercises the actual button through native load, version reporting and repeated create/close on a
-background thread. Its test
-does not reference `TsnetNode` or add JNI keep rules. The demo uses the standard optimized Android
-rules and the AAR's consumer rules.
+exercises native load, version reporting and repeated create/close, plus live-screen startup/restart
+until browser authorization is available (or a saved login connects). The live-screen test needs
+internet; it never opens the browser or changes an existing login. Neither test references `TsnetNode`
+or adds JNI keep rules. The demo uses the standard optimized Android rules and the AAR's consumer rules.
+
+## Live tailnet test
+
+Hardware smoke coverage now includes a Pixel 11 Pro XL, API 37, arm64-v8a, 4 KiB pages and SELinux
+Enforcing: all 25 library tests passed over USB on 2026-11-09, including network switching; the 2
+release-demo tests passed on 2026-11-08. On 2026-11-08, the user also reported all
+steps below passing with the release demo and a separate computer as the echo peer: browser login,
+IPv4/MagicDNS echo, saved-login restart, and logout/re-login. This manual result does not identify
+direct versus DERP paths. An ADB-driven follow-up on 2026-11-09 verified fresh 52-byte echoes on Wi-Fi
+(50 ms), cellular (1,126 ms), and restored Wi-Fi (37 ms), without restarting the node. Those timings
+measure dial plus exchange, not network handoff; an already-open stream was not tested. Wi-Fi was
+restored afterward. To repeat the basic test, use a tailnet and peer you own.
+
+1. Install the minified consumer with `./gradlew :demo:installRelease` (set `ANDROID_SERIAL` when more
+   than one device is attached). Open **Klethron tsnet demo → Live tailnet test → Start / resume node**.
+2. Tap **Authorize in browser**, log into the intended tailnet and approve the node. Return to the
+   demo and wait for **RUNNING / Login saved**. Do not close while authorization is pending: the new
+   login may not yet be persisted. No auth key is needed. Never copy the URL or node state into reports.
+3. On a separate tailnet peer, run the following echo server, replacing `100.x.y.z` with that peer's
+   Tailscale IPv4 address. Allow TCP 7070 from the test node in the tailnet policy and peer firewall.
+   The server binds only that address; it does not print payloads.
+
+   ```sh
+   python3 - 100.x.y.z <<'PY'
+   import socketserver
+   import sys
+
+   class Echo(socketserver.BaseRequestHandler):
+       def handle(self):
+           self.request.settimeout(15)
+           while data := self.request.recv(4096):
+               self.request.sendall(data)
+
+   with socketserver.ThreadingTCPServer((sys.argv[1], 7070), Echo) as server:
+       server.serve_forever()
+   PY
+   ```
+
+4. Enter the peer address and port `7070`, then tap **Verify TCP echo**. Expect **Echo verified: 52 B**
+   and elapsed time. Repeat with the peer's full MagicDNS name. Each exchange sends a fresh random
+   challenge and checks every returned byte. Dial and exchange each time out after 10 seconds.
+5. Tap **Close node**, reopen the live screen and Start again. Expect RUNNING without browser login;
+   repeat the echo. Then **Log out of tailnet**, wait for confirmation, **Log in / renew key**, authorize
+   again and repeat. A failed logout retains the login; restore connectivity and retry it.
+
+The node stays alive while its screen is behind the browser. Destroying the screen (including rotation)
+queues cleanup off the UI thread; Start resumes the saved state when reopened. The app has no service
+and cannot promise background lifetime. Identity is excluded from backup; uninstalling/clearing app
+data discards it locally but does not remove the machine from the tailnet admin console.
+
+Record only test outcomes, device/API/ABI/page size, network types and timings:
+
+| Case | Evidence required |
+|---|---|
+| Login, address/MagicDNS echo, saved-login restart | RUNNING, Login saved, exact echo before and after restart |
+| Logout/re-login, admin key expiry/removal | Access ends; observe state; browser re-authentication restores echo |
+| Wi-Fi ↔ cellular, different NATs | Echo succeeds again after each switch; use USB ADB |
+| Direct and real DERP | Peer-side path evidence during exchange, with UDP blocked only in a controlled test network for DERP; successful echo alone does not identify the path |
+| Fallback DNS | System DNS deliberately fails on a controlled network while control/DERP remain reachable; a fresh connection succeeds |
+
+Do not claim forced-DERP or fallback-DNS coverage without those conditions. The demo does not expose
+path diagnostics. Stop the echo server and log out/remove the test node when finished.
+
+For hardware automation over wireless ADB, exclude the test that disables Wi-Fi:
+
+```sh
+ANDROID_SERIAL=<serial> ./gradlew :tsnet:connectedDebugAndroidTest \
+  -Pandroid.testInstrumentationRunnerArguments.notClass=com.klethron.tsnet.NetworkChangeTest
+ANDROID_SERIAL=<serial> ./gradlew :demo:connectedReleaseAndroidTest
+```
+
+With USB ADB and working Wi-Fi plus cellular, run the full library suite instead. Count results from
+JUnit XML under each module's `build/outputs/androidTest-results/connected/`; record explicit
+exclusions separately from JUnit skips.
 
 ## Upstream pin
 

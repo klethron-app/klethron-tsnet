@@ -1,5 +1,27 @@
 <resources>
     <string name="load_native">Load tsnet and test node lifecycle</string>
-    <string name="native_loaded">Loaded %1$s\nNode created and closed. Networking is not implemented yet.</string>
+    <string name="native_loaded">Loaded %1$s\nNode created and closed. No network started.</string>
     <string name="native_failed">Native smoke test failed: %1$s</string>
+    <item name="smoke_test" type="id" />
+    <string name="live_test">Live tailnet test</string>
+    <string name="live_instructions">Start a node, authorize it in your browser, then verify a TCP echo from a peer in your tailnet. Identity stays in this app’s no-backup storage. Closing this screen disconnects; Start resumes the saved login.</string>
+    <string name="start_node">Start / resume node</string>
+    <string name="authorize">Authorize in browser</string>
+    <string name="login">Log in / renew key</string>
+    <string name="logout">Log out of tailnet</string>
+    <string name="close_node">Close node</string>
+    <string name="peer_host">Echo peer: tailnet IP or MagicDNS name</string>
+    <string name="peer_port">TCP port</string>
+    <string name="default_peer_port" translatable="false">7070</string>
+    <string name="exchange">Verify TCP echo</string>
+    <string name="not_started">Not started</string>
+    <string name="working">Working…</string>
+    <string name="operation_failed">Operation failed: %1$s</string>
+    <string name="echo_verified">Echo verified: %1$d B, %2$d ms (dial + exchange).</string>
+    <string name="login_saved">Login saved</string>
+    <string name="login_pending">Browser authorization pending; wait before closing</string>
+    <string name="login_requested">Login requested; waiting for control</string>
+    <string name="logged_out">Logout confirmed</string>
+    <string name="browser_missing">No browser is available</string>
+    <string name="invalid_destination">Enter a peer and a port from 1 to 65535</string>
 </resources>

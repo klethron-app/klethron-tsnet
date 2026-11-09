@@ -99,7 +99,30 @@ Upstream bugs and workarounds that shape this plan are in [UPSTREAM.md](UPSTREAM
 
 - Device coverage: 26 instrumentation tests (25 library, 1 R8-minified demo), zero failures/errors/skips
   per device, on API 34 / x86_64 / 4 KiB pages and API 37.2 / x86_64 / 16 KiB pages, both SELinux
-  Enforcing. Reports under each module's `build/reports/device-verification/`.
+  Enforcing (before the live demo was added). Reports under each module's `build/reports/device-verification/`.
+- Hardware, 2026-11-08: Pixel 11 Pro XL, API 37 / arm64-v8a / 4 KiB pages, SELinux Enforcing:
+  **24 library + 2 R8-minified demo tests**, zero failures/errors/skips, counted from JUnit XML.
+  Reports: each module's `build/reports/device-verification/hardware-pixel11-api37-4k/`.
+  `NetworkChangeTest` was explicitly excluded because ADB was over Wi-Fi; use USB for that test.
+  This verifies arm64 runtime and real control-plane TLS/registration, not an authorized real tailnet.
+- USB follow-up, 2026-11-09, same Pixel/API/ABI/page size/SELinux: all **25 library tests** passed,
+  zero failures/errors/skips and no exclusions, counted from JUnit XML. Includes
+  `NetworkChangeTest.rebindsWhenDefaultNetworkChanges` (5.133 s), which switches the physical default
+  network while its loopback test tailnet exchanges data. Reports:
+  `tsnet/build/reports/device-verification/hardware-pixel11-api37-4k-usb/`.
+- Manual real-tailnet verification, 2026-11-08: the user reported all guided steps passing on the
+  same Pixel with the installed R8-minified release demo and a separate computer running a TCP echo
+  server. Browser login reached RUNNING / Login saved; 52-byte echo passed by tailnet IPv4 address
+  and full MagicDNS name; close/reopen resumed the saved login without browser authorization and
+  echoed again; logout confirmed, browser re-login succeeded, and echo passed again. This is
+  user-reported manual evidence, separate from the JUnit counts. Direct versus DERP was not observed.
+- Real-tailnet network recovery, 2026-11-09: ADB-driven UI test of the installed R8-minified demo on
+  the same Pixel, using its saved login and the same running node. Verified fresh 52-byte TCP echoes
+  to the computer on Wi-Fi (50 ms), after disabling Wi-Fi and confirming CELLULAR as the default
+  network (1,126 ms), and after restoring Wi-Fi as the default (37 ms). The demo process did not
+  restart, and Wi-Fi was restored. These are dial-plus-exchange timings, not handoff/outage durations;
+  an already-open TCP stream was not tested. Direct versus DERP was not observed. Evidence:
+  `demo/build/reports/device-verification/hardware-pixel11-api37-4k-usb-live/results.json`.
 - Tests cover: native load and create/close cycles; interface parity with Java and a negative control
   showing stock Go discovery fails; file-free startup; a loopback two-node tailnet (testcontrol,
   DERP/STUN) with direct and DERP-only exchange; network-change rebinding on a real Wi-Fi/cellular
@@ -107,12 +130,30 @@ Upstream bugs and workarounds that shape this plan are in [UPSTREAM.md](UPSTREAM
   unauthorized login URL (`ControlPlaneTest`, needs internet); public login, restart from state,
   logout, failed logout, key expiry, re-login, device approval; public dial by address and MagicDNS,
   end of stream, close, refused/unroutable/timed-out dials, logout ending access.
-- The release demo uses R8/resource shrinking and exercises native lifecycle off the UI thread.
-- **Not verified:** a real tailnet login, control-side logout/expiry, real DERP, fallback DNS,
-  cross-device or NAT traversal, subnet routes, IPv6 peers, throughput, arm64 runtime, hardware,
-  a non-blocking consumer, or Play split delivery.
+- The release demo uses R8/resource shrinking. Two tests exercise native lifecycle and public-API
+  startup/restart through the live screen, reaching browser-authorization readiness without opening
+  or capturing a login URL. The latter needs internet. Browser login and real-tailnet TCP echo are
+  covered separately by the manual and ADB-driven checks above, not by these JUnit tests.
+- **Not verified:** admin-initiated key expiry/removal, access revocation during real logout,
+  real DERP, fallback DNS, direct traversal across different NATs, subnet routes, IPv6 peers, throughput,
+  survival of an already-open TCP stream across a network change,
+  arm64 with 16 KiB pages, a non-blocking consumer, or Play split delivery.
 - Seen once, unexplained: an API 37.2 logout test saw no status change after `STOPPED` for 30 s and the
   next close took 10 s. Watch for recurrence.
+
+### Live-test harness
+
+- Opt-in demo screen starts the public API with identity under `getNoBackupFilesDir()`, opens the login
+  URL only on a browser-button tap, shows backend state and login persistence, and supports logout and
+  re-authentication. It forwards default-network changes through `ConnectivityManager`.
+- One destination (tailnet IP or MagicDNS name) and port; a fresh 52-byte challenge must echo exactly.
+  Dial and exchange each have a 10-second bound. No URL, credential or peer payload is logged.
+- Node creation, operations and cleanup run off the UI thread. Browser navigation keeps the node alive;
+  destroying the screen queues close. Reopening requires Start, which resumes saved identity. Serial
+  cleanup prevents overlapping access to the state directory on activity recreation. No service.
+- [README.md](README.md#live-tailnet-test) has the peer echo setup, manual sequence and evidence matrix.
+  The basic authorized cross-device flow passed manually as recorded above; the remaining path and
+  failure scenarios still need explicit verification.
 
 ### Current sizes (release, `tsnet/build/reports/native/sizes.tsv`)
 
@@ -125,10 +166,12 @@ Complete release AAR: 14,472,683 bytes. Debug AAR: 15,442,185 bytes. Notices add
 
 ## Future
 
-1. **Prove a real tailnet.** Design an explicit live test: browser login on a test device through the
-   public API, never a checked-in or CI auth key. Cover login, control-side logout and key expiry,
-   re-authentication, real DERP, fallback DNS when system DNS fails, and cross-device/NAT paths including
-   recovery after a network change.
+1. **Extend real-tailnet coverage.** Basic browser login, address/MagicDNS echo, saved-login restart,
+   logout/re-login and fresh TCP dials after Wi-Fi/cellular switches passed on hardware. Next verify
+   an already-open stream across network changes, admin-initiated expiry/removal and access revocation
+   during logout. Distinguish direct and real
+   DERP paths with peer-side evidence; separately exercise fallback DNS and traversal across different
+   NATs. Use browser authorization, never a checked-in or CI auth key. Record untested cases explicitly.
 2. **Finish the lifecycle.** Surface backend errors (`Notify.ErrMessage`) and control's node-removed state
    as typed status. Decide whether an ephemeral mode is
    needed before adding one. Keep auditing upstream initialization, filesystem/process behaviour and
@@ -138,8 +181,9 @@ Complete release AAR: 14,472,683 bytes. Debug AAR: 15,442,185 bytes. Notices add
    `MessageQueue`, not `SocketChannel`), including backpressure with a slow reader and interactive
    latency. Add peer listing with stable node IDs only with that caller. Keep Go panic and allocation
    failure handling explicit.
-4. **Turn the demo into a network proof.** INTERNET permission, explicit setup, browser authorization,
-   one destination and a simple exchange, all off the UI thread. No auth keys in tests or fork PRs.
+4. **Verify the live demo on the remaining devices.** Repeat minified-consumer startup on API 34 and
+   16 KiB devices, then authorized networking. Verify browser return and activity recreation; a
+   destroyed screen intentionally needs Start again. No auth keys in tests or fork PRs.
 5. **Revalidate feature exclusions** against the release baseline now that Start and Dial are reachable,
    on a real tailnet on API 34 and 16 KiB devices. Reconsider `useexitnode`/`useproxy` only for a real
    caller; omit `acme` once upstream fixes the build. Update the licence inventory for the final set.

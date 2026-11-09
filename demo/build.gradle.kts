@@ -27,7 +27,7 @@ android {
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))
             testProguardFiles("test-rules.pro")
-            // This offline demo is a consumer smoke test, not a distributable application.
+            // This demo is a consumer test, not a distributable application.
             signingConfig = signingConfigs.getByName("debug")
         }
     }

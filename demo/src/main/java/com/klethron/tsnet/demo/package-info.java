@@ -1,4 +1,4 @@
-/// Offline smoke-test consumer of the tsnet library.
+/// Smoke-test and opt-in live-tailnet consumer of the tsnet library.
 @NullMarked
 package com.klethron.tsnet.demo;
 
