@@ -2,7 +2,7 @@
 
 An Android AAR containing a precompiled Tailscale tsnet engine and a small Java/JNI bridge, so an app can
 join a tailnet from its own process (no VPN, service or subprocess) and open TCP connections to peers.
-Java package `com.klethron.tsnet`, Maven coordinates `com.klethron:tsnet:0.1.0-SNAPSHOT`.
+Java package `com.klethron.tsnet`, Maven coordinates `com.klethron:tsnet:0.1.0`.
 
 **Early development:** login, status, dialing by address or MagicDNS name, logout and revocation are
 verified against loopback test servers and, on arm64 hardware, a real tailnet. No release is published

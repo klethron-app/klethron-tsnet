@@ -10,7 +10,7 @@ node lifetime and storage.
 
 ## Boundaries
 
-- Coordinates `com.klethron:tsnet:0.1.0-SNAPSHOT`, package `com.klethron.tsnet`. API 34 minimum;
+- Coordinates `com.klethron:tsnet`, package `com.klethron.tsnet`. API 34 minimum;
   arm64-v8a and x86_64 only, 16 KiB aligned.
 - Library owns tsnet and JNI. Consumers own UI, authorization flow, node lifetime, no-backup state
   directories and transport adapters. Klethron's base app must not load native code or start a node.
@@ -229,8 +229,8 @@ In order: Klethron consumes a pinned Maven Central release, so release readiness
    is verified; the signing key (v4 ed25519, certify-only primary offline, signing subkey until
    2028-11-08) is in the repository, keys.openpgp.org and keyserver.ubuntu.com; the `maven-central`
    environment allows only `v*` tags, requires the user's approval and holds the signing and Portal
-   token secrets ([README.md](README.md#distribution)). Remaining: a ruleset protecting `v*` tags from
-   moves and deletion. Then tag `v0.1.0` and
+   token secrets ([README.md](README.md#distribution)); the "Release tags" ruleset blocks moving or
+   deleting `v*` tags, with no bypass. Version `0.1.0` is committed. Remaining: push `main`, tag `v0.1.0`,
    check that the CI-built publication matches a local build of the tag (cross-host reproducibility is
    unverified: CI uses Temurin, the dev host Homebrew OpenJDK, both 25.0.5), that the Portal validates
    the upload, and that a scratch app resolves the published artifact before Klethron depends on it.
