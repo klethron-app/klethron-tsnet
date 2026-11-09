@@ -148,6 +148,15 @@ Upstream bugs and workarounds that shape this plan are in [UPSTREAM.md](UPSTREAM
   The demo now enables echo whenever a node is started, so a lost access shows as a failure. Its 2
   R8-minified tests passed afterwards (zero failures/errors/skips, JUnit XML) on API 37.2 / x86_64 /
   16 KiB pages, SELinux Enforcing.
+- Fallback DNS, 2026-11-09, same Pixel/API/ABI/page size/SELinux, USB ADB, saved login, on Wi-Fi.
+  Strict Private DNS set over ADB to an unresolvable hostname made system DNS fail (`unknown host` for
+  the control host, other names and the peer's MagicDNS name), while IP connectivity remained. A fresh
+  demo process reached RUNNING / Login saved without a browser within 9.6 s of Start. Fresh 52-byte
+  echoes then passed by tailnet IPv4 address (12/18/11 ms) and full MagicDNS name (11/10 ms), direct on
+  the LAN per the peer's status. Android recreated the unvalidated Wi-Fi network several times
+  meanwhile. The original unset Private DNS settings were restored. Which internal fallback resolved
+  control is unobserved because upstream logs are discarded; DNS failure on cellular was not tested.
+  Evidence: `demo/build/reports/device-verification/hardware-pixel11-api37-4k-usb-fallback-dns/results.json`.
 - Tests cover: native load and create/close cycles; interface parity with Java and a negative control
   showing stock Go discovery fails; file-free startup; a loopback two-node tailnet (testcontrol,
   DERP/STUN) with direct and DERP-only exchange; network-change rebinding on a real Wi-Fi/cellular
@@ -160,7 +169,7 @@ Upstream bugs and workarounds that shape this plan are in [UPSTREAM.md](UPSTREAM
   or capturing a login URL. The latter needs internet. Browser login and real-tailnet TCP echo are
   covered separately by the manual and ADB-driven checks above, not by these JUnit tests.
 - **Not verified:** admin-initiated key expiry/removal, real DERP (data relayed through DERP),
-  fallback DNS, traversal across NATs that prevent direct paths, subnet routes, IPv6 peers, throughput,
+  traversal across NATs that prevent direct paths, subnet routes, IPv6 peers, throughput,
   open-stream survival of outages longer than seconds, arm64 with 16 KiB pages, a non-blocking consumer, or Play split delivery.
 - Seen once, unexplained: an API 37.2 logout test saw no status change after `STOPPED` for 30 s and the
   next close took 10 s. Watch for recurrence.
@@ -193,11 +202,11 @@ Complete release AAR: 14,472,683 bytes. Debug AAR: 15,442,185 bytes. Notices add
 
 1. **Extend real-tailnet coverage.** Basic browser login, address/MagicDNS echo, saved-login restart,
    logout/re-login, fresh dials and an open stream across Wi-Fi/cellular switches, direct paths on LAN
-   and carrier NAT, and logout ending an open stream and fresh dials passed on hardware. Next verify
-   admin-initiated expiry/removal (needs the admin console) with an open stream and a fresh dial. Force
-   real DERP by blocking UDP on a controlled network, with peer-side evidence; separately exercise
-   fallback DNS. Use browser authorization, never a checked-in or CI auth key. Record untested cases
-   explicitly.
+   and carrier NAT, logout ending an open stream and fresh dials, and startup plus echo with failing
+   system DNS passed on hardware. Next verify admin-initiated expiry/removal (needs the admin console)
+   with an open stream and a fresh dial. Force real DERP by blocking UDP on a controlled network (for
+   example the peer's tailscaled UDP, which needs root), with peer-side evidence. Use browser
+   authorization, never a checked-in or CI auth key. Record untested cases explicitly.
 2. **Finish the lifecycle.** Surface backend errors (`Notify.ErrMessage`) and control's node-removed state
    as typed status. Decide whether an ephemeral mode is
    needed before adding one. Keep auditing upstream initialization, filesystem/process behaviour and
