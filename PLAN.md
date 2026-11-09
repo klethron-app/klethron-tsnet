@@ -225,10 +225,12 @@ release demo APK (59,526 compressed bytes plus ZIP headers).
 
 In order: Klethron consumes a pinned Maven Central release, so release readiness comes first.
 
-1. **Next: first Maven Central release, with the user.** Verify the `com.klethron` namespace (DNS TXT
-   record on `klethron.com`) and create a Portal user token; create a signing key and publish its public
-   key; create the `maven-central` environment (required reviewer, `v*` tags only) with the secrets in
-   [README.md](README.md#distribution); protect `v*` tags from moves and deletion. Then tag `v0.1.0` and
+1. **Next: first Maven Central release, with the user.** Done 2026-11-09: the `com.klethron` namespace
+   is verified; the signing key (v4 ed25519, certify-only primary offline, signing subkey until
+   2028-11-08) is in the repository and on keys.openpgp.org; the `maven-central` environment allows
+   only `v*` tags and holds `SIGNING_KEY` and `SIGNING_PASSPHRASE`. Remaining: upload the key to
+   keyserver.ubuntu.com, add a required reviewer and the Portal token secrets ([README.md](README.md#distribution)),
+   and protect `v*` tags from moves and deletion with a ruleset. Then tag `v0.1.0` and
    check that the CI-built publication matches a local build of the tag (cross-host reproducibility is
    unverified: CI uses Temurin, the dev host Homebrew OpenJDK, both 25.0.5), that the Portal validates
    the upload, and that a scratch app resolves the published artifact before Klethron depends on it.

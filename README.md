@@ -159,6 +159,14 @@ the NDK, and `TsnetNode.tailscaleVersion()` reports the linked Tailscale version
    with a local build of the tag using the pinned toolchains. Then publish the deployment in the Portal
    (irreversible) or drop it, and commit the next `-SNAPSHOT` version.
 
+Releases are signed by `Klethron release signing <release@klethron.com>`, fingerprint
+`361C CF78 F83A DAED D8DC  6DA8 A32D AC0A CDC6 D35B`, in [`release-signing-key.asc`](release-signing-key.asc)
+and on `keys.openpgp.org`. Its ed25519 signing subkey `2F78 F885 F811 292A 6199  2A11 8C31 C50B B472 B529`
+expires 2028-11-08; the primary key stays offline. Import the file, then check a download with
+`gpg --verify tsnet-X.Y.Z.aar.asc tsnet-X.Y.Z.aar`.
+
 The environment needs a required reviewer, deployments from `v*` tags only, and the secrets `SIGNING_KEY`
-(an ASCII-armoured secret key whose public key is on a keyserver such as `keyserver.ubuntu.com`),
-`SIGNING_PASSPHRASE`, `CENTRAL_USERNAME` and `CENTRAL_PASSWORD` (a Central Portal user token).
+(only the signing subkey, `gpg --export-secret-subkeys`), `SIGNING_PASSPHRASE`, `CENTRAL_USERNAME` and
+`CENTRAL_PASSWORD` (a Central Portal user token). `central-bundle.sh` fails unless every signature
+verifies with `release-signing-key.asc`. After renewing or replacing the subkey, commit and upload the
+new public key.

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Signs the release publication in a Gradle-built Maven repository and zips it as a Central Portal
-# bundle without running build code. The key exists only in a temporary keyring, removed on exit.
+# bundle without running build code. The key exists only in a temporary keyring, removed on exit, and
+# every signature must verify against the published release-signing-key.asc.
 #
 #   SIGNING_KEY=<ASCII-armoured secret key> SIGNING_PASSPHRASE=<its passphrase, may be empty> \
 #     .github/central-bundle.sh <version> <repository> <bundle.zip>
@@ -25,11 +26,13 @@ if [[ $found != "$artifacts" ]]; then
     exit 1
 fi
 
+public_key=$(dirname "$0")/../release-signing-key.asc
 work=$(mktemp -d)
-trap 'gpgconf --kill gpg-agent 2>/dev/null || true; rm -rf "$work"' EXIT
+trap 'gpgconf --kill all; gpgconf --homedir "$work/public" --kill all; rm -rf "$work"' EXIT
 export GNUPGHOME=$work/gnupg
-mkdir -m 700 "$GNUPGHOME"
+mkdir -m 700 "$GNUPGHOME" "$work/public"
 gpg --batch --quiet --import <<<"$SIGNING_KEY"
+gpg --homedir "$work/public" --batch --quiet --import "$public_key"
 
 mkdir -p "$work/bundle/$path"
 cp "$repository/$path"/* "$work/bundle/$path/"
@@ -39,7 +42,8 @@ for artifact in $artifacts; do
         [[ $("${sum}sum" "$file" | cut -d' ' -f1) == "$(cat "$file.$sum")" ]] || { echo "Bad $sum: $artifact" >&2; exit 1; }
     done
     gpg --batch --quiet --pinentry-mode loopback --passphrase-fd 3 --armor --detach-sign "$file" 3<<<"$SIGNING_PASSPHRASE"
-    gpg --batch --quiet --verify "$file.asc" "$file" 2>/dev/null
+    gpg --homedir "$work/public" --batch --quiet --verify "$file.asc" "$file" 2>/dev/null ||
+        { echo "SIGNING_KEY did not make a signature that verifies with $public_key" >&2; exit 1; }
 done
 (cd "$work/bundle" && zip -qrX - com) >"$bundle"
-gpg --batch --list-keys --with-colons | awk -F: '$1 == "fpr" { print "Signed with " $10; exit }'
+gpg --homedir "$work/public" --batch --list-keys --with-colons | awk -F: '$1 == "fpr" { print "Signed for " $10; exit }'
