@@ -4,4 +4,8 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- NetworkChangeTest follows the default network, as a consuming app would. -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <application>
+        <!-- CrashTest crashes this separate process, not the instrumentation. -->
+        <service android:name="com.klethron.tsnet.CrashService" android:process=":crash" />
+    </application>
 </manifest>

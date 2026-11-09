@@ -114,7 +114,8 @@ public final class LoginTest {
             assertNull("A logout is not a revocation", status.revocation());
             assertTrue(status.addresses().isEmpty());
             node.logout(WAIT); // Already logged out.
-            assertEquals(status.version, node.awaitStatus(status, Duration.ofMillis(500)).version);
+            TsnetStatus unchanged = node.awaitStatus(status, Duration.ofMillis(500));
+            assertEquals(status + " then " + unchanged, status.version, unchanged.version);
 
             // The same node can log in again, with a new login URL.
             node.login();

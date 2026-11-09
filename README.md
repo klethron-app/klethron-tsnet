@@ -59,6 +59,10 @@ The Javadoc of `TsnetNode` and `TsnetStatus` specifies each call. In short:
   written; logs are discarded.
 - Native TLS trusts Android's current system CA store (the Conscrypt APEX, minus roots the user
   disabled), not user-added CAs, the app's network security configuration or Tailscale's baked-in roots.
+- A Go bug ends the whole process. A panic is a native crash (`ApplicationExitInfo.REASON_CRASH_NATIVE`)
+  whose only logcat output (tag `Go`) is the panic message; a Go fatal error exits with status 2
+  (`REASON_EXIT_SELF`) and leaves no tombstone. Android starts apps in a mode in which Go prints no
+  tracebacks, and native backtraces stop in the Go runtime.
 
 The package is JSpecify `@NullMarked` (JSpecify is a transitive `api` dependency; copying only the AAR
 requires adding it) and Error Prone `@CheckReturnValue`. Methods carry AndroidX thread annotations
@@ -84,6 +88,8 @@ exist only in debug builds; `verifyNativeAar` rejects them in release.
 - `TailnetTest` exchanges data between two in-process nodes over a direct path and DERP only.
   `NetworkChangeTest` disables Wi-Fi and requires both nodes to rebind; on hardware, use USB ADB.
 - `NetworkInterfacesTest` and `TrustRootsTest` compare native interfaces and CA roots with Android's.
+- `CrashTest` fails fatally in Go in a separate process and checks how Android records it and that
+  logcat gets no traceback.
 - `ControlPlaneTest` (needs internet) registers with Tailscale's real control plane until it offers a
   login URL, which never leaves native code.
 - The R8-minified release demo's tests load the library and start its live screen until browser

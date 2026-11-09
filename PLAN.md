@@ -89,6 +89,24 @@ Upstream bugs and workarounds that shape this plan are in [UPSTREAM.md](UPSTREAM
     -PauditTags=ts_omit_logtail :tsnet:verifyNativeAar   # then ./gradlew build to restore
   ```
 
+### Crash diagnostics
+
+Measured 2026-11-09 on the three devices of the `crash-*` row below, and checked by `CrashTest`:
+
+- Android starts app processes with `AT_SECURE=1` (read on the Pixel), so Go runs in secure mode with
+  `GOTRACEBACK=none` and writes no goroutine traceback, not even to `debug.SetCrashOutput`.
+- An unrecovered panic, including a nil dereference, writes only `panic: <value>` (and a
+  `[signal SIGSEGV …]` line) to logcat tag `Go`, then aborts: tombstone and `REASON_CRASH_NATIVE`. A
+  runtime fatal error writes `fatal error: <message>` and exits with status 2: `REASON_EXIT_SELF`, no
+  tombstone, indistinguishable from `System.exit(2)` except for that line.
+- On the Pixel, the tombstone backtrace has one frame, the abort inside Go's runtime: the libraries'
+  unwind tables cover only their C code. Symbol tables or a build ID would name only that runtime
+  frame, never the panic site, so the libraries stay stripped.
+- Decided 2026-11-09: keep Go's secure-mode default. `debug.SetTraceback("single")` restores panic
+  tracebacks (function, module path and line; the negative control), but each frame prints raw
+  argument words, which can hold key material passed by value. Fatal errors exit before any traceback
+  regardless. The panic value is upstream text that this library cannot filter.
+
 ### Licences
 
 - `GO-MODULES.tsv` lists the 26 Go modules in release build metadata (31 in debug), with verbatim
@@ -115,6 +133,7 @@ Instrumentation runs, all SELinux Enforcing, zero failures/errors/skips:
 | 2026-11-09, pin `62d055f4c38b` | Emulator API 37.2 / x86_64 / 16 KiB; Pixel 11 Pro XL API 37 / arm64-v8a / 4 KiB (USB) | 23 library each, 2 demo on the emulator | `upstream-62d055-api37.2-16k`, `upstream-62d055-pixel11-api37-4k-usb`, `demo/…/upstream-62d055-api37.2-16k` |
 | 2026-11-09 | Emulators API 34 / x86_64 / 4 KiB and API 37.2 / x86_64 / 16 KiB | 2 demo each, including rotation with a pending login; it fails without `configChanges` | `demo/…/recreation-emulator-5556`, `recreation-emulator-5558`, `recreation-negative-noconfigchanges-emulator-5558` |
 | 2026-11-09 | Emulators API 34 / x86_64 / 4 KiB and API 37.2 / x86_64 / 16 KiB; Pixel 11 Pro XL API 37 / arm64-v8a / 4 KiB (USB) | 26 library each; both backpressure tests fail with an unbounded relay | `nonblocking-emulator-5556`, `nonblocking-emulator-5558`, `nonblocking-pixel11-api37-4k-usb`, `nonblocking-negative-unbounded-emulator-5558` |
+| 2026-11-09 | Emulators API 34 / x86_64 / 4 KiB and API 37.2 / x86_64 / 16 KiB; Pixel 11 Pro XL API 37 / arm64-v8a / 4 KiB (USB) | 29 library each, including 3 crash tests; both panic tests fail with `SetTraceback("single")` | `crash-api34-4k`, `crash-api37.2-16k`, `crash-pixel11-api37-4k-usb`, `crash-negative-traceback-pixel11-api37-4k-usb` |
 
 Non-blocking use of a dialed descriptor, against the loopback peer: an empty read fails with `EAGAIN`,
 and `Os.poll` and `MessageQueue` descriptor events report readiness. Unread data stalled the writer
@@ -160,8 +179,12 @@ DERP-to-direct upgrade, NATs that prevent direct paths, subnet routes, IPv6 peer
 longer than seconds, tailnet-period key expiry, revocation while not running, arm64 with 16 KiB pages,
 backpressure or interactive latency on a real tailnet, or Play split delivery.
 
-Seen once, unexplained: an API 37.2 logout test saw no status change after `STOPPED` for 30 s and the
-next close took 10 s. Watch for recurrence.
+**Logout race, unexplained:** 4 of 16 Pixel runs of `logoutRequiresANewLogin` (2026-11-09) saw
+`STOPPED` with the old addresses after `logout` returned: twice within 500 ms after `NEEDS_LOGIN`
+with no addresses, twice instead of it, until the wait timed out
+(`crash-pixel11-api37-4k-usb-logout-flake`, `logout-race-pixel11-api37-4k-usb`). An earlier API 37.2
+run, stuck after `STOPPED` for 30 s with a 10 s close, looks the same. Whether the node can still
+reach peers then is unknown.
 
 ### Live-test harness
 
@@ -189,19 +212,22 @@ release demo APK (59,526 compressed bytes plus ZIP headers).
 
 In order: Klethron consumes a pinned Maven Central release, so release readiness comes first.
 
-1. **Next: crash diagnostics.** The libraries have no symbol table, DWARF or GNU build ID, so tombstones,
-   `ndk-stack` and Play cannot symbolize native frames. `.gopclntab` survives stripping, and Go's
-   `runtime/write_err_android.go` writes fatal tracebacks to logcat; verify that on a device, check what
-   such output can expose, and keep unstripped symbols with a build ID only if a consumer needs them.
-2. **Publish immutable versions** to Maven Central: verify the `com.klethron` namespace, signing, protected
-   credentials, POM/source/Javadoc metadata, publish from tags. Record the upstream commit per release.
+1. **Next: fix the logout race** above. Find what brings back `STOPPED` and the old addresses after
+   `logout` returns (a late network map from the still-running map poll is the first suspect), whether
+   dials then still reach peers, and make the end state `NEEDS_LOGIN` without addresses. Record an
+   upstream cause in UPSTREAM.md.
+2. **Publish immutable versions** to Maven Central: verify the `com.klethron` namespace, signing,
+   protected credentials, POM/source/Javadoc metadata, publish from tags. Record the upstream commit per
+   release.
 3. **Integrate into Klethron** separately: update its TAILSCALE-PLAN.md, add the artifact only to
    `:klethron_tailscale`, test Play split loading and the SSH transport seam. Its `SessionLoop` runs a
    `java.nio` `Selector`, which has no public API to register a `ParcelFileDescriptor`: the adapter needs
    an `Os.poll` helper thread or `MessageQueue` descriptor events (both verified here), waking the
    selector. Measure SSH backpressure and interactive latency there on a real tailnet. Add peer listing
    with stable node IDs only with that caller. Without a foreground service, Android freezes a
-   backgrounded process and its node; decide that lifetime there.
+   backgrounded process and its node; decide that lifetime there. Report library crashes there from
+   `ApplicationExitInfo` on the next start, and add a way to keep the panic message (such as
+   `debug.SetCrashOutput` to a caller-owned no-backup file) only if it needs one.
 
 Blocked:
 

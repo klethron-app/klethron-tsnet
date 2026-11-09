@@ -140,3 +140,8 @@ JNIEXPORT jstring JNICALL
 Java_com_klethron_tsnet_LoginTest_nativeProbeHostnames(JNIEnv *env, jclass type) {
     return take_string(env, klethron_login_probe_hostnames());
 }
+
+JNIEXPORT void JNICALL
+Java_com_klethron_tsnet_CrashTest_nativeProbe(JNIEnv *env, jclass type, jint mode) {
+    klethron_crash_probe(mode);
+}
