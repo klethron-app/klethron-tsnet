@@ -1,3 +1,8 @@
+[![Build](https://github.com/klethron-app/klethron-tsnet/actions/workflows/build.yml/badge.svg?branch=main)](https://github.com/klethron-app/klethron-tsnet/actions/workflows/build.yml)
+[![Apache-2.0 licensed](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![Maven Central](https://img.shields.io/maven-central/v/com.klethron/tsnet)](https://central.sonatype.com/artifact/com.klethron/tsnet)
+[![Javadoc](https://javadoc.io/badge2/com.klethron/tsnet/javadoc.svg)](https://javadoc.io/doc/com.klethron/tsnet)
+
 # Klethron tsnet
 
 An Android AAR containing a precompiled Tailscale tsnet engine and a small Java/JNI bridge, so an app can
@@ -5,8 +10,8 @@ join a tailnet from its own process (no VPN, service or subprocess) and open TCP
 Java package `com.klethron.tsnet`, Maven coordinates `com.klethron:tsnet:0.1.0`.
 
 **Early development:** login, status, dialing by address or MagicDNS name, logout and revocation are
-verified against loopback test servers and, on arm64 hardware, a real tailnet. No release is published
-yet. See [PLAN.md](PLAN.md) for verification status and next steps.
+verified against loopback test servers and, on arm64 hardware, a real tailnet. The first release, 0.1.0,
+is on Maven Central. See [PLAN.md](PLAN.md) for verification status and next steps.
 
 ## Build
 
@@ -26,6 +31,12 @@ The release AAR is `tsnet/build/outputs/aar/tsnet-release.aar`; native sizes and
 consumers need neither Go nor an NDK.
 
 ## Use
+
+```kotlin
+dependencies { implementation("com.klethron:tsnet:0.1.0") }
+// The libraries are already stripped: skip AGP's strip step and its "Unable to strip" warning.
+android { packaging.jniLibs.keepDebugSymbols += "**/libklethron_tsnet.so" }
+```
 
 ```java
 // On a background thread. The directory holds the node's private keys: keep it out of backups.
@@ -142,8 +153,7 @@ lives while its screen exists, and uninstalling does not remove the machine from
 
 ## Distribution
 
-Maven Central is the intended destination, pending namespace verification and release setup; nothing is
-published yet. Original code is Apache-2.0; Tailscale and its dependencies keep their own licences, with
+Releases are on Maven Central. Original code is Apache-2.0; Tailscale and its dependencies keep their own licences, with
 notices in the AAR (see [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)). Tailscale is pinned to
 [`62d055f4c38b`](https://github.com/tailscale/tailscale/commit/62d055f4c38b610d63a8cee7fa4a7e65b01564eb)
 in `tsnet/src/main/go/go.mod`; builds use `-mod=readonly`, never a moving branch.
@@ -164,12 +174,28 @@ the NDK, and `TsnetNode.tailscaleVersion()` reports the linked Tailscale version
 
 Releases are signed by `Klethron release signing <release@klethron.com>`, fingerprint
 `361C CF78 F83A DAED D8DC  6DA8 A32D AC0A CDC6 D35B`, in [`release-signing-key.asc`](release-signing-key.asc)
-and on `keys.openpgp.org` and `keyserver.ubuntu.com`. Its ed25519 signing subkey `2F78 F885 F811 292A 6199  2A11 8C31 C50B B472 B529`
-expires 2028-11-08; the primary key stays offline. Import the file, then check a download with
-`gpg --verify tsnet-X.Y.Z.aar.asc tsnet-X.Y.Z.aar`.
+and on `keys.openpgp.org` and `keyserver.ubuntu.com`. Its ed25519 signing subkey
+`2F78 F885 F811 292A 6199  2A11 8C31 C50B B472 B529` expires 2028-11-08; the primary key stays offline.
+Import the file, then check a download with `gpg --verify tsnet-X.Y.Z.aar.asc tsnet-X.Y.Z.aar`. Gradle
+dependency verification (`--write-verification-metadata pgp,sha256`) pins the subkey, and rejects the
+primary's fingerprint as a trusted key: renew the subkey by extending its expiry, which keeps its
+fingerprint, rather than replacing it.
 
 The environment needs a required reviewer, deployments from `v*` tags only, and the secrets `SIGNING_KEY`
 (only the signing subkey, `gpg --export-secret-subkeys`), `SIGNING_PASSPHRASE`, `CENTRAL_USERNAME` and
 `CENTRAL_PASSWORD` (a Central Portal user token). `central-bundle.sh` fails unless every signature
 verifies with `release-signing-key.asc`. After renewing or replacing the subkey, commit and upload the
 new public key.
+
+To try unreleased changes in an app, include a checkout in the app's `settings.gradle.kts`; Gradle then
+builds `com.klethron:tsnet` from it whatever version the app requests (debug or release variant to
+match), which needs Go, the NDK and the same Android Gradle plugin version:
+
+```kotlin
+// Development only: build com.klethron:tsnet from a checkout instead of Maven Central.
+providers.gradleProperty("tsnet.checkout").orNull?.let { includeBuild(it) }
+```
+
+Build the app with `-Ptsnet.checkout=../klethron-tsnet`. To test the exact release artifact instead, run
+`./gradlew :tsnet:publishReleasePublicationToLocalBuildRepository` and depend on the `-SNAPSHOT` version
+from `maven("../klethron-tsnet/build/maven") { content { includeGroup("com.klethron") } }`.

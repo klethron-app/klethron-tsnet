@@ -44,6 +44,18 @@ Upstream bugs and workarounds that shape this plan are in [UPSTREAM.md](UPSTREAM
   Approving the job is the one human gate: from 0.1.1 it publishes automatically once Central validates
   the upload (0.1.0 was uploaded for manual publication and validated on 2026-11-09). Otherwise
   publishing goes only to `build/maven/`.
+- **0.1.0 released 2026-11-09** (tag `v0.1.0`, Tailscale `62d055f4c38b`). Namespace `com.klethron`
+  verified; signing key `361CCF78F83ADAEDD8DC6DA8A32DAC0ACDC6D35B` (v4 ed25519, certify-only primary
+  offline, signing subkey `2F78F885…B472B529` until 2028-11-08) in the repository and on
+  keys.openpgp.org and keyserver.ubuntu.com. The `maven-central` environment allows only `v*` tags and
+  requires the user's approval; the "Release tags" ruleset blocks moving or deleting them, with no
+  bypass. Cross-host check: CI (Temurin) and the dev host (Homebrew OpenJDK, both 25.0.5) produced
+  byte-identical native libraries and POM, and identical unpacked archives; archive bytes differ
+  because Temurin's bundled zlib and Homebrew's zlib-ng compress differently. Central's files are
+  byte-identical to CI's, and every signature verifies with the committed key. A scratch app
+  resolved it from Maven Central alone with strict Gradle dependency verification, which trusts the
+  subkey's fingerprint and rejects the primary's, and with the library as an included build of a
+  checkout (debug and release variants matched).
 
 ### Public API (`TsnetNode`, `TsnetStatus`)
 
@@ -224,20 +236,11 @@ release demo APK (59,526 compressed bytes plus ZIP headers).
 
 ## Future
 
-In order: Klethron consumes a pinned Maven Central release, so release readiness comes first.
-
-1. **Next: first Maven Central release, with the user.** Done 2026-11-09: the `com.klethron` namespace
-   is verified; the signing key (v4 ed25519, certify-only primary offline, signing subkey until
-   2028-11-08) is in the repository, keys.openpgp.org and keyserver.ubuntu.com; the `maven-central`
-   environment allows only `v*` tags, requires the user's approval and holds the signing and Portal
-   token secrets ([README.md](README.md#distribution)); the "Release tags" ruleset blocks moving or
-   deleting `v*` tags, with no bypass. Version `0.1.0` is committed. Remaining: push `main`, tag `v0.1.0`,
-   check that the CI-built publication matches a local build of the tag (cross-host reproducibility is
-   unverified: CI uses Temurin, the dev host Homebrew OpenJDK, both 25.0.5), that the Portal validates
-   the upload, and that a scratch app resolves the published artifact before Klethron depends on it.
-2. **Integrate into Klethron** separately: update its TAILSCALE-PLAN.md, add the artifact only to
-   `:klethron_tailscale`, test Play split loading and the SSH transport seam. Its `SessionLoop` runs a
-   `java.nio` `Selector`, which has no public API to register a `ParcelFileDescriptor`: the adapter needs
+1. **Next: integrate into Klethron** separately, consuming `com.klethron:tsnet:0.1.0` (or a checkout
+   while developing, README.md#distribution): update its TAILSCALE-PLAN.md, add the artifact only to
+   `:klethron_tailscale`, pin the signing subkey in its Gradle dependency verification, and test Play
+   split loading and the SSH transport seam. Its `SessionLoop` runs a `java.nio` `Selector`, which has
+   no public API to register a `ParcelFileDescriptor`: the adapter needs
    an `Os.poll` helper thread or `MessageQueue` descriptor events (both verified here), waking the
    selector. Measure SSH backpressure and interactive latency there on a real tailnet. Add peer listing
    with stable node IDs only with that caller. Without a foreground service, Android freezes a
