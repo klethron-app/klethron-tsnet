@@ -1,6 +1,6 @@
 [![Build](https://github.com/klethron-app/klethron-tsnet/actions/workflows/build.yml/badge.svg?branch=main)](https://github.com/klethron-app/klethron-tsnet/actions/workflows/build.yml)
 [![Maven Central](https://img.shields.io/maven-central/v/com.klethron/tsnet)](https://central.sonatype.com/artifact/com.klethron/tsnet)
-[![Javadoc](https://javadoc.io/badge2/com.klethron/tsnet/javadoc.svg)](https://javadoc.io/doc/com.klethron/tsnet)
+[![Javadoc](https://javadoc.io/badge2/com.klethron/tsnet/javadoc.svg)](https://javadoc.io/doc/com.klethron/tsnet/latest/)
 
 # Klethron tsnet
 
@@ -13,8 +13,8 @@ Requires **Android 14 (API 34)** or later. The AAR includes native libraries for
 
 **Under development.** Login, persistent identity, TCP dialing, logout and revocation have been tested
 locally and on a real tailnet. Broader network and device coverage is still needed; see
-[known limitations](UPSTREAM.md). Examples below follow the development API; consult the
-[versioned Javadoc](https://javadoc.io/doc/com.klethron/tsnet) for released APIs.
+[known limitations](UPSTREAM.md). See the
+[Javadoc](https://javadoc.io/doc/com.klethron/tsnet/latest/) for the full API.
 
 ## Install
 
@@ -40,8 +40,8 @@ Declare these permissions in your app's manifest:
 
 ## Connect
 
-A `TailnetNode` represents your app as a device on a tailnet (a private Tailscale network). Run node
-operations on a worker thread. Keep its state in a dedicated directory under
+A [`TailnetNode`][TailnetNode] represents your app as a device on a tailnet (a private Tailscale network).
+Run node operations on a worker thread. Keep its state in a dedicated directory under
 [`Context.getNoBackupFilesDir()`](https://developer.android.com/reference/android/content/Context#getNoBackupFilesDir()):
 it contains private keys and must never be logged, backed up or shared.
 
@@ -65,19 +65,20 @@ try (TailnetNode node = new TailnetNode()) {
 }
 ```
 
-`awaitStatus` waits for changes without polling. A login URL lets whoever opens it claim the node;
-pass it only to the user's browser. Wait for the URL to clear before closing, so the login is saved.
+[`awaitStatus`][awaitStatus] waits for changes without polling. A login URL lets whoever opens it claim
+the node; pass it only to the user's browser. Wait for the URL to clear before closing, so the login is saved.
 Starting with the same directory then resumes that identity.
 
-`dial` accepts a tailnet IP address or MagicDNS name and returns a socket descriptor owned by the
-caller. It reaches peers and subnet routes only. Closing the node ends its connections but preserves
-its identity. `logout` ends tailnet access; `login` starts authorization again after logout or key
-expiry. The app decides how long to keep the node alive and whether to run a service.
+[`dial`][dial] accepts a tailnet IP address or MagicDNS name and returns a socket descriptor owned by the
+caller. It reaches peers and subnet routes only. [`close`][close] ends its connections but preserves
+its identity. [`logout`][logout] ends tailnet access; [`login`][login] starts authorization again after
+logout or key expiry. The app decides how long to keep the node alive and whether to run a service.
 
 ## Network changes
 
-Forward Android's default-network changes so the node can reconnect after switching Wi-Fi or mobile
-networks. Register this callback while using the library and unregister it when finished:
+Forward Android's default-network changes with [`setDefaultNetwork`][setDefaultNetwork] so the node
+can reconnect after switching Wi-Fi or mobile networks. Register this callback while using the library
+and unregister it when finished:
 
 ```java
 ConnectivityManager.NetworkCallback callback = new ConnectivityManager.NetworkCallback() {
@@ -97,3 +98,11 @@ disabled roots; user-added CAs and the app's network security configuration do n
 See [CONTRIBUTING.md](CONTRIBUTING.md) to build, test or use a checkout. Original code is
 [Apache-2.0 licensed](LICENSE); bundled dependencies retain their
 [own licences](THIRD-PARTY-NOTICES.md), included in the AAR.
+
+[TailnetNode]: https://javadoc.io/doc/com.klethron/tsnet/latest/com/klethron/tsnet/TailnetNode.html
+[awaitStatus]: https://javadoc.io/doc/com.klethron/tsnet/latest/com/klethron/tsnet/TailnetNode.html#awaitStatus(com.klethron.tsnet.NodeStatus,java.time.Duration)
+[dial]: https://javadoc.io/doc/com.klethron/tsnet/latest/com/klethron/tsnet/TailnetNode.html#dial(java.lang.String,int,java.time.Duration)
+[close]: https://javadoc.io/doc/com.klethron/tsnet/latest/com/klethron/tsnet/TailnetNode.html#close()
+[logout]: https://javadoc.io/doc/com.klethron/tsnet/latest/com/klethron/tsnet/TailnetNode.html#logout(java.time.Duration)
+[login]: https://javadoc.io/doc/com.klethron/tsnet/latest/com/klethron/tsnet/TailnetNode.html#login()
+[setDefaultNetwork]: https://javadoc.io/doc/com.klethron/tsnet/latest/com/klethron/tsnet/TailnetNode.html#setDefaultNetwork(android.net.LinkProperties)
