@@ -7,7 +7,7 @@ import android.widget.Button;
 import android.widget.LinearLayout;
 import androidx.annotation.MainThread;
 import androidx.annotation.WorkerThread;
-import com.klethron.tsnet.TsnetNode;
+import com.klethron.tsnet.TailnetNode;
 import org.jspecify.annotations.Nullable;
 
 public final class MainActivity extends Activity {
@@ -42,8 +42,8 @@ public final class MainActivity extends Activity {
     // @WorkerThread, so this method carries it.
     @WorkerThread
     private String loadNative() {
-        try (TsnetNode ignored = new TsnetNode()) {
-            return getString(R.string.native_loaded, TsnetNode.tailscaleVersion());
+        try (TailnetNode ignored = new TailnetNode()) {
+            return getString(R.string.native_loaded, TailnetNode.tailscaleVersion());
         } catch (LinkageError | RuntimeException failure) {
             return getString(R.string.native_failed, failure.getClass().getSimpleName());
         }

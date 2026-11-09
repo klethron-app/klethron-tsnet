@@ -65,7 +65,7 @@ public final class MinifiedDemoTest {
         Intent intent = new Intent(Intent.ACTION_MAIN)
                 .setClassName(instrumentation.getTargetContext(), "com.klethron.tsnet.demo.MainActivity")
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-        // Exercise the real consumer without referencing TsnetNode or adding test keep rules.
+        // Exercise the real consumer without referencing TailnetNode or adding test keep rules.
         Activity activity = instrumentation.startActivitySync(intent);
         try {
             Button button = activity.findViewById(instrumentation.getTargetContext().getResources()

@@ -17,8 +17,8 @@ ANDROID_SERIAL=<serial> ./gradlew :tsnet:connectedDebugAndroidTest
 ANDROID_SERIAL=<serial> ./gradlew :demo:connectedReleaseAndroidTest
 ```
 
-Device tests require SELinux Enforcing. The network-change test toggles Wi-Fi, so use USB ADB on
-hardware. Record JUnit XML test counts and device/API/ABI/page size in the commit message. Debug builds
+Device tests require SELinux Enforcing. The network-change test requires Wi-Fi with a cellular
+fallback and toggles Wi-Fi; use USB ADB on hardware. Record JUnit XML test counts and device/API/ABI/page size in the commit message. Debug builds
 include local control-server and peer fixtures; release builds exclude them. The demo tests exercise
 an R8-minified consumer.
 

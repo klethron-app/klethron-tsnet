@@ -47,7 +47,7 @@ type node struct {
 
 type nodeStatus struct {
 	state      ipn.State
-	revocation string // A TsnetStatus.Revocation name while NeedsLogin, or "".
+	revocation string // A NodeStatus.Revocation name while NeedsLogin, or "".
 	loginURL   string
 	ip4, ip6   netip.Addr
 	err        string // The latest backend error since the node last ran, as printable ASCII.
@@ -113,6 +113,7 @@ func (n *node) close() {
 	defer n.lifecycle.Unlock()
 	if n.stop != nil {
 		n.stop()
+		n.stop = nil
 	}
 	_ = n.server.Close()
 }
@@ -242,7 +243,7 @@ func (n *node) await(after uint64, timeout time.Duration) (string, bool) {
 	}
 }
 
-// Failures of dial and logout, which otherwise return a file descriptor or 0; TsnetNode.check
+// Failures of dial and logout, which otherwise return a file descriptor or 0; TailnetNode.check
 // maps them to exceptions.
 const (
 	resultClosed = -1 - iota
@@ -314,7 +315,7 @@ func (n *node) dial(host string, port uint16, timeout time.Duration) int {
 	if err != nil {
 		return n.failed(ctx, resultDialFailed)
 	}
-	fd, err := relay(conn)
+	fd, err := relay(n.ctx, conn)
 	if err != nil {
 		_ = conn.Close()
 		return n.failed(ctx, resultDialFailed)
@@ -386,7 +387,7 @@ func (n *node) awaitRunning(ctx context.Context) bool {
 // descriptor. The peer's EOF reaches the app as end of stream while the app may keep writing.
 // The app's EOF (closing the descriptor or shutting down its output) ends the connection, so
 // connections never outlive the app's descriptor; half-closing towards the peer is not supported.
-func relay(conn net.Conn) (int, error) {
+func relay(ctx context.Context, conn net.Conn) (int, error) {
 	fds, err := syscall.Socketpair(syscall.AF_UNIX, syscall.SOCK_STREAM|syscall.SOCK_CLOEXEC, 0)
 	if err != nil {
 		return -1, err
@@ -402,19 +403,25 @@ func relay(conn net.Conn) (int, error) {
 		_ = conn.Close() // Also unblocks the other copy.
 		_ = local.Close()
 	})
+	// Closing conn alone cannot interrupt a copy blocked writing to the app's socket.
+	unwatch := context.AfterFunc(ctx, end)
+	finish := func() {
+		unwatch()
+		end()
+	}
 	go func() {
 		if _, err := io.Copy(local, conn); err != nil || local.(*net.UnixConn).CloseWrite() != nil {
-			end()
+			finish()
 		}
 	}()
 	go func() {
 		_, _ = io.Copy(conn, local)
-		end()
+		finish()
 	}()
 	return fds[1], nil
 }
 
-// Java enum names, in TsnetStatus.State. InUseOtherUser is Windows-only.
+// Java enum names, in NodeStatus.State. InUseOtherUser is Windows-only.
 var javaStates = map[ipn.State]string{
 	ipn.NeedsLogin:       "NEEDS_LOGIN",
 	ipn.NeedsMachineAuth: "NEEDS_MACHINE_AUTH",

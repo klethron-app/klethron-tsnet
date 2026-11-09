@@ -55,7 +55,7 @@ func klethron_node_create() C.longlong {
 	return C.longlong(nodes.last)
 }
 
-// Results of klethron_node_start; TsnetNode.start maps them to exceptions.
+// Results of klethron_node_start; TailnetNode.start maps them to exceptions.
 const (
 	startOK = iota
 	startClosed
@@ -136,12 +136,12 @@ func milliseconds(millis C.longlong) time.Duration {
 
 //export klethron_node_close
 func klethron_node_close(id C.longlong) {
-	nodes.Lock()
-	n := nodes.byID[int64(id)]
-	delete(nodes.byID, int64(id))
-	nodes.Unlock()
-	if n != nil {
+	if n := lookupNode(id); n != nil {
 		n.close()
+		// Keep the node reachable until shutdown finishes so concurrent closes wait for it.
+		nodes.Lock()
+		delete(nodes.byID, int64(id))
+		nodes.Unlock()
 	}
 }
 

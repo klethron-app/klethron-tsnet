@@ -22,11 +22,10 @@ import androidx.annotation.AnyThread;
 import androidx.annotation.MainThread;
 import androidx.annotation.UiThread;
 import androidx.annotation.WorkerThread;
-import com.klethron.tsnet.TsnetNode;
-import com.klethron.tsnet.TsnetStatus;
+import com.klethron.tsnet.TailnetNode;
+import com.klethron.tsnet.NodeStatus;
 import java.io.File;
 import java.io.IOException;
-import java.net.Inet4Address;
 import java.net.SocketTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -44,11 +43,11 @@ public final class LiveActivity extends Activity {
     private final Handler ui = new Handler(Looper.getMainLooper());
     private volatile boolean destroyed;
     // Only accessed on WORKER: lint checks the methods' thread annotations, not field access.
-    private @Nullable TsnetNode node;
+    private @Nullable TailnetNode node;
     private @Nullable ParcelFileDescriptor held; // Kept-open connection.
     private int heldExchanges;
     // Only accessed on the UI thread.
-    private @Nullable TsnetStatus status; // Never saved in a Bundle.
+    private @Nullable NodeStatus status; // Never saved in a Bundle.
     private boolean busy;
     private boolean started;
     private boolean registered;
@@ -58,20 +57,13 @@ public final class LiveActivity extends Activity {
         @Override
         public void onLinkPropertiesChanged(Network network, LinkProperties properties) {
             if (destroyed) return;
-            Inet4Address gateway = null;
-            for (var route : properties.getRoutes()) {
-                if (route.isDefaultRoute() && route.hasGateway() && route.getGateway() instanceof Inet4Address address) {
-                    gateway = address;
-                    break;
-                }
-            }
-            TsnetNode.setDefaultNetwork(properties.getInterfaceName(), gateway);
+            TailnetNode.setDefaultNetwork(properties);
         }
 
         @MainThread
         @Override
         public void onLost(Network network) {
-            if (!destroyed) TsnetNode.setDefaultNetwork(null, null);
+            if (!destroyed) TailnetNode.setDefaultNetwork(null);
         }
     };
 
@@ -115,7 +107,7 @@ public final class LiveActivity extends Activity {
         WORKER.execute(() -> {
             if (destroyed) return;
             try {
-                TsnetNode current = new TsnetNode();
+                TailnetNode current = new TailnetNode();
                 node = current;
                 current.start(new File(getNoBackupFilesDir(), "tailnet"), "klethron-tsnet-demo");
                 ui.post(() -> {
@@ -136,11 +128,11 @@ public final class LiveActivity extends Activity {
     }
 
     @WorkerThread
-    private void watch(TsnetNode current) {
-        TsnetStatus previous = null;
+    private void watch(TailnetNode current) {
+        NodeStatus previous = null;
         try {
             while (!destroyed) {
-                TsnetStatus next = current.awaitStatus(previous, Duration.ofSeconds(1));
+                NodeStatus next = current.awaitStatus(previous, Duration.ofDays(1));
                 ui.post(() -> {
                     if (destroyed) return;
                     status = next;
@@ -228,7 +220,7 @@ public final class LiveActivity extends Activity {
 
     private interface Operation {
         @WorkerThread
-        String run(TsnetNode current) throws Exception;
+        String run(TailnetNode current) throws Exception;
     }
 
     @UiThread
@@ -270,7 +262,7 @@ public final class LiveActivity extends Activity {
             if (status.revocation() != null) text += " (" + status.revocation().name() + ")";
             if (status.error() != null) text += "\n" + getString(R.string.backend_error, status.error());
             if (status.loginUrl() != null) text += "\n" + getString(R.string.login_pending);
-            else if (status.state() == TsnetStatus.State.RUNNING) text += "\n" + getString(R.string.login_saved);
+            else if (status.state() == NodeStatus.State.RUNNING) text += "\n" + getString(R.string.login_saved);
             ((TextView) findViewById(R.id.node_status)).setText(text);
         }
     }
@@ -287,7 +279,7 @@ public final class LiveActivity extends Activity {
         status = null;
         if (registered) {
             getSystemService(ConnectivityManager.class).unregisterNetworkCallback(networkCallback);
-            TsnetNode.setDefaultNetwork(null, null);
+            TailnetNode.setDefaultNetwork(null);
         }
         WORKER.execute(() -> {
             closeHeld();

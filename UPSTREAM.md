@@ -87,6 +87,10 @@ or workaround once upstream fixes it. Patches are hash-checked in `BuildGoLibrar
 
 ## Limits
 
+- Live-tailnet coverage is still needed for 16 KiB devices, DERP-to-direct upgrades, restrictive NATs,
+  subnet routes, IPv6 peers, throughput, prolonged outages, scheduled key expiry, revocation while
+  stopped and Play split delivery.
+
 - **`ts_omit_serve` breaks the `tsnet` build** (`tsnet.go` calls `SetServeConfig`/`GetServeConfig`
   unconditionally), so serve stays linked. **To report upstream.**
 - `ts_omit_clientmetrics` breaks `util/syspolicy`; `ts_omit_tailnetlock` breaks the debug test servers.
@@ -99,7 +103,7 @@ or workaround once upstream fixes it. Patches are hash-checked in `BuildGoLibrar
 ## Updating upstream
 
 Resolve `tailscale/tailscale` main to a full SHA; update the Go requirement and sums, the version
-assertions (`TsnetNodeTest`, `MinifiedDemoTest`) and the documented SHA; re-check patch hashes and every
+assertions (`TailnetNodeTest`, `MinifiedDemoTest`) and the documented SHA; re-check patch hashes and every
 entry above. Re-audit initialization, filesystem and subprocess reachability and state permissions, and
 retest the state format. Update both notice inventories (THIRD-PARTY-NOTICES.md), then rebuild both ABIs
 and repeat the device tests. Omit `serve` once upstream fixes its build; when the omitted feature set

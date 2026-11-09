@@ -1,7 +1,7 @@
-/// Embedded tsnet nodes with explicitly owned lifetimes.
-///
-/// Reference types are non-null unless annotated otherwise. Results must be used: an ignored
-/// [TsnetNode] can never be closed.
+/// Connect an Android app to a Tailscale private network (a tailnet) and open TCP connections to
+/// its devices. [TailnetNode] manages the app's network identity; [NodeStatus] reports login and
+/// connection progress. The library uses [tsnet](https://github.com/tailscale/tailscale/tree/main/tsnet)
+/// inside the app's process, without a device-wide VPN.
 @NullMarked
 @CheckReturnValue
 package com.klethron.tsnet;

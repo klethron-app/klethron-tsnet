@@ -36,6 +36,11 @@ Java_com_klethron_tsnet_TrustRootsTest_nativeProbe(JNIEnv *env, jclass type) {
     return take_string(env, klethron_roots_probe());
 }
 
+JNIEXPORT jboolean JNICALL
+Java_com_klethron_tsnet_TailnetNodeTest_nativeConcurrentClose(JNIEnv *env, jclass type) {
+    return klethron_concurrent_close_probe() ? JNI_TRUE : JNI_FALSE;
+}
+
 JNIEXPORT jstring JNICALL
 Java_com_klethron_tsnet_NetworkInterfacesTest_nativeProbe(JNIEnv *env, jclass type) {
     return take_string(env, klethron_network_probe());

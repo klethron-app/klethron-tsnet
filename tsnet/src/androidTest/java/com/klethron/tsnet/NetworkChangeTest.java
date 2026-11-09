@@ -10,11 +10,9 @@ import android.net.ConnectivityManager;
 import android.net.LinkProperties;
 import android.net.Network;
 import android.net.NetworkCapabilities;
-import android.net.RouteInfo;
 import android.os.ParcelFileDescriptor;
 import androidx.test.platform.app.InstrumentationRegistry;
 import java.io.FileInputStream;
-import java.net.Inet4Address;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -24,7 +22,7 @@ import org.junit.Test;
 
 /**
  * Acts as the consuming app: forwards ConnectivityManager's default network to
- * {@link TsnetNode#setDefaultNetwork} while a loopback two-node tailnet runs, then disables Wi-Fi
+ * {@link TailnetNode#setDefaultNetwork} while a loopback two-node tailnet runs, then disables Wi-Fi
  * so the default network really changes. Both nodes must rebind and keep exchanging data.
  * Requires a device whose default network is Wi-Fi with another network (emulator cellular) behind it.
  */
@@ -39,20 +37,20 @@ public final class NetworkChangeTest {
         ConnectivityManager connectivity = context.getSystemService(ConnectivityManager.class);
         assertTrue("The default network must be Wi-Fi", awaitWifiDefault(connectivity));
 
-        TsnetNode.setDefaultNetwork(null, null);
+        TailnetNode.setDefaultNetwork(null);
         Path directory = LoginTest.temporaryDirectory("netchange-");
         LinkedBlockingQueue<String> names = new LinkedBlockingQueue<>();
         ConnectivityManager.NetworkCallback callback = new ConnectivityManager.NetworkCallback() {
             @Override
             public void onLinkPropertiesChanged(Network network, LinkProperties properties) {
                 String name = properties.getInterfaceName();
-                TsnetNode.setDefaultNetwork(name, ipv4Gateway(properties));
+                TailnetNode.setDefaultNetwork(properties);
                 names.add(name == null ? "" : name);
             }
 
             @Override
             public void onLost(Network network) {
-                TsnetNode.setDefaultNetwork(null, null);
+                TailnetNode.setDefaultNetwork(null);
                 names.add("");
             }
         };
@@ -80,7 +78,7 @@ public final class NetworkChangeTest {
             }
             // Release the probe first: it holds the lock that other tailnet probes wait for.
             nativeProbeStop();
-            TsnetNode.setDefaultNetwork(null, null);
+            TailnetNode.setDefaultNetwork(null);
             LoginTest.deleteDirectory(directory);
             shell("svc wifi enable");
             // Leave the device as found; Wi-Fi reconnects asynchronously.
@@ -97,15 +95,6 @@ public final class NetworkChangeTest {
             Thread.sleep(100);
         }
         return false;
-    }
-
-    private static Inet4Address ipv4Gateway(LinkProperties properties) {
-        for (RouteInfo route : properties.getRoutes()) {
-            if (route.isDefaultRoute() && route.hasGateway() && route.getGateway() instanceof Inet4Address gateway) {
-                return gateway;
-            }
-        }
-        return null;
     }
 
     private static String nextName(LinkedBlockingQueue<String> names) throws InterruptedException {

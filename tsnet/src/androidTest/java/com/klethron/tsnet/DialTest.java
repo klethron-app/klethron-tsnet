@@ -68,7 +68,7 @@ public final class DialTest {
 
     @Test(timeout = 90000)
     public void echoesThroughAddressAndMagicDnsName() throws Exception {
-        try (TsnetNode node = startNode()) {
+        try (TailnetNode node = startNode()) {
             // The first dial waits for the node to join.
             for (String host : new String[] {peer, PEER_NAME}) {
                 try (ParcelFileDescriptor connection = node.dial(host, 7070, WAIT)) {
@@ -85,7 +85,7 @@ public final class DialTest {
 
     @Test(timeout = 60000)
     public void deliversPeerEndOfStreamAndClosesWithDescriptor() throws Exception {
-        try (TsnetNode node = startNode();
+        try (TailnetNode node = startNode();
                 ParcelFileDescriptor connection = node.dial(peer, 7071, WAIT)) {
             // The peer greets and closes its side; this side remains writable.
             assertEquals("klethron\n", readToEnd(connection));
@@ -98,7 +98,7 @@ public final class DialTest {
 
     @Test(timeout = 60000)
     public void servesANonBlockingConsumer() throws Exception {
-        try (TsnetNode node = startNode();
+        try (TailnetNode node = startNode();
                 ParcelFileDescriptor connection = node.dial(peer, 7070, WAIT)) {
             FileDescriptor fd = nonBlocking(connection);
             byte[] one = new byte[1];
@@ -138,7 +138,7 @@ public final class DialTest {
 
     @Test(timeout = 120000)
     public void slowsAPeerWhileTheAppDoesNotRead() throws Exception {
-        try (TsnetNode node = startNode();
+        try (TailnetNode node = startNode();
                 ParcelFileDescriptor connection = node.dial(peer, 7073, WAIT)) {
             // Until the peer has written and then made no progress for a second.
             long flooded = 0;
@@ -160,7 +160,7 @@ public final class DialTest {
 
     @Test(timeout = 120000)
     public void slowsTheAppWhileThePeerDoesNotRead() throws Exception {
-        try (TsnetNode node = startNode();
+        try (TailnetNode node = startNode();
                 ParcelFileDescriptor connection = node.dial(peer, 7074, WAIT)) {
             FileDescriptor fd = nonBlocking(connection);
             byte[] chunk = new byte[64 << 10];
@@ -182,8 +182,27 @@ public final class DialTest {
     }
 
     @Test(timeout = 60000)
+    public void closesAnUnreadConnectionWithNode() throws Exception {
+        try (TailnetNode node = startNode();
+                ParcelFileDescriptor connection = node.dial(peer, 7073, WAIT)) {
+            long flooded = 0;
+            for (long last = 0; flooded == 0 || flooded != last; Thread.sleep(1000)) {
+                last = flooded;
+                flooded = LoginTest.nativeProbeFlooded();
+            }
+            assertTrue("Peer was not slowed", flooded < FLOOD);
+            node.close();
+            // With unread data, closing only the tailnet socket leaves the relay blocked.
+            assertTrue("Relay stayed open", poll(connection.getFileDescriptor(), 0, 10000));
+            ErrnoException closed = assertThrows(ErrnoException.class,
+                    () -> Os.write(connection.getFileDescriptor(), new byte[] {1}, 0, 1));
+            assertEquals(OsConstants.EPIPE, closed.errno);
+        }
+    }
+
+    @Test(timeout = 60000)
     public void reachesOnlyTheTailnet() throws Exception {
-        try (TsnetNode node = startNode()) {
+        try (TailnetNode node = startNode()) {
             node.dial(peer, 7070, WAIT).close(); // Joined.
             // Upstream would dial both through the device's network: the first is the control server.
             int controlPort = URI.create(controlUrl).getPort();
@@ -196,7 +215,7 @@ public final class DialTest {
 
     @Test(timeout = 60000)
     public void refusesInvalidCallsAndClosesConnectionsWithNode() throws Exception {
-        TsnetNode node = new TsnetNode();
+        TailnetNode node = new TailnetNode();
         assertThrows(IllegalStateException.class, () -> node.dial(peer, 7070, WAIT));
         assertThrows(IllegalArgumentException.class, () -> node.dial("", 7070, WAIT));
         assertThrows(IllegalArgumentException.class, () -> node.dial("a".repeat(256), 7070, WAIT));
@@ -215,7 +234,7 @@ public final class DialTest {
 
     @Test(timeout = 60000)
     public void logoutEndsTailnetAccess() throws Exception {
-        try (TsnetNode node = startNode();
+        try (TailnetNode node = startNode();
                 ParcelFileDescriptor connection = node.dial(peer, 7070, WAIT)) {
             write(connection, new byte[] {1});
             assertEquals(1, new FileInputStream(connection.getFileDescriptor()).read());
@@ -232,7 +251,7 @@ public final class DialTest {
 
     @Test(timeout = 60000)
     public void timesOutAndWakesOnCloseWhileNotRunning() throws Exception {
-        TsnetNode node = new TsnetNode();
+        TailnetNode node = new TailnetNode();
         node.start(directory.resolve("node").toFile(), "klethron-dialer", "http://127.0.0.1:1");
         assertThrows(SocketTimeoutException.class, () -> node.dial(peer, 7070, Duration.ofMillis(200)));
         CompletableFuture<Throwable> dialer = CompletableFuture.supplyAsync(() ->
@@ -242,8 +261,8 @@ public final class DialTest {
         dialer.get(10, TimeUnit.SECONDS);
     }
 
-    private TsnetNode startNode() throws IOException {
-        TsnetNode node = new TsnetNode();
+    private TailnetNode startNode() throws IOException {
+        TailnetNode node = new TailnetNode();
         node.start(directory.resolve("node").toFile(), "klethron-dialer", controlUrl);
         return node;
     }

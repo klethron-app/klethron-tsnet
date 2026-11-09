@@ -4,12 +4,12 @@
 #include "_cgo_export.h"
 
 JNIEXPORT jlong JNICALL
-Java_com_klethron_tsnet_TsnetNode_nativeCreate(JNIEnv *env, jclass type) {
+Java_com_klethron_tsnet_TailnetNode_nativeCreate(JNIEnv *env, jclass type) {
     return klethron_node_create();
 }
 
 JNIEXPORT jint JNICALL
-Java_com_klethron_tsnet_TsnetNode_nativeStart(JNIEnv *env, jclass type, jlong handle, jbyteArray config) {
+Java_com_klethron_tsnet_TailnetNode_nativeStart(JNIEnv *env, jclass type, jlong handle, jbyteArray config) {
     // Java encodes standard UTF-8, including supplementary characters in paths.
     jsize length = (*env)->GetArrayLength(env, config);
     jbyte *bytes = (*env)->GetByteArrayElements(env, config, NULL);
@@ -20,7 +20,7 @@ Java_com_klethron_tsnet_TsnetNode_nativeStart(JNIEnv *env, jclass type, jlong ha
 }
 
 JNIEXPORT jstring JNICALL
-Java_com_klethron_tsnet_TsnetNode_nativeAwaitStatus(JNIEnv *env, jclass type, jlong handle, jlong after, jlong timeoutMillis) {
+Java_com_klethron_tsnet_TailnetNode_nativeAwaitStatus(JNIEnv *env, jclass type, jlong handle, jlong after, jlong timeoutMillis) {
     char *record = klethron_node_await_status(handle, after, timeoutMillis);
     if (record == NULL) return NULL; // Closed.
     // Records are ASCII, so JNI modified UTF-8 is sufficient.
@@ -30,12 +30,12 @@ Java_com_klethron_tsnet_TsnetNode_nativeAwaitStatus(JNIEnv *env, jclass type, jl
 }
 
 JNIEXPORT void JNICALL
-Java_com_klethron_tsnet_TsnetNode_nativeClose(JNIEnv *env, jclass type, jlong handle) {
+Java_com_klethron_tsnet_TailnetNode_nativeClose(JNIEnv *env, jclass type, jlong handle) {
     klethron_node_close(handle);
 }
 
 JNIEXPORT jstring JNICALL
-Java_com_klethron_tsnet_TsnetNode_nativeTailscaleVersion(JNIEnv *env, jclass type) {
+Java_com_klethron_tsnet_TailnetNode_nativeTailscaleVersion(JNIEnv *env, jclass type) {
     // Module versions are ASCII, so JNI modified UTF-8 is sufficient here.
     char *version = klethron_tailscale_version();
     jstring result = (*env)->NewStringUTF(env, version);
@@ -44,8 +44,8 @@ Java_com_klethron_tsnet_TsnetNode_nativeTailscaleVersion(JNIEnv *env, jclass typ
 }
 
 JNIEXPORT void JNICALL
-Java_com_klethron_tsnet_TsnetNode_nativeSetDefaultNetwork(JNIEnv *env, jclass type, jbyteArray name, jint gateway) {
-    // Java limits names to IFNAMSIZ - 1 bytes; copy exact bytes rather than modified UTF-8.
+Java_com_klethron_tsnet_TailnetNode_nativeSetDefaultNetwork(JNIEnv *env, jclass type, jbyteArray name, jint gateway) {
+    // Android interface names fit IFNAMSIZ; preserve their standard UTF-8 bytes.
     char bytes[16];
     jsize length = (*env)->GetArrayLength(env, name);
     if (length >= (jsize) sizeof bytes) return;
@@ -54,7 +54,7 @@ Java_com_klethron_tsnet_TsnetNode_nativeSetDefaultNetwork(JNIEnv *env, jclass ty
 }
 
 JNIEXPORT jint JNICALL
-Java_com_klethron_tsnet_TsnetNode_nativeDial(JNIEnv *env, jclass type, jlong handle, jbyteArray host, jint port, jlong timeoutMillis) {
+Java_com_klethron_tsnet_TailnetNode_nativeDial(JNIEnv *env, jclass type, jlong handle, jbyteArray host, jint port, jlong timeoutMillis) {
     // Java limits hosts to 255 UTF-8 bytes; copy exact bytes rather than modified UTF-8.
     char bytes[256];
     jsize length = (*env)->GetArrayLength(env, host);
@@ -64,11 +64,11 @@ Java_com_klethron_tsnet_TsnetNode_nativeDial(JNIEnv *env, jclass type, jlong han
 }
 
 JNIEXPORT jint JNICALL
-Java_com_klethron_tsnet_TsnetNode_nativeLogout(JNIEnv *env, jclass type, jlong handle, jlong timeoutMillis) {
+Java_com_klethron_tsnet_TailnetNode_nativeLogout(JNIEnv *env, jclass type, jlong handle, jlong timeoutMillis) {
     return klethron_node_logout(handle, timeoutMillis);
 }
 
 JNIEXPORT jint JNICALL
-Java_com_klethron_tsnet_TsnetNode_nativeLogin(JNIEnv *env, jclass type, jlong handle) {
+Java_com_klethron_tsnet_TailnetNode_nativeLogin(JNIEnv *env, jclass type, jlong handle) {
     return klethron_node_login(handle);
 }
