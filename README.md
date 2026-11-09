@@ -1,203 +1,99 @@
 [![Build](https://github.com/klethron-app/klethron-tsnet/actions/workflows/build.yml/badge.svg?branch=main)](https://github.com/klethron-app/klethron-tsnet/actions/workflows/build.yml)
-[![Apache-2.0 licensed](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Maven Central](https://img.shields.io/maven-central/v/com.klethron/tsnet)](https://central.sonatype.com/artifact/com.klethron/tsnet)
 [![Javadoc](https://javadoc.io/badge2/com.klethron/tsnet/javadoc.svg)](https://javadoc.io/doc/com.klethron/tsnet)
 
 # Klethron tsnet
 
-An Android AAR containing a precompiled Tailscale tsnet engine and a small Java/JNI bridge, so an app can
-join a tailnet from its own process (no VPN, service or subprocess) and open TCP connections to peers.
-Java package `com.klethron.tsnet`, Maven coordinates `com.klethron:tsnet:0.1.0`.
+Connect an Android app to a [Tailscale](https://tailscale.com/) network and open TCP connections to its
+peers. The library embeds [tsnet](https://github.com/tailscale/tailscale/tree/main/tsnet) in your app's
+process. Each node has its own identity; it needs neither the Tailscale app nor a device-wide VPN.
 
-**Early development:** login, status, dialing by address or MagicDNS name, logout and revocation are
-verified against loopback test servers and, on arm64 hardware, a real tailnet. The first release, 0.1.0,
-is on Maven Central. Not yet verified: a live tailnet with 16 KiB pages, DERP-to-direct upgrades, NATs
-that prevent direct paths, subnet routes, IPv6 peers, throughput, outages longer than seconds,
-tailnet-period key expiry, revocation while stopped and Play split delivery.
+Requires **Android 14 (API 34)** or later. The AAR includes native libraries for **arm64-v8a** and
+**x86_64**, with 16 KiB page support. Consumers need no Go compiler or NDK.
 
-## Build
+**Under development.** Login, persistent identity, TCP dialing, logout and revocation have been tested
+locally and on a real tailnet. Broader network and device coverage is still needed; see
+[known limitations](UPSTREAM.md). Examples below follow the development API; consult the
+[versioned Javadoc](https://javadoc.io/doc/com.klethron/tsnet) for released APIs.
 
-Requires JDK 25 (25.0.5 for byte-identical output), Go 1.27.3, an Android SDK (`ANDROID_HOME` or `local.properties`) with platform
-`android-37.2`, build-tools `37.0.0` and NDK `30.0.16248370`. Native builds support Linux x86_64 and
-macOS hosts; only Linux is verified.
+## Install
 
-```sh
-./gradlew build
-./gradlew :tsnet:publishReleasePublicationToLocalBuildRepository   # to build/maven/
-ANDROID_SERIAL=<serial> ./gradlew :tsnet:connectedDebugAndroidTest
-ANDROID_SERIAL=<serial> ./gradlew :demo:connectedReleaseAndroidTest
-```
-
-The release AAR is `tsnet/build/outputs/aar/tsnet-release.aar`; native sizes and alignment are in
-`tsnet/build/reports/native/sizes.tsv`. It contains arm64-v8a and x86_64 code, needs API 34, and
-consumers need neither Go nor an NDK.
-
-## Use
+Add `mavenCentral()` to your repositories and select a
+[release version](https://central.sonatype.com/artifact/com.klethron/tsnet):
 
 ```kotlin
-dependencies { implementation("com.klethron:tsnet:0.1.0") }
-// The libraries are already stripped: skip AGP's strip step and its "Unable to strip" warning.
-android { packaging.jniLibs.keepDebugSymbols += "**/libklethron_tsnet.so" }
+dependencies {
+    implementation("com.klethron:tsnet:<version>")
+}
+android {
+    // The bundled libraries are already stripped.
+    packaging.jniLibs.keepDebugSymbols += "**/libklethron_tsnet.so"
+}
 ```
 
+Declare these permissions in your app's manifest:
+
+```xml
+<uses-permission android:name="android.permission.INTERNET" />
+<uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+```
+
+## Connect
+
+A `TailnetNode` represents your app as a device on a tailnet (a private Tailscale network). Run node
+operations on a worker thread. Keep its state in a dedicated directory under
+[`Context.getNoBackupFilesDir()`](https://developer.android.com/reference/android/content/Context#getNoBackupFilesDir()):
+it contains private keys and must never be logged, backed up or shared.
+
 ```java
-// On a background thread. The directory holds the node's private keys: keep it out of backups.
-try (TsnetNode node = new TsnetNode()) {
+try (TailnetNode node = new TailnetNode()) {
     node.start(new File(context.getNoBackupFilesDir(), "tailscale"), "my-device");
-    TsnetStatus status = null;
+    NodeStatus status = null;
     do {
         status = node.awaitStatus(status, Duration.ofSeconds(30));
         if (status.loginUrl() != null) {
-            // Open in the user's browser; never log it. Whoever opens it can claim this node.
+            // Offer to open this URL in the user's browser. Never log it.
         }
-    } while (status.state() != TsnetStatus.State.RUNNING);
-    // Closing the node disconnects it; its state remains for the next start.
-    try (ParcelFileDescriptor connection = node.dial("my-server", 22, Duration.ofSeconds(30))) {
-        // A connected stream socket: use FileInputStream/FileOutputStream, or android.system.Os.
+        if (status.error() != null) {
+            // Show the error to the user and allow cancellation.
+        }
+    } while (status.state() != NodeStatus.State.RUNNING || status.loginUrl() != null);
+
+    try (ParcelFileDescriptor connection = node.dial("my-server", 443, Duration.ofSeconds(30))) {
+        // Read/write the connected socket using android.system.Os or file streams.
     }
 }
 ```
 
-The Javadoc of `TsnetNode` and `TsnetStatus` specifies each call. In short:
+`awaitStatus` waits for changes without polling. A login URL lets whoever opens it claim the node;
+pass it only to the user's browser. Wait for the URL to clear before closing, so the login is saved.
+Starting with the same directory then resumes that identity.
 
-- `dial` reaches only peers and subnet routes in the network map, never the device's own network. The
-  result is one end of a Unix socket pair relayed to the tailnet connection, so it can be polled.
-- `logout`, then `login`, re-authenticates; `TsnetStatus.revocation()` says whether control expired the
-  key or removed the device. Close a node only after its login URL clears, or the login may be lost.
-- `TsnetNode.setDefaultNetwork(interfaceName, ipv4Gateway)` must be fed from a
-  `ConnectivityManager.registerDefaultNetworkCallback` (`onLinkPropertiesChanged` and `onLost`): native
-  code cannot see the default network on Android, and without it nodes never rebind after a change.
-- Every connection setting is explicit. `start` ignores `TS_CONTROL_URL` and refuses to run if the
-  environment sets `TS_AUTHKEY` or `TS_AUTH_KEY`. Only `tailscaled.state` (0600, directory 0700) is
-  written; logs are discarded.
-- Native TLS trusts Android's current system CA store (the Conscrypt APEX, minus roots the user
-  disabled), not user-added CAs, the app's network security configuration or Tailscale's baked-in roots.
-- A Go bug ends the whole process. A panic is a native crash (`ApplicationExitInfo.REASON_CRASH_NATIVE`)
-  whose only logcat output (tag `Go`) is the panic message; a Go fatal error exits with status 2
-  (`REASON_EXIT_SELF`) and leaves no tombstone. Android starts apps in a mode in which Go prints no
-  tracebacks, and native backtraces stop in the Go runtime.
+`dial` accepts a tailnet IP address or MagicDNS name and returns a socket descriptor owned by the
+caller. It reaches peers and subnet routes only. Closing the node ends its connections but preserves
+its identity. `logout` ends tailnet access; `login` starts authorization again after logout or key
+expiry. The app decides how long to keep the node alive and whether to run a service.
 
-The package is JSpecify `@NullMarked` (JSpecify is a transitive `api` dependency; copying only the AAR
-requires adding it) and Error Prone `@CheckReturnValue`. Methods carry AndroidX thread annotations
-(`@WorkerThread`, except `@AnyThread` `tailscaleVersion` and `setDefaultNetwork`) and `start` is
-`@RequiresPermission(INTERNET)`. Lint, Error Prone and Kotlin's `-Xreturn-value-checker` read these by
-name, so the AAR does not depend on `androidx.annotation` or `error_prone_annotations`. Lint does not
-check the constructor or try-with-resources' implicit `close()`.
+## Network changes
 
-Both variants omit 19 upstream features with build tags (`tsnet/build.gradle.kts`), including SSH, the web
-client, ACME certificates, logtail, debug hooks, PeerAPI, exit nodes, environment proxies, OAuth secrets, MDM policy and the
-on-disk netmap cache. Two upstream patches keep the login after a failed logout and stop a netmap in
-flight from undoing a logout; see [UPSTREAM.md](UPSTREAM.md).
+Forward Android's default-network changes so the node can reconnect after switching Wi-Fi or mobile
+networks. Register this callback while using the library and unregister it when finished:
 
-## Tests
-
-Instrumentation tests need an SELinux **Enforcing** device (`adb shell getenforce`). Native test bridges
-exist only in debug builds; `verifyNativeAar` rejects them in release.
-
-- `LoginTest` and `DialTest` drive the public API against an in-process loopback test control server:
-  interactive login, restart from state, logout, failed logout, key expiry, device removal, device
-  approval, rejected registration, and dialing an in-memory peer by address and MagicDNS name,
-  blocking and non-blocking, with backpressure in both directions.
-- `TailnetTest` exchanges data between two in-process nodes over a direct path and DERP only.
-  `NetworkChangeTest` disables Wi-Fi and requires both nodes to rebind; on hardware, use USB ADB.
-- `NetworkInterfacesTest` and `TrustRootsTest` compare native interfaces and CA roots with Android's.
-- `CrashTest` fails fatally in Go in a separate process and checks how Android records it and that
-  logcat gets no traceback.
-- `ControlPlaneTest` (needs internet) registers with Tailscale's real control plane until it offers a
-  login URL, which never leaves native code.
-- The R8-minified release demo's tests load the library and start its live screen until browser
-  authorization is offered, without opening it, then require a rotation to keep the screen and node.
-
-## Live tailnet test
-
-The demo's opt-in **Live tailnet test** screen exercises the API on a real tailnet. Use a tailnet and peer
-you own; never use an auth key.
-
-1. `./gradlew :demo:installRelease`, then open **Klethron tsnet demo → Live tailnet test → Start / resume node**.
-2. Tap **Authorize in browser**, approve the node, return and wait for **RUNNING / Login saved**. Android
-   freezes the demo in the background, so the login completes only after you return. Do not close while
-   authorization is pending. Never copy the URL or node state into reports.
-3. On another peer, allow TCP 7070 from the node and run this echo server with that peer's Tailscale IPv4
-   address:
-
-   ```sh
-   python3 - 100.x.y.z <<'PY'
-   import socketserver
-   import sys
-
-   class Echo(socketserver.BaseRequestHandler):
-       def handle(self):
-           self.request.settimeout(15)
-           while data := self.request.recv(4096):
-               self.request.sendall(data)
-
-   with socketserver.ThreadingTCPServer((sys.argv[1], 7070), Echo) as server:
-       server.serve_forever()
-   PY
-   ```
-
-4. Enter the peer's address and port 7070 and tap **Verify TCP echo**: expect **Echo verified: 52 B**.
-   Repeat with its MagicDNS name. **Keep connection open** reuses one stream, for network-change tests.
-5. **Close node**, reopen and Start: expect RUNNING without a browser, and echo again. **Log out of
-   tailnet**: echoes must now fail. **Log in / renew key**, authorize and echo again.
-
-Record only outcomes, device/API/ABI/page size, network types and timings:
-
-| Case | Evidence required |
-|---|---|
-| Logout, admin key expiry, removal | Access ends; state and `revocation()`; re-login restores the echo. Key expiry needs the API (`POST /api/v2/device/{id}/expire` with a short-lived token); removal is in the admin console |
-| Wi-Fi ↔ cellular | Fresh and kept-open echoes succeed after each switch; the peer sees one unchanged connection (`ss -tn`) |
-| Direct or DERP path | The peer's own status during the exchange; an echo alone does not show the path. Force DERP with an ephemeral tsnet echo peer run with `TS_DEBUG_ALWAYS_USE_DERP=true` and log it out afterwards |
-| Fallback DNS | System DNS fails (strict Private DNS set to an unresolvable host; delete both settings afterwards) while a fresh process starts and connects |
-
-Stop the echo server and log out or remove the test node when finished. The demo has no service: the node
-lives while its screen exists, and uninstalling does not remove the machine from the tailnet.
-
-## Distribution
-
-Releases are on Maven Central. Original code is Apache-2.0; Tailscale and its dependencies keep their own licences, with
-notices in the AAR (see [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)). Tailscale is pinned to
-[`62d055f4c38b`](https://github.com/tailscale/tailscale/commit/62d055f4c38b610d63a8cee7fa4a7e65b01564eb)
-in `tsnet/src/main/go/go.mod`; builds use `-mod=readonly`, never a moving branch.
-
-A release is the commit of its tag, which the POM names (`<scm><tag>`); that commit pins Tailscale, Go and
-the NDK, and `TsnetNode.tailscaleVersion()` reports the linked Tailscale version. To release `X.Y.Z`:
-
-1. Commit `version=X.Y.Z` in `gradle.properties`, then push the tag `vX.Y.Z` on that commit.
-2. CI builds and verifies the publication as on `main`, then the `release` job, in the protected
-   `maven-central` environment, waits for approval.
-3. Before approving, compare the files it will sign, the run's `maven-release` artifact
-   (`gh run download <run> -n maven-release`), with a local build of the tag using the pinned toolchains.
-   The POM and native libraries must be byte-identical and every archive's unpacked files identical;
-   compressed bytes differ between JDK builds (Temurin's bundled zlib and Homebrew's zlib-ng).
-4. Approving publishes irreversibly: the job signs the files with `.github/central-bundle.sh`, uploads
-   them and waits until Central has validated and published them. It runs no Gradle, and the build job
-   never sees the secrets. Commit the next `-SNAPSHOT` version.
-
-Releases are signed by `Klethron release signing <release@klethron.com>`, fingerprint
-`361C CF78 F83A DAED D8DC  6DA8 A32D AC0A CDC6 D35B`, in [`release-signing-key.asc`](release-signing-key.asc)
-and on `keys.openpgp.org` and `keyserver.ubuntu.com`. Its ed25519 signing subkey
-`2F78 F885 F811 292A 6199  2A11 8C31 C50B B472 B529` expires 2028-11-08; the primary key stays offline.
-Import the file, then check a download with `gpg --verify tsnet-X.Y.Z.aar.asc tsnet-X.Y.Z.aar`. Gradle
-dependency verification (`--write-verification-metadata pgp,sha256`) pins the subkey, and rejects the
-primary's fingerprint as a trusted key: renew the subkey by extending its expiry, which keeps its
-fingerprint, rather than replacing it.
-
-The environment needs a required reviewer, deployments from `v*` tags only, and the secrets `SIGNING_KEY`
-(only the signing subkey, `gpg --export-secret-subkeys`), `SIGNING_PASSPHRASE`, `CENTRAL_USERNAME` and
-`CENTRAL_PASSWORD` (a Central Portal user token). `central-bundle.sh` fails unless every signature
-verifies with `release-signing-key.asc`. After renewing or replacing the subkey, commit and upload the
-new public key.
-
-To try unreleased changes in an app, include a checkout in the app's `settings.gradle.kts`; Gradle then
-builds `com.klethron:tsnet` from it whatever version the app requests (debug or release variant to
-match), which needs Go, the NDK and the same Android Gradle plugin version:
-
-```kotlin
-// Development only: build com.klethron:tsnet from a checkout instead of Maven Central.
-providers.gradleProperty("tsnet.checkout").orNull?.let { includeBuild(it) }
+```java
+ConnectivityManager.NetworkCallback callback = new ConnectivityManager.NetworkCallback() {
+    @Override public void onLinkPropertiesChanged(Network network, LinkProperties properties) {
+        TailnetNode.setDefaultNetwork(properties);
+    }
+    @Override public void onLost(Network network) {
+        TailnetNode.setDefaultNetwork(null);
+    }
+};
+connectivityManager.registerDefaultNetworkCallback(callback);
 ```
 
-Build the app with `-Ptsnet.checkout=../klethron-tsnet`. To test the exact release artifact instead, run
-`./gradlew :tsnet:publishReleasePublicationToLocalBuildRepository` and depend on the `-SNAPSHOT` version
-from `maven("../klethron-tsnet/build/maven") { content { includeGroup("com.klethron") } }`.
+Reports apply to all nodes in the process. Native TLS uses Android's system CA store, excluding
+disabled roots; user-added CAs and the app's network security configuration do not apply.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) to build, test or use a checkout. Original code is
+[Apache-2.0 licensed](LICENSE); bundled dependencies retain their
+[own licences](THIRD-PARTY-NOTICES.md), included in the AAR.
