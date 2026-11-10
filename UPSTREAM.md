@@ -23,10 +23,10 @@ with Go 1.27.4. Recheck each entry on every update and drop fixes upstream has m
   synthetic interface cannot describe multi-interface networks.
 - **Android netmon cannot see default-network changes.** It polls only every ten minutes and its
   default-route interface is empty without a host report, so change deltas never set
-  `RebindLikelyRequired` (no UDP rebind, re-STUN or DERP reconnect). Workaround: public
-  `setDefaultNetwork` calls `UpdateLastKnownDefaultRouteInterface`/`UpdateLastKnownDefaultGateway`, then
-  `InjectEvent` on each started node's monitor (via the unstable `Server.Sys().NetMon`). Apps report
-  their default network.
+  `RebindLikelyRequired` (no UDP rebind, re-STUN or DERP reconnect). Workaround: while nodes run,
+  `TailnetNode` follows `registerDefaultNetworkCallback` and calls
+  `UpdateLastKnownDefaultRouteInterface`/`UpdateLastKnownDefaultGateway`, then `InjectEvent` on each
+  started node's monitor (via the unstable `Server.Sys().NetMon`).
 - **Go `crypto/x509` reads the wrong Android CA store** (a Go issue). It reads only
   `/system/etc/security/cacerts`, missing the Conscrypt APEX store used since Android 14 (updated by
   Play system updates), and ignores roots the user disabled. Workaround: load the APEX (or system)

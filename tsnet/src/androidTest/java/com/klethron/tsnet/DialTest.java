@@ -276,7 +276,7 @@ public final class DialTest {
 
     @Test(timeout = 60000)
     public void timesOutAndWakesOnCloseWhileNotRunning() throws Exception {
-        try (TailnetNode node = TailnetNode.start(directory.resolve("node").toFile(), "klethron-dialer", "http://127.0.0.1:1")) {
+        try (TailnetNode node = TailnetNode.start(LoginTest.CONTEXT, directory.resolve("node").toFile(), "klethron-dialer", "http://127.0.0.1:1")) {
             assertThrows(SocketTimeoutException.class, () -> node.dial(peer, 7070, Duration.ofMillis(200)));
             CompletableFuture<Throwable> dialer = CompletableFuture.supplyAsync(() ->
                     assertThrows(ClosedChannelException.class, () -> node.dial(peer, 7070, Duration.ofMinutes(5))));
@@ -288,7 +288,7 @@ public final class DialTest {
     }
 
     private TailnetNode startNode() throws IOException {
-        return TailnetNode.start(directory.resolve("node").toFile(), "klethron-dialer", controlUrl);
+        return TailnetNode.start(LoginTest.CONTEXT, directory.resolve("node").toFile(), "klethron-dialer", controlUrl);
     }
 
     /// Waits until the peer on port 7073 has written and then made no progress for a second.

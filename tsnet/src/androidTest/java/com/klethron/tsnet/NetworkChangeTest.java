@@ -5,7 +5,6 @@ import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
 import android.app.UiAutomation;
-import android.content.Context;
 import android.net.ConnectivityManager;
 import android.net.LinkProperties;
 import android.net.Network;
@@ -22,61 +21,53 @@ import java.util.concurrent.TimeUnit;
 import org.junit.Test;
 
 /**
- * Acts as the consuming app: forwards ConnectivityManager's default network to
- * {@link TailnetNode#setDefaultNetwork} while a loopback two-node tailnet runs, then disables Wi-Fi
- * so the default network really changes. Both nodes must rebind and keep exchanging data.
- * Requires a device without a VPN whose default network is Wi-Fi with cellular behind it.
+ * Runs a loopback two-node tailnet while a node started through the public API follows the
+ * default network, then disables Wi-Fi so the default network really changes. Both tailnet nodes
+ * must rebind and keep exchanging data. Requires a device without a VPN whose default network is
+ * Wi-Fi with cellular behind it.
  */
 public final class NetworkChangeTest {
     @Test(timeout = 180000)
     public void rebindsWhenDefaultNetworkChanges() throws Exception {
-        Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
-        ConnectivityManager connectivity = context.getSystemService(ConnectivityManager.class);
+        ConnectivityManager connectivity = LoginTest.CONTEXT.getSystemService(ConnectivityManager.class);
         assertTrue("The default network must be Wi-Fi", awaitWifiDefault(connectivity));
 
-        TailnetNode.setDefaultNetwork(null);
         Path directory = LoginTest.temporaryDirectory("netchange-");
+        Path nodeDirectory = LoginTest.temporaryDirectory("netchange-node-");
+        // Learns the default interface names; only the library reports them to the nodes.
         LinkedBlockingQueue<String> names = new LinkedBlockingQueue<>();
         ConnectivityManager.NetworkCallback callback = new ConnectivityManager.NetworkCallback() {
             @Override
             public void onLinkPropertiesChanged(Network network, LinkProperties properties) {
                 String name = properties.getInterfaceName();
-                TailnetNode.setDefaultNetwork(properties);
                 names.add(name == null ? "" : name);
             }
-
-            @Override
-            public void onLost(Network network) {
-                TailnetNode.setDefaultNetwork(null);
-                names.add("");
-            }
         };
-        boolean registered = false;
+        connectivity.registerDefaultNetworkCallback(callback, new Handler(Looper.getMainLooper()));
         try {
-            assertEquals("ok", Probe.call("netchangeStart", directory));
-            connectivity.registerDefaultNetworkCallback(callback, new Handler(Looper.getMainLooper()));
-            registered = true;
             String wifi = nextName(names);
-            assertEquals("ok", Probe.call("netchangeAwait", wifi));
-
-            shell("svc wifi disable");
-            String other = wifi;
-            while (other.isEmpty() || other.equals(wifi)) {
-                other = nextName(names);
+            // Checks that, with no node running, Android netmon has no default route.
+            assertEquals("ok", Probe.call("netchangeStart", directory));
+            try (TailnetNode node = TailnetNode.start(LoginTest.CONTEXT, nodeDirectory.toFile(), "klethron-netchange",
+                    "http://127.0.0.1:1")) { // Unreachable: the node only follows the default network.
+                assertEquals("ok", Probe.call("netchangeAwait", wifi));
+                shell("svc wifi disable");
+                String other = wifi;
+                while (other.isEmpty() || other.equals(wifi)) {
+                    other = nextName(names);
+                }
+                assertEquals("ok", Probe.call("netchangeAwait", other));
             }
-            assertEquals("ok", Probe.call("netchangeAwait", other));
             Probe.call("netchangeStop");
             try (var files = Files.list(directory)) {
                 assertEquals("Nodes must not write node state", 0, files.count());
             }
         } finally {
-            if (registered) {
-                connectivity.unregisterNetworkCallback(callback);
-            }
+            connectivity.unregisterNetworkCallback(callback);
             // Release the probe first: it holds the lock that other tailnet probes wait for.
             Probe.call("netchangeStop");
-            TailnetNode.setDefaultNetwork(null);
             LoginTest.deleteDirectory(directory);
+            LoginTest.deleteDirectory(nodeDirectory);
             shell("svc wifi enable");
             // Leave the device as found; Wi-Fi reconnects asynchronously.
             boolean unused = awaitWifiDefault(connectivity); // Best effort: must not mask a test failure.

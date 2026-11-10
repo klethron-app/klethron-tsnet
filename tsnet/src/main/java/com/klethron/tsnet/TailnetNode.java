@@ -1,10 +1,11 @@
 package com.klethron.tsnet;
 
-import android.Manifest;
+import android.content.Context;
+import android.net.ConnectivityManager;
 import android.net.LinkProperties;
+import android.net.Network;
 import android.os.ParcelFileDescriptor;
 import androidx.annotation.AnyThread;
-import androidx.annotation.RequiresPermission;
 import androidx.annotation.WorkerThread;
 import java.io.File;
 import java.io.IOException;
@@ -17,6 +18,7 @@ import java.nio.ByteBuffer;
 import java.nio.channels.ClosedChannelException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.jspecify.annotations.Nullable;
 
 /// An embedded tsnet node: one device in a [tailnet](https://tailscale.com/kb/1136/tailnet), with
@@ -24,17 +26,38 @@ import org.jspecify.annotations.Nullable;
 /// network stack and does not route the Android device's traffic.
 ///
 /// [Start][#start] a node, follow [#awaitStatus] until it is [NodeStatus.State#RUNNING] without a
-/// [NodeStatus#loginUrl()], then [#dial]. Report network changes through [#setDefaultNetwork].
-/// Methods are thread-safe; `@WorkerThread` methods block. Closing the node ends its connections
-/// and cancels blocked calls, which then throw [ClosedChannelException]. Zero or negative timeouts
-/// do not wait: [#awaitStatus] returns at once, [#dial] and [#logout] time out at once. The first
-/// use of this class in a process loads its native library.
+/// [NodeStatus#loginUrl()], then [#dial]. Running nodes follow the device's default network to
+/// reconnect after Wi-Fi or cellular changes; while another app's VPN is active, that network is the
+/// VPN, which hides such changes. Methods are thread-safe; `@WorkerThread` methods block. Closing the
+/// node ends its connections and cancels blocked calls, which then throw [ClosedChannelException].
+/// Zero or negative timeouts do not wait: [#awaitStatus] returns at once, [#dial] and [#logout]
+/// time out at once. The first use of this class in a process loads its native library.
 public final class TailnetNode implements AutoCloseable {
     static {
         System.loadLibrary("klethron_tsnet");
     }
 
+    /// Reports the default network to all nodes in this process; registered while any node runs.
+    private static final ConnectivityManager.NetworkCallback DEFAULT_NETWORK = new ConnectivityManager.NetworkCallback() {
+        @Override
+        public void onLinkPropertiesChanged(Network network, LinkProperties properties) {
+            String name = properties.getInterfaceName();
+            int gateway = properties.getRoutes().stream()
+                    .filter(route -> route.isDefaultRoute() && route.hasGateway() && route.getGateway() instanceof Inet4Address)
+                    .mapToInt(route -> ByteBuffer.wrap(route.getGateway().getAddress()).getInt()).findFirst().orElse(0);
+            nativeSetDefaultNetwork(name == null ? new byte[0] : name.getBytes(StandardCharsets.UTF_8), gateway);
+        }
+
+        @Override
+        public void onLost(Network network) {
+            nativeSetDefaultNetwork(new byte[0], 0);
+        }
+    };
+    private static int running; // Guarded by DEFAULT_NETWORK, as is connectivity.
+    private static @Nullable ConnectivityManager connectivity;
+
     private final long handle;
+    private final AtomicBoolean closed = new AtomicBoolean();
 
     private TailnetNode(long handle) {
         this.handle = handle;
@@ -42,30 +65,51 @@ public final class TailnetNode implements AutoCloseable {
 
     /// Starts a node that connects to Tailscale, restoring a saved login or requesting browser
     /// authorization. Returns after local initialization; [#awaitStatus] reports progress and the
-    /// login URL.
+    /// login URL. The `context` gives access to [ConnectivityManager].
     ///
     /// The directory stores this node's private keys. Give each node its own directory under
-    /// [android.content.Context#getNoBackupFilesDir()]; it is created if missing. Starting again with
-    /// it after [#close] restores the same identity. Never back up or share its contents.
+    /// [Context#getNoBackupFilesDir()]; it is created if missing. Starting again with it after
+    /// [#close] restores the same identity. Never back up or share its contents.
     ///
     /// @param hostname the requested device name; Tailscale may adjust it
     /// @throws IllegalArgumentException if the directory is relative or the hostname is empty or contains NUL
     /// @throws IOException if initialization fails
     @WorkerThread
-    @RequiresPermission(Manifest.permission.INTERNET)
-    public static TailnetNode start(File stateDirectory, String hostname) throws IOException {
-        return start(stateDirectory, hostname, "");
+    public static TailnetNode start(Context context, File stateDirectory, String hostname) throws IOException {
+        return start(context, stateDirectory, hostname, "");
     }
 
-    /// As [#start(File, String)], with an alternative control server URL for tests.
-    static TailnetNode start(File stateDirectory, String hostname, String controlUrl) throws IOException {
+    /// As [#start(Context, File, String)], with an alternative control server URL for tests.
+    static TailnetNode start(Context context, File stateDirectory, String hostname, String controlUrl) throws IOException {
         if (!stateDirectory.isAbsolute() || hostname.isEmpty()) {
             throw new IllegalArgumentException("State directory must be absolute and hostname non-empty");
         }
         String config = stateDirectory.getPath() + '\0' + hostname + '\0' + controlUrl;
-        long handle = nativeStart(config.getBytes(StandardCharsets.UTF_8));
+        synchronized (DEFAULT_NETWORK) {
+            if (running == 0) {
+                // Reports the current default network at once, on a framework thread.
+                connectivity = context.getApplicationContext().getSystemService(ConnectivityManager.class);
+                connectivity.registerDefaultNetworkCallback(DEFAULT_NETWORK);
+            }
+            running++;
+        }
+        long handle = -1;
+        try {
+            handle = nativeStart(config.getBytes(StandardCharsets.UTF_8));
+        } finally {
+            if (handle < 0) stopFollowingDefaultNetwork();
+        }
         check(handle);
         return new TailnetNode(handle);
+    }
+
+    private static void stopFollowingDefaultNetwork() {
+        synchronized (DEFAULT_NETWORK) {
+            if (--running == 0 && connectivity != null) {
+                connectivity.unregisterNetworkCallback(DEFAULT_NETWORK);
+                nativeSetDefaultNetwork(new byte[0], 0); // Unknown until the next start reports it.
+            }
+        }
     }
 
     /// Waits for a status change, returning the latest snapshot when it changes or `timeout` elapses.
@@ -149,22 +193,6 @@ public final class TailnetNode implements AutoCloseable {
         return nativeTailscaleVersion();
     }
 
-    /// Reports the default network to all nodes in this process, so they can reconnect after changes.
-    /// Forward [android.net.ConnectivityManager.NetworkCallback#onLinkPropertiesChanged] from
-    /// [android.net.ConnectivityManager#registerDefaultNetworkCallback], and pass `null` on
-    /// [android.net.ConnectivityManager.NetworkCallback#onLost]. Keep the callback registered while
-    /// nodes are in use. While another app's VPN is active, the default network is that VPN, which
-    /// hides Wi-Fi and cellular changes.
-    @AnyThread
-    public static void setDefaultNetwork(@Nullable LinkProperties properties) {
-        String name = properties == null ? null : properties.getInterfaceName();
-        byte[] encoded = name == null ? new byte[0] : name.getBytes(StandardCharsets.UTF_8);
-        int gateway = properties == null ? 0 : properties.getRoutes().stream()
-                .filter(route -> route.isDefaultRoute() && route.hasGateway() && route.getGateway() instanceof Inet4Address)
-                .mapToInt(route -> ByteBuffer.wrap(route.getGateway().getAddress()).getInt()).findFirst().orElse(0);
-        nativeSetDefaultNetwork(encoded, gateway);
-    }
-
     /// Disconnects this node and closes its connections, keeping its saved identity for the next
     /// [#start]. Waits for shutdown; pending calls throw [ClosedChannelException]. Repeated or
     /// concurrent calls are safe.
@@ -172,6 +200,7 @@ public final class TailnetNode implements AutoCloseable {
     @Override
     public void close() {
         nativeClose(handle);
+        if (!closed.getAndSet(true)) stopFollowingDefaultNetwork();
     }
 
     /// Maps node.go's negative results to exceptions.

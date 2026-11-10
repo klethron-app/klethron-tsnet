@@ -1,6 +1,4 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <uses-permission android:name="android.permission.INTERNET" />
-    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <application android:label="Klethron tsnet demo" android:allowBackup="false"
         android:supportsRtl="true" android:theme="@android:style/Theme.Material.Light.NoActionBar">
         <!-- One instance owns the state directory. Recreation would close the node, losing a pending login:

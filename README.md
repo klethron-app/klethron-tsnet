@@ -31,12 +31,7 @@ android {
 }
 ```
 
-Declare these permissions in your app's manifest:
-
-```xml
-<uses-permission android:name="android.permission.INTERNET" />
-<uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
-```
+The library's manifest adds the `INTERNET` and `ACCESS_NETWORK_STATE` permissions to your app.
 
 ## Connect
 
@@ -47,7 +42,7 @@ it contains private keys and must never be logged, backed up or shared.
 
 ```java
 File directory = new File(context.getNoBackupFilesDir(), "tailscale");
-try (TailnetNode node = TailnetNode.start(directory, "my-device")) {
+try (TailnetNode node = TailnetNode.start(context, directory, "my-device")) {
     NodeStatus status = null;
     do {
         status = node.awaitStatus(status, Duration.ofSeconds(30));
@@ -81,29 +76,13 @@ caller. It reaches peers and subnet routes only. [`close`][close] ends its conne
 its identity. [`logout`][logout] ends tailnet access; [`login`][login] starts authorization again after
 logout or key expiry. The app decides how long to keep the node alive and whether to run a service.
 
-## Network changes
+## Network
 
-Forward changes of the default network with [`setDefaultNetwork`][setDefaultNetwork] so the node
-can reconnect after switching Wi-Fi or mobile networks. Register this callback after starting a node,
-which loads the native library off the main thread, and unregister it when finished:
-
-```java
-ConnectivityManager.NetworkCallback callback = new ConnectivityManager.NetworkCallback() {
-    @Override public void onLinkPropertiesChanged(Network network, LinkProperties properties) {
-        TailnetNode.setDefaultNetwork(properties);
-    }
-    @Override public void onLost(Network network) {
-        TailnetNode.setDefaultNetwork(null);
-    }
-};
-connectivityManager.registerDefaultNetworkCallback(callback, handler);
-```
-
-While another VPN app, such as Tailscale's, is active, the default network stays that VPN when Wi-Fi
-or cellular changes, so the node can keep using a dead control connection for minutes; see
-[known limitations](UPSTREAM.md#limits). Reports apply to all nodes in the process.
-Native TLS uses Android's system CA store, excluding disabled roots; user-added CAs and the app's
-network security configuration do not apply.
+Running nodes follow the device's default network, so they reconnect after switching Wi-Fi or mobile
+networks. While another VPN app, such as Tailscale's, is active, the default network stays that VPN
+when Wi-Fi or cellular changes, so a node can keep using a dead control connection for minutes; see
+[known limitations](UPSTREAM.md#limits). Native TLS uses Android's system CA store, excluding
+disabled roots; user-added CAs and the app's network security configuration do not apply.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) to build, test or use a checkout. Original code is
 [Apache-2.0 licensed](LICENSE); bundled dependencies retain their
@@ -116,4 +95,3 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) to build, test or use a checkout. Origina
 [close]: https://javadoc.io/doc/com.klethron/tsnet/latest/com/klethron/tsnet/TailnetNode.html#close()
 [logout]: https://javadoc.io/doc/com.klethron/tsnet/latest/com/klethron/tsnet/TailnetNode.html#logout(java.time.Duration)
 [login]: https://javadoc.io/doc/com.klethron/tsnet/latest/com/klethron/tsnet/TailnetNode.html#login()
-[setDefaultNetwork]: https://javadoc.io/doc/com.klethron/tsnet/latest/com/klethron/tsnet/TailnetNode.html#setDefaultNetwork(android.net.LinkProperties)

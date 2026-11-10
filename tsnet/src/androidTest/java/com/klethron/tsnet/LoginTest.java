@@ -6,6 +6,7 @@ import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
+import android.content.Context;
 import androidx.test.platform.app.InstrumentationRegistry;
 import com.google.errorprone.annotations.CanIgnoreReturnValue;
 import java.io.File;
@@ -32,6 +33,7 @@ import org.junit.Test;
  * interactive login. The test completes login in place of the user's browser.
  */
 public final class LoginTest {
+    static final Context CONTEXT = InstrumentationRegistry.getInstrumentation().getTargetContext();
     private static final Duration WAIT = Duration.ofSeconds(30);
 
     private String controlUrl;
@@ -53,7 +55,7 @@ public final class LoginTest {
     @Test(timeout = 90000)
     public void logsInInteractivelyAndResumesFromState() throws Exception {
         List<InetAddress> addresses;
-        try (TailnetNode node = TailnetNode.start(directory.toFile(), "klethron-login-test", controlUrl)) {
+        try (TailnetNode node = TailnetNode.start(CONTEXT, directory.toFile(), "klethron-login-test", controlUrl)) {
             NodeStatus status = await(node, s -> s.loginUrl() != null);
             assertEquals(NodeStatus.State.NEEDS_LOGIN, status.state());
             assertNull(status.revocation());
@@ -75,7 +77,7 @@ public final class LoginTest {
         assertOnlyStateFile();
 
         // The persisted identity resumes without another login.
-        try (TailnetNode node = TailnetNode.start(directory.toFile(), "klethron-login-test", controlUrl)) {
+        try (TailnetNode node = TailnetNode.start(CONTEXT, directory.toFile(), "klethron-login-test", controlUrl)) {
             NodeStatus status = await(node, s -> {
                 assertNull("Resumed node asked to log in again", s.loginUrl());
                 return s.state() == NodeStatus.State.RUNNING;
@@ -88,7 +90,7 @@ public final class LoginTest {
     @Test(timeout = 120000)
     public void logoutRequiresANewLogin() throws Exception {
         String firstUrl;
-        try (TailnetNode node = TailnetNode.start(directory.toFile(), "klethron-logout-test", controlUrl)) {
+        try (TailnetNode node = TailnetNode.start(CONTEXT, directory.toFile(), "klethron-logout-test", controlUrl)) {
             NodeStatus status = await(node, s -> s.loginUrl() != null);
             firstUrl = status.loginUrl();
             node.logout(WAIT); // Not logged in: no effect.
@@ -128,7 +130,7 @@ public final class LoginTest {
         assertOnlyStateFile();
 
         // The logout persists: the directory no longer resumes, and a new login is offered.
-        try (TailnetNode node = TailnetNode.start(directory.toFile(), "klethron-logout-test", controlUrl)) {
+        try (TailnetNode node = TailnetNode.start(CONTEXT, directory.toFile(), "klethron-logout-test", controlUrl)) {
             NodeStatus status = await(node, s -> {
                 assertTrue("Logged-out node resumed", s.state() != NodeStatus.State.RUNNING);
                 return s.loginUrl() != null;
@@ -146,7 +148,7 @@ public final class LoginTest {
     @Test(timeout = 120000)
     public void failedLogoutKeepsTheLoginForRetries() throws Exception {
         List<InetAddress> addresses;
-        try (TailnetNode node = TailnetNode.start(directory.toFile(), "klethron-logout-failure-test", controlUrl)) {
+        try (TailnetNode node = TailnetNode.start(CONTEXT, directory.toFile(), "klethron-logout-failure-test", controlUrl)) {
             NodeStatus status = await(node, s -> s.loginUrl() != null);
             complete(status);
             addresses = await(node, s -> s.state() == NodeStatus.State.RUNNING).addresses();
@@ -162,7 +164,7 @@ public final class LoginTest {
         // The login persisted: a new node resumes it. Once control accepts, the same node that
         // failed to log out retries successfully.
         Probe.call("rejectRegistrations", false);
-        try (TailnetNode node = TailnetNode.start(directory.toFile(), "klethron-logout-failure-test", controlUrl)) {
+        try (TailnetNode node = TailnetNode.start(CONTEXT, directory.toFile(), "klethron-logout-failure-test", controlUrl)) {
             NodeStatus status = await(node, s -> {
                 assertNull("Node asked to log in again", s.loginUrl());
                 return s.state() == NodeStatus.State.RUNNING;
@@ -182,7 +184,7 @@ public final class LoginTest {
     @Test(timeout = 120000)
     public void expiredKeyRequiresANewLogin() throws Exception {
         List<InetAddress> addresses;
-        try (TailnetNode node = TailnetNode.start(directory.toFile(), "klethron-expiry-test", controlUrl)) {
+        try (TailnetNode node = TailnetNode.start(CONTEXT, directory.toFile(), "klethron-expiry-test", controlUrl)) {
             NodeStatus status = await(node, s -> s.loginUrl() != null);
             complete(status);
             addresses = await(node, s -> s.state() == NodeStatus.State.RUNNING).addresses();
@@ -230,7 +232,7 @@ public final class LoginTest {
         assertOnlyStateFile();
 
         // The new key persisted.
-        try (TailnetNode node = TailnetNode.start(directory.toFile(), "klethron-expiry-test", controlUrl)) {
+        try (TailnetNode node = TailnetNode.start(CONTEXT, directory.toFile(), "klethron-expiry-test", controlUrl)) {
             NodeStatus status = await(node, s -> {
                 assertNull("Node asked to log in again", s.loginUrl());
                 return s.state() == NodeStatus.State.RUNNING;
@@ -241,14 +243,14 @@ public final class LoginTest {
 
     @Test(timeout = 120000)
     public void removedNodeRequiresANewLogin() throws Exception {
-        try (TailnetNode node = TailnetNode.start(directory.toFile(), "klethron-removal-test", controlUrl)) {
+        try (TailnetNode node = TailnetNode.start(CONTEXT, directory.toFile(), "klethron-removal-test", controlUrl)) {
             NodeStatus status = await(node, s -> s.loginUrl() != null);
             complete(status);
             await(node, s -> s.state() == NodeStatus.State.RUNNING);
         }
         // testcontrol keeps streaming to a running node, so it notices at its next start.
         Probe.call("remove", true);
-        try (TailnetNode node = TailnetNode.start(directory.toFile(), "klethron-removal-test", controlUrl)) {
+        try (TailnetNode node = TailnetNode.start(CONTEXT, directory.toFile(), "klethron-removal-test", controlUrl)) {
             NodeStatus status = await(node, s -> s.state() == NodeStatus.State.NEEDS_LOGIN);
             assertEquals(NodeStatus.Revocation.NODE_REMOVED, status.revocation());
             assertNull(status.loginUrl());
@@ -269,7 +271,7 @@ public final class LoginTest {
     @Test(timeout = 90000)
     public void rejectedLoginReportsAnErrorUntilRunning() throws Exception {
         Probe.call("rejectRegistrations", true);
-        try (TailnetNode node = TailnetNode.start(directory.toFile(), "klethron-rejection-test", controlUrl)) {
+        try (TailnetNode node = TailnetNode.start(CONTEXT, directory.toFile(), "klethron-rejection-test", controlUrl)) {
             NodeStatus status = await(node, s -> s.error() != null);
             assertEquals("invalid authkey", status.error()); // testcontrol's text.
             assertEquals(NodeStatus.State.NEEDS_LOGIN, status.state());
@@ -290,7 +292,7 @@ public final class LoginTest {
     @Test(timeout = 90000)
     public void deviceApprovalFollowsLogin() throws Exception {
         Probe.call("requireMachineAuth");
-        try (TailnetNode node = TailnetNode.start(directory.toFile(), "klethron-approval-test", controlUrl)) {
+        try (TailnetNode node = TailnetNode.start(CONTEXT, directory.toFile(), "klethron-approval-test", controlUrl)) {
             NodeStatus status = await(node, s -> s.loginUrl() != null);
             complete(status);
             status = await(node, s -> s.state() == NodeStatus.State.NEEDS_MACHINE_AUTH);
@@ -304,7 +306,7 @@ public final class LoginTest {
 
     @Test(timeout = 60000)
     public void closeWakesWaitersAndRejectsLaterCalls() throws Exception {
-        try (TailnetNode node = TailnetNode.start(directory.toFile(), "klethron-close-test", controlUrl)) {
+        try (TailnetNode node = TailnetNode.start(CONTEXT, directory.toFile(), "klethron-close-test", controlUrl)) {
             NodeStatus status = await(node, s -> s.loginUrl() != null);
             CompletableFuture<Throwable> waiter = CompletableFuture.supplyAsync(() ->
                     assertThrows(ClosedChannelException.class, () -> node.awaitStatus(status, Duration.ofMinutes(5))));
@@ -319,20 +321,20 @@ public final class LoginTest {
 
     @Test(timeout = 30000)
     public void refusesInvalidConfigurationAndEnvironmentAuthKeys() throws Exception {
-        assertThrows(IllegalArgumentException.class, () -> TailnetNode.start(new File("relative"), "host"));
-        assertThrows(IllegalArgumentException.class, () -> TailnetNode.start(directory.toFile(), ""));
-        assertThrows(IllegalArgumentException.class, () -> TailnetNode.start(directory.toFile(), "a\0b", controlUrl));
+        assertThrows(IllegalArgumentException.class, () -> TailnetNode.start(CONTEXT, new File("relative"), "host"));
+        assertThrows(IllegalArgumentException.class, () -> TailnetNode.start(CONTEXT, directory.toFile(), ""));
+        assertThrows(IllegalArgumentException.class, () -> TailnetNode.start(CONTEXT, directory.toFile(), "a\0b", controlUrl));
         Probe.call("setAuthKeyEnvironment", true);
         try {
-            IOException e = assertThrows(IOException.class, () -> TailnetNode.start(directory.toFile(), "host", controlUrl));
+            IOException e = assertThrows(IOException.class, () -> TailnetNode.start(CONTEXT, directory.toFile(), "host", controlUrl));
             assertTrue(e.getMessage().contains("TS_AUTHKEY"));
         } finally {
             Probe.call("setAuthKeyEnvironment", false);
         }
         Path file = Files.createFile(directory.getParent().resolve("not-a-directory"));
-        assertThrows(IOException.class, () -> TailnetNode.start(file.toFile(), "host", controlUrl));
+        assertThrows(IOException.class, () -> TailnetNode.start(CONTEXT, file.toFile(), "host", controlUrl));
         // Refusals leave no node behind that holds the directory.
-        TailnetNode.start(directory.toFile(), "klethron-refusal-test", controlUrl).close();
+        TailnetNode.start(CONTEXT, directory.toFile(), "klethron-refusal-test", controlUrl).close();
     }
 
     @CanIgnoreReturnValue
@@ -352,8 +354,7 @@ public final class LoginTest {
     }
 
     static Path temporaryDirectory(String prefix) throws Exception {
-        return Files.createTempDirectory(InstrumentationRegistry.getInstrumentation()
-                .getTargetContext().getNoBackupFilesDir().toPath(), prefix);
+        return Files.createTempDirectory(CONTEXT.getNoBackupFilesDir().toPath(), prefix);
     }
 
     static void deleteDirectory(Path directory) throws Exception {

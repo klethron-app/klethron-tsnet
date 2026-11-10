@@ -4,9 +4,6 @@ import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.ActivityNotFoundException;
 import android.content.Intent;
-import android.net.ConnectivityManager;
-import android.net.LinkProperties;
-import android.net.Network;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
@@ -54,20 +51,6 @@ public final class LiveActivity extends Activity {
     private boolean busy;
     private boolean started;
 
-    private final ConnectivityManager.NetworkCallback networkCallback = new ConnectivityManager.NetworkCallback() {
-        @MainThread // Registered with the main-looper handler `ui`.
-        @Override
-        public void onLinkPropertiesChanged(Network network, LinkProperties properties) {
-            TailnetNode.setDefaultNetwork(properties);
-        }
-
-        @MainThread
-        @Override
-        public void onLost(Network network) {
-            TailnetNode.setDefaultNetwork(null);
-        }
-    };
-
     @MainThread
     @Override
     public void onCreate(@Nullable Bundle savedState) {
@@ -108,11 +91,10 @@ public final class LiveActivity extends Activity {
         WORKER.execute(() -> {
             if (destroyed) return;
             try {
-                TailnetNode current = TailnetNode.start(new File(getNoBackupFilesDir(), "tailnet"), "klethron-tsnet-demo");
+                TailnetNode current = TailnetNode.start(this, new File(getNoBackupFilesDir(), "tailnet"), "klethron-tsnet-demo");
                 node = current;
                 ui.post(() -> {
                     if (destroyed) return;
-                    getSystemService(ConnectivityManager.class).registerDefaultNetworkCallback(networkCallback, ui);
                     started = true;
                     busy = false;
                     render();
@@ -280,8 +262,6 @@ public final class LiveActivity extends Activity {
     @Override
     public void onDestroy() {
         destroyed = true;
-        // Not reporting a null network: that would apply to another instance's node too.
-        if (started) getSystemService(ConnectivityManager.class).unregisterNetworkCallback(networkCallback);
         WORKER.execute(() -> {
             closeHeld();
             if (node != null) node.close();

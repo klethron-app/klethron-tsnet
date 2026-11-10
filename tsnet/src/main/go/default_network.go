@@ -19,8 +19,9 @@ var (
 	monitors   = make(map[*netmon.Monitor]struct{})
 )
 
-// Upstream netmon cannot discover Android's default route; the host app reports it instead.
-// The interface name and IPv4 gateway are process-global upstream, so this updates every node.
+// Upstream netmon cannot discover Android's default route; TailnetNode's network callback reports
+// it instead. The interface name and IPv4 gateway are process-global upstream, so this updates
+// every node.
 //
 //export klethron_set_default_network
 func klethron_set_default_network(name *C.char, length C.int, gateway C.uint32_t) {
