@@ -17,29 +17,36 @@ import org.junit.Test;
 public final class NetworkInterfacesTest {
     @Test
     public void nativeInterfacesMatchAndroidWhereGoDiscoveryIsDenied() throws Exception {
-        JSONObject report = new JSONObject(Probe.call("interfaces"));
-        assertEquals("", report.getString("Error"));
-        // A negative control, independent of the registered getter. Needs SELinux Enforcing.
-        assertTrue(report.getString("GoError"), report.getString("GoError").contains("permission denied"));
-        Set<String> actual = new TreeSet<>();
-        JSONArray interfaces = report.getJSONArray("Interfaces");
-        for (int i = 0; i < interfaces.length(); i++) {
-            actual.add(interfaces.getString(i));
-        }
-        Set<String> expected = new TreeSet<>();
+        Set<String> expected = Set.of();
+        Set<String> actual = null;
         boolean hasIPv4 = false;
         boolean hasIPv6 = false;
-        for (NetworkInterface iface : Collections.list(NetworkInterface.getNetworkInterfaces())) {
-            for (InterfaceAddress address : iface.getInterfaceAddresses()) {
-                byte[] ip = address.getAddress().getAddress();
-                hasIPv4 |= ip.length == 4;
-                hasIPv6 |= ip.length == 16;
-                expected.add(HexFormat.of().formatHex(iface.getName().getBytes(StandardCharsets.UTF_8))
-                        + "|" + iface.getIndex() + "|" + iface.getMTU()
-                        + "|" + iface.isUp() + "|" + iface.isLoopback()
-                        + "|" + iface.isPointToPoint() + "|" + iface.supportsMulticast()
-                        + "|" + HexFormat.of().formatHex(ip)
-                        + "/" + address.getNetworkPrefixLength());
+        // Retry: addresses can change between the snapshots, as when Wi-Fi reconnects after NetworkChangeTest.
+        for (int attempt = 0; attempt < 50 && !expected.equals(actual); attempt++) {
+            if (attempt > 0) Thread.sleep(100);
+            JSONObject report = new JSONObject(Probe.call("interfaces"));
+            assertEquals("", report.getString("Error"));
+            // A negative control, independent of the registered getter. Needs SELinux Enforcing.
+            assertTrue(report.getString("GoError"), report.getString("GoError").contains("permission denied"));
+            actual = new TreeSet<>();
+            JSONArray interfaces = report.getJSONArray("Interfaces");
+            for (int i = 0; i < interfaces.length(); i++) {
+                actual.add(interfaces.getString(i));
+            }
+            expected = new TreeSet<>();
+            hasIPv4 = hasIPv6 = false;
+            for (NetworkInterface iface : Collections.list(NetworkInterface.getNetworkInterfaces())) {
+                for (InterfaceAddress address : iface.getInterfaceAddresses()) {
+                    byte[] ip = address.getAddress().getAddress();
+                    hasIPv4 |= ip.length == 4;
+                    hasIPv6 |= ip.length == 16;
+                    expected.add(HexFormat.of().formatHex(iface.getName().getBytes(StandardCharsets.UTF_8))
+                            + "|" + iface.getIndex() + "|" + iface.getMTU()
+                            + "|" + iface.isUp() + "|" + iface.isLoopback()
+                            + "|" + iface.isPointToPoint() + "|" + iface.supportsMulticast()
+                            + "|" + HexFormat.of().formatHex(ip)
+                            + "/" + address.getNetworkPrefixLength());
+                }
             }
         }
         assertTrue("Expected IPv4 and IPv6 addresses", hasIPv4 && hasIPv6);
