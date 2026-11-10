@@ -2,7 +2,7 @@
 
 Upstream issues at Tailscale
 [`5b6c39b94d50`](https://github.com/tailscale/tailscale/commit/5b6c39b94d50beac39dd7302d6f75f14e281a01f)
-with Go 1.27.3. Recheck each entry on every update and drop fixes upstream has made.
+with Go 1.27.4. Recheck each entry on every update and drop fixes upstream has made.
 `BuildGoLibrary.kt` hash-checks the patch; `TAILSCALE-MODIFICATIONS` documents it.
 
 ## Patched
