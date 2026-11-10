@@ -97,11 +97,13 @@ with Go 1.27.4. Recheck each entry on every update and drop fixes upstream has m
 - **Another app's VPN.** Its network would be the default and hide Wi-Fi and cellular changes: a
   control connection dialled over lingering cellular then hung until the two-minute long-poll timeout
   (Pixel 11 Pro XL with the Tailscale app). Apps cannot read a VPN's underlying networks, so nodes
-  follow the best non-VPN network, which split tunnels such as Tailscale's leave their traffic on. With
-  a full-tunnel VPN, traffic uses the VPN while nodes follow the network below it; untested.
-- Live-tailnet coverage is still needed for default-network changes, 16 KiB devices, DERP-to-direct
-  upgrades, restrictive NATs, subnet routes, IPv6 peers, throughput, prolonged outages, scheduled key
-  expiry, revocation while stopped and Play split delivery.
+  follow the best non-VPN network, which split tunnels such as Tailscale's leave their traffic on. On
+  that Pixel with the Tailscale app, a direct path returned about 2 s after each of two Wi-Fi losses
+  and at once on reconnecting, and a held connection survived. With a full-tunnel VPN, traffic uses
+  the VPN while nodes follow the network below it; untested.
+- Live-tailnet coverage is still needed for network changes without another VPN, 16 KiB devices,
+  restrictive NATs, subnet routes, IPv6 peers, throughput, prolonged outages, scheduled key expiry,
+  revocation while stopped and Play split delivery.
 - **Names without a tailnet DNS route** fall back to the device's resolver when tailnet DNS fails
   (`tsnet` `dnsResolver.hostLookup`), so the name leaves the tailnet; `dial` still connects only to
   tailnet addresses. Upstream has no option to disable the fallback.

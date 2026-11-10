@@ -11,8 +11,9 @@ process. Each node has its own identity; it needs neither the Tailscale app nor 
 Requires **Android 14 (API 34)** or later. The AAR includes native libraries for **arm64-v8a** and
 **x86_64**, with 16 KiB page support. Consumers need no Go compiler or NDK.
 
-**Under development.** Login, persistent identity, TCP dialing, logout and revocation have been tested
-locally and on a real tailnet. Peer listing has been tested locally. Broader network and device coverage is still needed; see
+**Under development.** Login, persistent identity, TCP dialing, logout, revocation and Wi-Fi/cellular
+switches have been tested locally and on a real tailnet, including with the Tailscale app's VPN active.
+Peer listing has been tested locally. Broader network and device coverage is still needed; see
 [known limitations](UPSTREAM.md#limits). See the
 [Javadoc](https://javadoc.io/doc/com.klethron/tsnet/latest/) for the full API.
 
