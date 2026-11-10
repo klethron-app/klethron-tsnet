@@ -36,6 +36,7 @@ Declare these permissions in your app's manifest:
 ```xml
 <uses-permission android:name="android.permission.INTERNET" />
 <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+<uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
 ```
 
 ## Connect
@@ -95,13 +96,15 @@ ConnectivityManager.NetworkCallback callback = new ConnectivityManager.NetworkCa
         TailnetNode.setDefaultNetwork(null);
     }
 };
-connectivityManager.registerBestMatchingNetworkCallback(TailnetNode.PHYSICAL_NETWORK, callback, handler);
+connectivityManager.requestNetwork(TailnetNode.PHYSICAL_NETWORK, callback, handler);
 ```
 
 Use `PHYSICAL_NETWORK` rather than the default network: while another VPN app, such as Tailscale's,
 is active, the default network stays that VPN when Wi-Fi or cellular changes, and the node would keep
-using a dead control connection for minutes. Reports apply to all nodes in the process. Native TLS uses Android's system CA store, excluding
-disabled roots; user-added CAs and the app's network security configuration do not apply.
+using a dead control connection for minutes. Request it rather than register a best-matching callback,
+which Android can leave without a network after Wi-Fi loss. Reports apply to all nodes in the process.
+Native TLS uses Android's system CA store, excluding disabled roots; user-added CAs and the app's
+network security configuration do not apply.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) to build, test or use a checkout. Original code is
 [Apache-2.0 licensed](LICENSE); bundled dependencies retain their

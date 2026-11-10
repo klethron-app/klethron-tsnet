@@ -54,7 +54,7 @@ public final class NetworkChangeTest {
         boolean registered = false;
         try {
             assertEquals("ok", Probe.call("netchangeStart", directory));
-            connectivity.registerBestMatchingNetworkCallback(TailnetNode.PHYSICAL_NETWORK, callback,
+            connectivity.requestNetwork(TailnetNode.PHYSICAL_NETWORK, callback,
                     new Handler(Looper.getMainLooper()));
             registered = true;
             String wifi = nextName(names);

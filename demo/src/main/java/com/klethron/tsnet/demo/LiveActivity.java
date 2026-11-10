@@ -115,7 +115,7 @@ public final class LiveActivity extends Activity {
                 current.start(new File(getNoBackupFilesDir(), "tailnet"), "klethron-tsnet-demo");
                 ui.post(() -> {
                     if (destroyed) return;
-                    getSystemService(ConnectivityManager.class).registerBestMatchingNetworkCallback(
+                    getSystemService(ConnectivityManager.class).requestNetwork(
                             TailnetNode.PHYSICAL_NETWORK, networkCallback, ui);
                     registered = true;
                     started = true;

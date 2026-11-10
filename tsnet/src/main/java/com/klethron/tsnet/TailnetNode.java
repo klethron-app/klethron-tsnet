@@ -150,9 +150,9 @@ public final class TailnetNode implements AutoCloseable {
     }
 
     /// The network to report through [#setDefaultNetwork]: the best one with internet access that is
-    /// not a VPN. Register it with
-    /// [android.net.ConnectivityManager#registerBestMatchingNetworkCallback]. While another app's
-    /// VPN is active, the app's default network stays that VPN when Wi-Fi or cellular changes.
+    /// not a VPN. Request it with [android.net.ConnectivityManager#requestNetwork], which needs
+    /// `CHANGE_NETWORK_STATE`. While another app's VPN is active, the app's default network stays that
+    /// VPN when Wi-Fi or cellular changes. A best-matching callback can miss cellular after Wi-Fi loss.
     public static final NetworkRequest PHYSICAL_NETWORK = new NetworkRequest.Builder()
             .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
             .addCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)
