@@ -31,6 +31,7 @@ import (
 // for the network, and calls end when the node closes, so Close waits at most for local work.
 type node struct {
 	server *tsnet.Server
+	client *local.Client // Set once started successfully.
 
 	lifecycle sync.RWMutex // Held for reading by calls on a started node.
 	started   bool
@@ -87,18 +88,15 @@ func (n *node) start(config string) int {
 	if n.server.ControlURL == "" {
 		n.server.ControlURL = ipn.DefaultControlURL
 	}
-	if err := n.server.Start(); err != nil {
-		return resultStartFailed
-	}
-	client, err := n.server.LocalClient()
-	if err != nil {
+	var err error
+	if n.client, err = n.server.LocalClient(); err != nil { // Starts the server.
 		return resultStartFailed
 	}
 	ctx, cancel := context.WithCancel(n.ctx)
 	watching := make(chan struct{})
 	go func() {
 		defer close(watching)
-		n.watchStatus(ctx, client)
+		n.watchStatus(ctx)
 	}()
 	unwatch := watchDefaultNetwork(n.server)
 	n.stop = func() {
@@ -124,15 +122,15 @@ func (n *node) close() {
 // watchStatus follows the IPN bus until ctx ends. A new watch starts with the current state, self
 // node and peers, so re-watching after an unexpected disconnect (such as falling behind) loses nothing
 // needed. Peer changes include online changes, as full nodes.
-func (n *node) watchStatus(ctx context.Context, client *local.Client) {
+func (n *node) watchStatus(ctx context.Context) {
 	for ctx.Err() == nil {
-		if watcher, err := client.WatchIPNBus(ctx, ipn.NotifyInitialState|ipn.NotifyInitialStatus|ipn.NotifyPeerChanges); err == nil {
+		if watcher, err := n.client.WatchIPNBus(ctx, ipn.NotifyInitialState|ipn.NotifyInitialStatus|ipn.NotifyPeerChanges); err == nil {
 			for {
 				notify, err := watcher.Next()
 				if err != nil {
 					break
 				}
-				n.publish(notify, peerLines(ctx, client, &notify))
+				n.publish(notify, peerLines(ctx, n.client, &notify))
 			}
 			watcher.Close()
 		}
@@ -399,11 +397,7 @@ func (n *node) logout(timeout time.Duration) int {
 		return result
 	}
 	defer done()
-	client, err := n.server.LocalClient()
-	if err != nil {
-		return n.failed(ctx, resultLogoutFailed)
-	}
-	if err := client.Logout(ctx); err != nil {
+	if err := n.client.Logout(ctx); err != nil {
 		return n.failed(ctx, resultLogoutFailed)
 	}
 	return 0
@@ -417,11 +411,7 @@ func (n *node) login() int {
 		return result
 	}
 	defer done()
-	client, err := n.server.LocalClient()
-	if err != nil {
-		return n.failed(ctx, resultLoginFailed)
-	}
-	current, err := client.GetPrefs(ctx)
+	current, err := n.client.GetPrefs(ctx)
 	if err != nil {
 		return n.failed(ctx, resultLoginFailed)
 	}
@@ -433,11 +423,11 @@ func (n *node) login() int {
 		current.Hostname != n.server.Hostname {
 		prefs := ipn.NewPrefs()
 		prefs.Hostname, prefs.ControlURL, prefs.WantRunning = n.server.Hostname, n.server.ControlURL, true
-		if err := client.Start(ctx, ipn.Options{UpdatePrefs: prefs}); err != nil {
+		if err := n.client.Start(ctx, ipn.Options{UpdatePrefs: prefs}); err != nil {
 			return n.failed(ctx, resultLoginFailed)
 		}
 	}
-	if err := client.StartLoginInteractive(ctx); err != nil {
+	if err := n.client.StartLoginInteractive(ctx); err != nil {
 		return n.failed(ctx, resultLoginFailed)
 	}
 	return 0
