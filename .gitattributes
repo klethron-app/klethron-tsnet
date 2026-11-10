@@ -2,5 +2,5 @@
 gradlew text eol=lf
 gradlew.bat text eol=crlf
 
-# Keep upstream notice text verbatim, including terminal blank lines.
-tsnet/src/main/assets/klethron-tsnet/licenses/** -text whitespace=-blank-at-eof
+# Keep upstream notice text verbatim, including trailing whitespace.
+tsnet/src/*/assets/klethron-tsnet/licenses/** -text -whitespace
