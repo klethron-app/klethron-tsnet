@@ -109,10 +109,17 @@ func (n *node) close() {
 	_ = n.server.Close()
 }
 
-// watchStatus follows the IPN bus until ctx ends. A new watch starts with the current state, self
-// node and peers, so re-watching after an unexpected disconnect (such as falling behind) loses nothing
-// needed. Peer changes include online changes, as full nodes.
+// watchStatus follows the IPN bus until ctx ends. A new watch starts with the current state and
+// self node, so re-watching after an unexpected disconnect (such as falling behind) loses nothing
+// needed. Peer changes, which include online changes, signal refreshPeers instead of reading the
+// status here, so slow reads in large tailnets cannot make the watch fall behind.
 func (n *node) watchStatus(ctx context.Context) {
+	refresh, refreshed := make(chan struct{}, 1), make(chan struct{})
+	go func() {
+		defer close(refreshed)
+		n.refreshPeers(ctx, refresh)
+	}()
+	defer func() { <-refreshed }()
 	for ctx.Err() == nil {
 		if watcher, err := n.client.WatchIPNBus(ctx, ipn.NotifyInitialState|ipn.NotifyInitialStatus|ipn.NotifyPeerChanges); err == nil {
 			for {
@@ -120,7 +127,13 @@ func (n *node) watchStatus(ctx context.Context) {
 				if err != nil {
 					break
 				}
-				n.publish(notify, peerLines(ctx, n.client, &notify))
+				n.publish(notify, nil)
+				if notify.InitialStatus != nil || notify.State != nil || len(notify.PeersChanged)+len(notify.PeersRemoved) > 0 {
+					select {
+					case refresh <- struct{}{}:
+					default: // A refresh is pending, and will read this change.
+					}
+				}
 			}
 			watcher.Close()
 		}
@@ -131,20 +144,24 @@ func (n *node) watchStatus(ctx context.Context) {
 	}
 }
 
-// peerLines returns the record's peer lines when notify may change them, or nil to keep the
-// published ones. Upstream builds the status from its network map, which a logout clears, so
-// rather than apply the notified changes, read the status after each change.
-func peerLines(ctx context.Context, client *local.Client, notify *ipn.Notify) *string {
-	status := notify.InitialStatus
-	if status == nil {
-		if notify.State == nil && len(notify.PeersChanged) == 0 && len(notify.PeersRemoved) == 0 {
-			return nil
+// refreshPeers publishes the peers after each signal on refresh until ctx ends. Upstream builds the
+// status from its network map, which a logout clears, so rather than apply the notified changes,
+// it reads the status.
+func (n *node) refreshPeers(ctx context.Context, refresh <-chan struct{}) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-refresh:
 		}
-		var err error
-		if status, err = client.Status(ctx); err != nil {
-			return nil
+		if status, err := n.client.Status(ctx); err == nil {
+			n.publish(ipn.Notify{}, peerLines(status))
 		}
 	}
+}
+
+// peerLines returns the record's peer lines.
+func peerLines(status *ipnstate.Status) *string {
 	var lines []string
 	for _, peer := range status.Peer {
 		if line := peerLine(peer); line != "" {

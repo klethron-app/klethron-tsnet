@@ -114,7 +114,8 @@ public final class DialTest {
             assertEquals(List.of(other, online), LoginTest.await(node, s -> s.peers().size() > 1).peers());
 
             node.logout(WAIT);
-            assertEquals(List.of(), LoginTest.await(node, s -> s.state() == NodeStatus.State.NEEDS_LOGIN).peers());
+            // The peers clear after the state changes.
+            LoginTest.await(node, s -> s.state() == NodeStatus.State.NEEDS_LOGIN && s.peers().isEmpty());
         }
     }
 
