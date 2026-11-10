@@ -52,21 +52,13 @@ func klethron_node_create() C.longlong {
 	return C.longlong(nodes.last)
 }
 
-// Results of klethron_node_start; TailnetNode.start maps them to exceptions.
-const (
-	startOK = iota
-	startClosed
-	startRepeated
-	startInvalid
-	startAuthEnvironment
-	startFailed
-)
-
+// klethron_node_start returns 0 or a negative failure result.
+//
 //export klethron_node_start
 func klethron_node_start(id C.longlong, config *C.char, length C.int) C.int {
 	n := lookupNode(id)
 	if n == nil {
-		return startClosed
+		return resultClosed
 	}
 	return C.int(n.start(C.GoStringN(config, length)))
 }

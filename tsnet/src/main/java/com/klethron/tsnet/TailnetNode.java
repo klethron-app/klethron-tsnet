@@ -65,14 +65,7 @@ public final class TailnetNode implements AutoCloseable {
             throw new IllegalArgumentException("State directory must be absolute and hostname non-empty");
         }
         String config = stateDirectory.getPath() + '\0' + hostname + '\0' + controlUrl;
-        switch (nativeStart(handle, config.getBytes(StandardCharsets.UTF_8))) {
-            case 0 -> { }
-            case 1 -> throw new IllegalStateException("Node is closed");
-            case 2 -> throw new IllegalStateException("Node was already started");
-            case 3 -> throw new IllegalArgumentException("Invalid node configuration");
-            case 4 -> throw new IOException("TS_AUTHKEY or TS_AUTH_KEY is set in the process environment");
-            default -> throw new IOException("Node failed to start");
-        }
+        check(nativeStart(handle, config.getBytes(StandardCharsets.UTF_8)));
     }
 
     /// Waits for a status change, returning the latest snapshot when it changes or `timeout` elapses.
@@ -203,13 +196,16 @@ public final class TailnetNode implements AutoCloseable {
         switch (result) {
             case -1 -> throw new IllegalStateException("Node is closed");
             case -2 -> throw new IllegalStateException("Node is not started");
-            case -3 -> throw new IllegalArgumentException("Invalid host");
+            case -3 -> throw new IllegalArgumentException("Invalid argument");
             case -4 -> throw new UnknownHostException("Tailnet DNS cannot resolve the host");
             case -5 -> throw new NoRouteToHostException("Address is not reachable through the tailnet");
             case -6 -> throw new SocketTimeoutException("Timed out");
             case -7 -> throw new ConnectException("Tailnet connection failed");
             case -8 -> throw new IOException("Logout failed");
             case -9 -> throw new IOException("Login failed");
+            case -10 -> throw new IllegalStateException("Node was already started");
+            case -11 -> throw new IOException("TS_AUTHKEY or TS_AUTH_KEY is set in the process environment");
+            case -12 -> throw new IOException("Node failed to start");
             default -> {
                 if (result < 0) throw new IOException("Native failure " + result);
             }

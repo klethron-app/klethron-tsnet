@@ -68,19 +68,19 @@ func (n *node) start(config string) int {
 	n.lifecycle.Lock()
 	defer n.lifecycle.Unlock()
 	if n.ctx.Err() != nil {
-		return startClosed
+		return resultClosed
 	}
 	if n.started {
-		return startRepeated
+		return resultStarted
 	}
 	fields := strings.Split(config, "\x00")
 	if len(fields) != 3 || !utf8.ValidString(config) || !filepath.IsAbs(fields[0]) || fields[1] == "" {
-		return startInvalid
+		return resultInvalid
 	}
 	// tsnet reads an auth key from the environment when none is configured. This library only
 	// supports interactive login, so refuse rather than silently use a host-process credential.
 	if os.Getenv("TS_AUTHKEY") != "" || os.Getenv("TS_AUTH_KEY") != "" {
-		return startAuthEnvironment
+		return resultAuthEnvironment
 	}
 	n.started = true // A failed upstream Start cannot be retried.
 	n.server.Dir, n.server.Hostname, n.server.ControlURL = fields[0], fields[1], fields[2]
@@ -88,11 +88,11 @@ func (n *node) start(config string) int {
 		n.server.ControlURL = ipn.DefaultControlURL
 	}
 	if err := n.server.Start(); err != nil {
-		return startFailed
+		return resultStartFailed
 	}
 	client, err := n.server.LocalClient()
 	if err != nil {
-		return startFailed
+		return resultStartFailed
 	}
 	ctx, cancel := context.WithCancel(n.ctx)
 	watching := make(chan struct{})
@@ -106,7 +106,7 @@ func (n *node) start(config string) int {
 		cancel()
 		<-watching
 	}
-	return startOK
+	return 0
 }
 
 // close wakes waiters and cancels dials. Closing the server ends relayed connections.
@@ -315,8 +315,8 @@ func (n *node) await(after uint64, timeout time.Duration) (string, bool) {
 	}
 }
 
-// Failures of dial and logout, which otherwise return a file descriptor or 0; TailnetNode.check
-// maps them to exceptions.
+// Failures of calls that otherwise return a file descriptor or 0; TailnetNode.check maps them to
+// exceptions.
 const (
 	resultClosed = -1 - iota
 	resultNotStarted
@@ -327,6 +327,9 @@ const (
 	resultDialFailed
 	resultLogoutFailed
 	resultLoginFailed
+	resultStarted
+	resultAuthEnvironment
+	resultStartFailed
 )
 
 // whenStarted returns a context for a call on a started node, ending at the timeout or when the node
