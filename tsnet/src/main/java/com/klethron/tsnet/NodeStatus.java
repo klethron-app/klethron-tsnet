@@ -44,9 +44,14 @@ public final class NodeStatus {
     ///     or `android`, or empty if unknown
     /// @param online whether Tailscale reports the device as connected; `false` if unknown
     /// @param addresses the device's Tailscale IP addresses, IPv4 first
-    public record Peer(String dnsName, String os, boolean online, List<InetAddress> addresses) {
+    /// @param sshHostKeys the device's SSH host keys in OpenSSH public key format, such as
+    ///     `ssh-ed25519 AAAA…`, if it runs [Tailscale SSH](https://tailscale.com/kb/1193/tailscale-ssh);
+    ///     otherwise empty. Tailscale's control server distributes them: accept them for [#dnsName()]
+    ///     and [#addresses()] instead of asking the user to trust an unknown key, as `tailscale ssh` does.
+    public record Peer(String dnsName, String os, boolean online, List<InetAddress> addresses, List<String> sshHostKeys) {
         public Peer {
             addresses = List.copyOf(addresses);
+            sshHostKeys = List.copyOf(sshHostKeys);
         }
     }
 
@@ -72,13 +77,15 @@ public final class NodeStatus {
     }
 
     /// Parses native "version\nSTATE\nREVOCATION\nloginURL\naddresses\nerror" records, followed by
-    /// "\ndnsName,os,online,addresses" peer lines; empty fields are absent. Addresses are comma-separated.
+    /// "\ndnsName\tos\tonline\taddresses\tsshHostKeys" peer lines; empty fields are absent. Lists
+    /// are comma-separated.
     static NodeStatus parse(long owner, String record) {
         String[] fields = record.split("\n", -1);
         List<Peer> peers = new ArrayList<>();
         for (int i = 6; i < fields.length; i++) {
-            String[] peer = fields[i].split(",", 4);
-            peers.add(new Peer(peer[0], peer[1], Boolean.parseBoolean(peer[2]), addresses(peer[3])));
+            String[] peer = fields[i].split("\t", -1);
+            List<String> keys = peer[4].isEmpty() ? List.of() : List.of(peer[4].split(","));
+            peers.add(new Peer(peer[0], peer[1], Boolean.parseBoolean(peer[2]), addresses(peer[3]), keys));
         }
         return new NodeStatus(owner, Long.parseLong(fields[0]), State.valueOf(fields[1]),
                 fields[2].isEmpty() ? null : Revocation.valueOf(fields[2]), fields[3].isEmpty() ? null : fields[3],

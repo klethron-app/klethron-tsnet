@@ -70,7 +70,9 @@ the node; pass it only to the user's browser. Wait for the URL to clear before c
 Starting with the same directory then resumes that identity.
 
 [`NodeStatus.peers`][peers] lists the other devices this node can see, with their MagicDNS name, operating
-system, online state and addresses, so users can pick a device instead of typing its name. Each change,
+system, online state, addresses and [Tailscale SSH](https://tailscale.com/kb/1193/tailscale-ssh) host
+keys, so users can pick a device instead of typing its name, and SSH clients can verify it without
+trust-on-first-use. Each change,
 including a device going online or offline, is a status change.
 
 [`dial`][dial] accepts a tailnet IP address or MagicDNS name and returns a socket descriptor owned by the

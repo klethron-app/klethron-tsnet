@@ -97,6 +97,7 @@ public final class DialTest {
             assertFalse(listed.online());
             assertEquals(InetAddresses.parseNumericAddress(peer), listed.addresses().get(0));
             assertEquals(2, listed.addresses().size());
+            assertEquals(List.of(), listed.sshHostKeys());
             assertTrue(status.toString(), status.toString().endsWith(", peers=1}"));
             assertFalse(status.toString().contains("klethron-peer"));
             try (ParcelFileDescriptor connection = node.dial(listed.dnsName(), 7070, WAIT)) {
@@ -105,13 +106,15 @@ public final class DialTest {
             }
 
             assertTrue(LoginTest.nativeProbeSetPeerOnline(true));
-            NodeStatus.Peer online = new NodeStatus.Peer(PEER_NAME, "android", true, listed.addresses());
+            NodeStatus.Peer online = new NodeStatus.Peer(PEER_NAME, "android", true, listed.addresses(), List.of());
             assertEquals(List.of(online), LoginTest.await(node, s -> !s.peers().equals(List.of(listed))).peers());
 
-            // Hides the sharee and Mullvad nodes; sorts by name and lists IPv4 first.
+            // Hides the sharee and Mullvad nodes; sorts by name, lists IPv4 first, trims host keys and
+            // drops one with a comma.
             LoginTest.nativeProbeAddPeers();
             NodeStatus.Peer other = new NodeStatus.Peer("klethron-other.tail-scale.ts.net", "linux", false, List.of(
-                    InetAddresses.parseNumericAddress("100.101.0.1"), InetAddresses.parseNumericAddress("fd7a:115c:a1e0::101:1")));
+                    InetAddresses.parseNumericAddress("100.101.0.1"), InetAddresses.parseNumericAddress("fd7a:115c:a1e0::101:1")),
+                    List.of("ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl"));
             assertEquals(List.of(other, online), LoginTest.await(node, s -> s.peers().size() > 1).peers());
 
             node.logout(WAIT);

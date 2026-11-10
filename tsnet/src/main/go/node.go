@@ -168,19 +168,26 @@ func peerLines(ctx context.Context, client *local.Client, notify *ipn.Notify) *s
 	return &joined
 }
 
-// peerLine returns "\nname,OS,online,addresses", with comma-separated addresses, IPv4 first, or ""
-// for peers hidden as by "tailscale status": nodes that may only connect to this one, and Mullvad
-// exit nodes, which do not accept connections. Names are DNS names; field replaces commas in the OS.
+// peerLine returns "\nname\tOS\tonline\taddresses\tSSH host keys", with comma-separated lists and
+// addresses IPv4 first, or "" for peers hidden as by "tailscale status": nodes that may only connect
+// to this one, and Mullvad exit nodes, which do not accept connections. It replaces commas in names
+// and the OS, and drops host keys that are not printable ASCII or contain commas.
 func peerLine(peer *ipnstate.PeerStatus) string {
 	name := strings.TrimSuffix(peer.DNSName, ".")
 	if peer.ShareeNode || name == "" || strings.HasSuffix(name, ".mullvad.ts.net") || len(peer.TailscaleIPs) == 0 {
 		return ""
 	}
-	fields := []string{field(name, 255), field(peer.OS, 32), strconv.FormatBool(peer.Online)}
+	var addresses, keys []string
 	for _, ip := range slices.SortedFunc(slices.Values(peer.TailscaleIPs), netip.Addr.Compare) {
-		fields = append(fields, ip.String())
+		addresses = append(addresses, ip.String())
 	}
-	return "\n" + strings.Join(fields, ",")
+	for _, key := range peer.SSH_HostKeys {
+		if key = strings.TrimSpace(key); key != "" && key == printable(key, 8192) && !strings.Contains(key, ",") {
+			keys = append(keys, key)
+		}
+	}
+	return "\n" + strings.Join([]string{field(name, 255), field(peer.OS, 32), strconv.FormatBool(peer.Online),
+		strings.Join(addresses, ","), strings.Join(keys, ",")}, "\t")
 }
 
 // field returns printable(s, limit) without commas.

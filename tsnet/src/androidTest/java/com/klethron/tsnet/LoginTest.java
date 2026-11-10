@@ -419,7 +419,8 @@ public final class LoginTest {
     static native boolean nativeProbeSetPeerOnline(boolean online);
 
     /// Registers an offline Linux device `klethron-other` with addresses 100.101.0.1 and
-    /// fd7a:115c:a1e0::101:1, a sharee node and a Mullvad exit node. None is reachable.
+    /// fd7a:115c:a1e0::101:1, a valid SSH host key and one containing a comma, a sharee node and a
+    /// Mullvad exit node. None is reachable.
     static native void nativeProbeAddPeers();
 
     private static native boolean nativeProbeComplete(byte[] loginUrl);

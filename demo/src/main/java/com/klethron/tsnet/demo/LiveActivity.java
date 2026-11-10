@@ -156,7 +156,8 @@ public final class LiveActivity extends Activity {
         String[] labels = new String[peers.size()];
         for (int i = 0; i < labels.length; i++) {
             NodeStatus.Peer peer = peers.get(i);
-            labels[i] = getString(peer.online() ? R.string.peer_online : R.string.peer_offline, peer.dnsName(), peer.os());
+            labels[i] = getString(peer.online() ? R.string.peer_online : R.string.peer_offline, peer.dnsName(), peer.os())
+                    + (peer.sshHostKeys().isEmpty() ? "" : getString(R.string.peer_tailscale_ssh));
         }
         new AlertDialog.Builder(this).setTitle(R.string.pick_peer).setItems(labels, (dialog, which) ->
                 ((EditText) findViewById(R.id.peer_host)).setText(peers.get(which).dnsName())).show();
