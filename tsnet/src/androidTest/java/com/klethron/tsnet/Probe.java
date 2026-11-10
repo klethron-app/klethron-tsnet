@@ -1,8 +1,10 @@
 package com.klethron.tsnet;
 
+import com.google.errorprone.annotations.CanIgnoreReturnValue;
 import java.nio.charset.StandardCharsets;
 
-/// Calls the debug library's test probes, listed in probes.go.
+/// Calls the debug library's test probes, listed in probes.go. Tests ignore results they do not check.
+@CanIgnoreReturnValue
 final class Probe {
     static {
         System.loadLibrary("klethron_tsnet");

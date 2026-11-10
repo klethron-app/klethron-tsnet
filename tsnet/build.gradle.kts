@@ -121,6 +121,7 @@ dependencies {
     // consumers need neither artifact (androidx.annotation would also export the Kotlin stdlib).
     compileOnly(libs.androidx.annotation)
     compileOnly(libs.errorprone.annotations)
+    androidTestCompileOnly(libs.errorprone.annotations)
     androidTestImplementation(libs.android.test.runner)
     androidTestImplementation(libs.junit)
 }

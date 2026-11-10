@@ -8,6 +8,7 @@ import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
 import androidx.test.platform.app.InstrumentationRegistry;
+import com.google.errorprone.annotations.CanIgnoreReturnValue;
 import java.io.File;
 import java.io.IOException;
 import java.net.Inet4Address;
@@ -357,6 +358,7 @@ public final class LoginTest {
         }
     }
 
+    @CanIgnoreReturnValue
     static NodeStatus await(TailnetNode node, Predicate<NodeStatus> condition) {
         long deadline = System.nanoTime() + WAIT.toNanos();
         NodeStatus status = null;
