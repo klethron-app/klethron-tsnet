@@ -44,10 +44,11 @@ abstract class VerifyNativeNotices @Inject constructor(private val exec: ExecOpe
         fun requireNotice(condition: Boolean, message: String) {
             if (!condition) throw GradleException("$message. Review THIRD-PARTY-NOTICES.md and the checked-in notices")
         }
+        fun requireFile(file: File, message: String) = requireNotice(file.isFile && file.length() > 0, message)
         val directory = notices.get().asFile
         for (path in listOf("GO-LICENSE", "GO-PATENTS", "JSPECIFY-LICENSE", "TAILSCALE-MODIFICATIONS", "FILE-NOTICES",
             "UNICODE-LICENSE")) {
-            requireNotice(directory.resolve(path).isFile && directory.resolve(path).length() > 0, "Missing notice $path")
+            requireFile(directory.resolve(path), "Missing notice $path")
         }
         // Per-file notices come from a manual source review; any toolchain or module change invalidates it.
         val inventoryHash = MessageDigest.getInstance("SHA-256").digest(directory.resolve("GO-MODULES.tsv").readBytes())
@@ -66,8 +67,7 @@ abstract class VerifyNativeNotices @Inject constructor(private val exec: ExecOpe
             for (module in modules) {
                 for (path in module[3].split(',')) {
                     requireNotice(!path.startsWith('/') && path.split('/').none { it == ".." }, "Invalid notice path $path")
-                    requireNotice(directory.resolve(path).isFile && directory.resolve(path).length() > 0,
-                        "Missing notice $path for ${module[0]}")
+                    requireFile(directory.resolve(path), "Missing notice $path for ${module[0]}")
                 }
             }
             return modules
@@ -107,11 +107,9 @@ abstract class VerifyNativeNotices @Inject constructor(private val exec: ExecOpe
                 val fields = lines.drop(1).map { it.trim().split(Regex("\\s+")) }
                 // The build verifies upstream checksums before applying our documented tsnet patch.
                 // Local replacements have no binary module checksum; accept only this exact one.
-                val replacements = fields.withIndex().filter { it.value.first() == "=>" }
-                requireNotice(replacements.size == 1 && replacements.all { (index, row) ->
-                    row == listOf("=>", "./tailscale", "(devel)") && index > 0 &&
-                        fields[index - 1].take(2) == listOf("dep", "tailscale.com")
-                }, "Unexpected Go module replacement; only the documented tsnet patch is allowed")
+                val replacements = fields.indices.filter { fields[it].first() == "=>" }.map { fields[it - 1].take(2) + fields[it] }
+                requireNotice(replacements == listOf(listOf("dep", "tailscale.com", "=>", "./tailscale", "(devel)")),
+                    "Unexpected Go module replacement; only the documented tsnet patch is allowed")
                 val upstreamTailscale = expected.single { it[0] == "tailscale.com" }
                 val actual = fields.filter { it.first() == "dep" }.map {
                     val dependency = it.drop(1)
@@ -124,10 +122,7 @@ abstract class VerifyNativeNotices @Inject constructor(private val exec: ExecOpe
                 results.append("${entry.name}\t${goVersion.get()}\t${actual.size}\n")
             }
         }
-        report.get().asFile.apply {
-            parentFile.mkdirs()
-            writeText(results.toString())
-        }
+        report.get().asFile.writeText(results.toString())
         logger.lifecycle(results.toString())
     }
 }

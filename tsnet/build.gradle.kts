@@ -55,42 +55,37 @@ val omittedFeatures = listOf(
     "bakedroots",
 )
 
-val nativeTasks = listOf("release", "debug").associateWith { buildType ->
-    listOf("arm64-v8a", "x86_64").map { abi ->
-        val suffix = if (buildType == "debug") "Debug" else ""
-        tasks.register<BuildGoLibrary>("buildGo" + (if (abi == "arm64-v8a") "Arm64" else "X86_64") + suffix) {
+androidComponents.onVariants { variant ->
+    val buildType = variant.buildType!!
+    val debug = buildType == "debug"
+    for (abi in listOf("arm64-v8a", "x86_64")) {
+        val buildGo = tasks.register<BuildGoLibrary>(
+            "buildGo" + (if (abi == "arm64-v8a") "Arm64" else "X86_64") + (if (debug) "Debug" else "")
+        ) {
             sources.set(layout.projectDirectory.dir("src/main/go"))
             sdkDirectory.set(androidComponents.sdkComponents.sdkDirectory)
             ndkVersion.set(libs.versions.ndk)
             goVersion.set(libs.versions.go)
             api.set(libs.versions.minSdk.get().toInt())
             this.abi.set(abi)
-            buildTags.set(omittedFeatures.map { "ts_omit_$it" } +
-                if (buildType == "debug") listOf("klethron_test") else emptyList())
+            buildTags.set(omittedFeatures.map { "ts_omit_$it" } + if (debug) listOf("klethron_test") else emptyList())
             outputDirectory.set(layout.buildDirectory.dir("generated/jniLibs/$buildType/$abi"))
         }
+        variant.sources.jniLibs?.addGeneratedSourceDirectory(buildGo, BuildGoLibrary::outputDirectory)
     }
-}
-androidComponents.onVariants { variant ->
-    nativeTasks.getValue(variant.buildType!!).forEach { task ->
-        variant.sources.jniLibs?.addGeneratedSourceDirectory(task, BuildGoLibrary::outputDirectory)
-    }
-}
 
-// Audit the binaries actually packaged in each variant, not the wider go.mod graph.
-androidComponents.onVariants { variant ->
-    val buildType = variant.buildType!!
+    // Audit the binaries actually packaged in each variant, not the wider go.mod graph.
     val aar = variant.artifacts.get(SingleArtifact.AAR)
     val verifyNotices = tasks.register<VerifyNativeNotices>("verify${variant.name.replaceFirstChar { it.uppercase() }}NativeNotices") {
         this.aar.set(aar)
         notices.set(layout.projectDirectory.dir("src/main/assets/klethron-tsnet/licenses"))
-        if (buildType == "debug") debugNotices.set(layout.projectDirectory.dir("src/debug/assets/klethron-tsnet/licenses"))
+        if (debug) debugNotices.set(layout.projectDirectory.dir("src/debug/assets/klethron-tsnet/licenses"))
         goVersion.set(libs.versions.go)
         ndkVersion.set(libs.versions.ndk)
         report.set(layout.buildDirectory.file("reports/native/notices-$buildType.tsv"))
     }
     tasks.named("check") { dependsOn(verifyNotices) }
-    if (buildType == "release") {
+    if (!debug) {
         val verifyNativeAar = tasks.register<VerifyNativeAar>("verifyNativeAar") {
             this.aar.set(aar)
             report.set(layout.buildDirectory.file("reports/native/sizes.tsv"))

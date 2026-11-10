@@ -25,12 +25,9 @@ abstract class VerifyNativeAar : DefaultTask() {
         val file = aar.get().asFile
         val sizes = StringBuilder("entry\tuncompressed_bytes\tcompressed_bytes\n")
         ZipFile(file).use { zip ->
-            val entries = zip.entries().asSequence().filter { it.name.endsWith(".so") }.toList()
+            // VerifyNativeNotices checks that these are exactly the two supported libraries.
             val machines = mapOf("arm64-v8a" to 183, "x86_64" to 62)
-            requireNative(entries.map { it.name }.toSet() == machines.keys.map {
-                "jni/$it/libklethron_tsnet.so"
-            }.toSet(), "AAR must contain exactly the two supported native libraries")
-            for (entry in entries) {
+            for (entry in zip.entries().asSequence().filter { it.name.endsWith(".so") }) {
                 val bytes = zip.getInputStream(entry).use { it.readBytes() }
                 val binaryText = String(bytes, Charsets.ISO_8859_1)
                 // Every instrumentation bridge exports klethron_*_probe and binds a *Test.nativeProbe method.
@@ -59,10 +56,7 @@ abstract class VerifyNativeAar : DefaultTask() {
             }
         }
         sizes.append("AAR\t${file.length()}\t${file.length()}\n")
-        report.get().asFile.apply {
-            parentFile.mkdirs()
-            writeText(sizes.toString())
-        }
+        report.get().asFile.writeText(sizes.toString())
         logger.lifecycle(sizes.toString())
     }
 }
