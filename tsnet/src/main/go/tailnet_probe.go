@@ -40,8 +40,8 @@ func checkProbeEnvironment(dir string) string {
 	if buildfeatures.HasLogTail {
 		return "logtail must be disabled"
 	}
-	// Refuse ambient auth configuration instead of risking an OAuth exchange.
-	for _, name := range []string{"TS_AUTHKEY", "TS_AUTH_KEY", "TS_CLIENT_SECRET", "TS_CLIENT_ID", "TS_ID_TOKEN", "TS_AUDIENCE"} {
+	// tsnet would send an ambient auth key to control.
+	for _, name := range []string{"TS_AUTHKEY", "TS_AUTH_KEY"} {
 		if os.Getenv(name) != "" {
 			return "unexpected authentication environment"
 		}

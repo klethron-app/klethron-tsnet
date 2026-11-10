@@ -36,8 +36,8 @@ func controlRoot(dir string) (root, problem string) {
 	defer cancel()
 	controlURL, _ := url.Parse(ipn.DefaultControlURL) // A valid constant.
 
-	// Plain crypto/tls verifies only against Go's system pool, unlike Tailscale's tlsdial, which
-	// silently falls back to baked-in Let's Encrypt roots. Resolution uses bionic via cgo.
+	// Plain crypto/tls records the verified chain; tlsdial verifies in a callback and records none.
+	// Resolution uses bionic via cgo.
 	usePlatformRoots()
 	dialer := &tls.Dialer{NetDialer: new(net.Dialer), Config: &tls.Config{ServerName: controlURL.Host}}
 	conn, err := dialer.DialContext(ctx, "tcp", net.JoinHostPort(controlURL.Host, "443"))

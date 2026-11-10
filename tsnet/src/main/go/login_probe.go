@@ -279,16 +279,17 @@ func completeLogin(control *testcontrol.Server, loginURL string) string {
 }
 
 // expireNodes expires the node keys of all registered nodes, as when their key expiry passes or
-// an administrator expires them. It returns the number of nodes.
+// an administrator expires them. It returns the number of devices, as approveMachines counts them.
 func expireNodes(control *testcontrol.Server, _ string) string {
-	nodes := control.AllNodes()
 	loginProbe.expired.Make()
-	for _, node := range nodes {
+	devices := make(set.Set[key.MachinePublic])
+	for _, node := range control.AllNodes() {
 		node.KeyExpiry = time.Now().Add(-time.Minute)
 		loginProbe.expired.Add(node.Key)
+		devices.Add(node.Machine)
 		control.UpdateNode(node)
 	}
-	return strconv.Itoa(len(nodes))
+	return strconv.Itoa(len(devices))
 }
 
 // removeNodes makes control answer map requests as for nodes deleted from the tailnet if removed
@@ -300,7 +301,8 @@ func removeNodes(removed string) string {
 
 // rejectRegistrations makes control reject every registration request, including logouts, with an
 // error if reject is "true", or no longer. Stopping the server would not: nodes keep their hijacked
-// Noise connection. testcontrol reads the field without locking; no registration is in flight here.
+// Noise connection. testcontrol reads the field without locking; a racing registration may see the
+// old value.
 func rejectRegistrations(control *testcontrol.Server, reject string) string {
 	control.RequireAuthKey = ""
 	if reject == "true" {

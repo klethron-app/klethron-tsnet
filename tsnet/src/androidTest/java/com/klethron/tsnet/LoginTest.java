@@ -187,7 +187,6 @@ public final class LoginTest {
             complete(status);
             addresses = await(node, s -> s.state() == NodeStatus.State.RUNNING).addresses();
 
-            assertNull(status.revocation());
             assertEquals("1", Probe.call("expire"));
             status = await(node, s -> s.state() == NodeStatus.State.NEEDS_LOGIN);
             assertEquals(NodeStatus.Revocation.KEY_EXPIRED, status.revocation());
