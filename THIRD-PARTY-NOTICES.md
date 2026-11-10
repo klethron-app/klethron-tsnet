@@ -89,7 +89,7 @@ xargs grep -h -i -E 'copyright|spdx|public domain|licen[cs]e that|licen[cs]ed un
   < files.txt | sed -E 's/[0-9]{4}/YYYY/g' | sort | uniq -c | sort -n   # 149 lines; inspect the unusual ones
 ```
 
-For the C runtime, rebuild one library with `-extldflags=-Wl,-z,max-page-size=16384,--trace` and
+For the C runtime, rebuild one library with `-extldflags=-Wl,--trace` and
 check that no new archive member or object appears.
 
 ## Updating

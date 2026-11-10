@@ -1,6 +1,7 @@
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.security.MessageDigest
+import java.util.HexFormat
 import groovy.json.JsonSlurper
 import javax.inject.Inject
 import org.gradle.api.DefaultTask
@@ -92,8 +93,7 @@ abstract class BuildGoLibrary @Inject constructor(
         }
         fun patch(path: String, expectedHash: String, before: String, after: String) {
             val original = upstream.resolve(path).readBytes()
-            val checksum = MessageDigest.getInstance("SHA-256").digest(original)
-                .joinToString("") { "%02x".format(it) }
+            val checksum = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(original))
             val text = original.toString(Charsets.UTF_8)
             if (checksum != expectedHash || text.split(before).size != 2) {
                 throw GradleException("Pinned $path changed; review TAILSCALE-MODIFICATIONS before building")
@@ -108,7 +108,7 @@ abstract class BuildGoLibrary @Inject constructor(
         workspace.resolve("go.mod").appendText("\nreplace tailscale.com => ./tailscale\n")
         go(workspace, "build", "-mod=readonly", "-trimpath", "-buildvcs=false",
             "-tags=" + buildTags.get().joinToString(","), "-buildmode=c-shared",
-            "-ldflags=-s -w -buildid= -extldflags=-Wl,-z,max-page-size=16384",
+            "-ldflags=-s -buildid=", // The NDK aligns to 16 KiB; VerifyNativeAar checks it.
             "-o", output.resolve("libklethron_tsnet.so").absolutePath, ".",
             env = mapOf("GOOS" to "android", "GOARCH" to arch, "CGO_ENABLED" to "1", "CC" to compiler.absolutePath))
     }

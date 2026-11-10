@@ -28,7 +28,7 @@ fi
 
 public_key=$(dirname "$0")/../release-signing-key.asc
 work=$(mktemp -d)
-trap 'gpgconf --kill all; gpgconf --homedir "$work/public" --kill all; rm -rf "$work"' EXIT
+trap 'gpgconf --kill all || :; gpgconf --homedir "$work/public" --kill all || :; rm -rf "$work"' EXIT
 export GNUPGHOME=$work/gnupg
 mkdir -m 700 "$GNUPGHOME" "$work/public"
 gpg --batch --quiet --import <<<"$SIGNING_KEY"

@@ -1,6 +1,7 @@
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.security.MessageDigest
+import java.util.HexFormat
 import java.util.zip.ZipFile
 import javax.inject.Inject
 import org.gradle.api.DefaultTask
@@ -51,8 +52,8 @@ abstract class VerifyNativeNotices @Inject constructor(private val exec: ExecOpe
             requireFile(directory.resolve(path), "Missing notice $path")
         }
         // Per-file notices come from a manual source review; any toolchain or module change invalidates it.
-        val inventoryHash = MessageDigest.getInstance("SHA-256").digest(directory.resolve("GO-MODULES.tsv").readBytes())
-            .joinToString("") { "%02x".format(it) }
+        val inventoryHash = HexFormat.of().formatHex(
+            MessageDigest.getInstance("SHA-256").digest(directory.resolve("GO-MODULES.tsv").readBytes()))
         val reviewed = "Reviewed for Go ${goVersion.get()}, NDK ${ndkVersion.get()} and GO-MODULES.tsv SHA-256\n$inventoryHash."
         requireNotice(reviewed in directory.resolve("FILE-NOTICES").readText(), "FILE-NOTICES is not reviewed for this build")
         fun inventory(directory: File, name: String): List<List<String>> {
@@ -99,7 +100,6 @@ abstract class VerifyNativeNotices @Inject constructor(private val exec: ExecOpe
                 exec.exec {
                     commandLine("go", "version", "-m", library.absolutePath)
                     environment("GOTOOLCHAIN", "local")
-                    environment("GOWORK", "off")
                     standardOutput = output
                 }
                 val lines = output.toString(Charsets.UTF_8).lineSequence().toList()

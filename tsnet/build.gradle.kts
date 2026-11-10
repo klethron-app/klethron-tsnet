@@ -6,7 +6,6 @@ plugins {
 }
 
 group = "com.klethron"
-version = rootProject.version
 
 android {
     enableKotlin = false
@@ -22,7 +21,6 @@ android {
         minSdk = libs.versions.minSdk.get().toInt()
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         consumerProguardFiles("consumer-rules.pro")
-        ndk { abiFilters += setOf("arm64-v8a", "x86_64") }
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -55,6 +53,16 @@ val omittedFeatures = listOf(
     "bakedroots",
 )
 
+// AGP's Dokka-based Javadoc drops the code spans and links of Markdown doc comments; the JDK renders them.
+val javadoc = tasks.register<Javadoc>("releaseJavadoc") {
+    source("src/main/java")
+    (options as StandardJavadocDocletOptions).apply {
+        addBooleanOption("-no-fonts", true)
+        addBooleanOption("Xdoclint:all,-missing", true) // Parameters are described in the prose.
+        addBooleanOption("Werror", true)
+    }
+}
+
 androidComponents.onVariants { variant ->
     val buildType = variant.buildType!!
     val debug = buildType == "debug"
@@ -69,14 +77,13 @@ androidComponents.onVariants { variant ->
             api.set(libs.versions.minSdk.get().toInt())
             this.abi.set(abi)
             buildTags.set(omittedFeatures.map { "ts_omit_$it" } + if (debug) listOf("klethron_test") else emptyList())
-            outputDirectory.set(layout.buildDirectory.dir("generated/jniLibs/$buildType/$abi"))
         }
         variant.sources.jniLibs?.addGeneratedSourceDirectory(buildGo, BuildGoLibrary::outputDirectory)
     }
 
     // Audit the binaries actually packaged in each variant, not the wider go.mod graph.
     val aar = variant.artifacts.get(SingleArtifact.AAR)
-    val verifyNotices = tasks.register<VerifyNativeNotices>("verify${variant.name.replaceFirstChar { it.uppercase() }}NativeNotices") {
+    tasks.register<VerifyNativeNotices>("verify${variant.name.replaceFirstChar { it.uppercase() }}NativeNotices") {
         this.aar.set(aar)
         notices.set(layout.projectDirectory.dir("src/main/assets/klethron-tsnet/licenses"))
         if (debug) debugNotices.set(layout.projectDirectory.dir("src/debug/assets/klethron-tsnet/licenses"))
@@ -84,34 +91,17 @@ androidComponents.onVariants { variant ->
         ndkVersion.set(libs.versions.ndk)
         report.set(layout.buildDirectory.file("reports/native/notices-$buildType.tsv"))
     }
-    tasks.named("check") { dependsOn(verifyNotices) }
     if (!debug) {
-        val verifyNativeAar = tasks.register<VerifyNativeAar>("verifyNativeAar") {
+        tasks.register<VerifyNativeAar>("verifyNativeAar") {
             this.aar.set(aar)
             report.set(layout.buildDirectory.file("reports/native/sizes.tsv"))
         }
-        tasks.named("check") { dependsOn(verifyNativeAar) }
+        javadoc.configure { classpath = variant.compileClasspath + files(androidComponents.sdkComponents.bootClasspath) }
     }
 }
-
-// AGP's Dokka-based Javadoc drops the code spans and links of Markdown doc comments; the JDK renders them.
-val javadoc = tasks.register<Javadoc>("releaseJavadoc") {
-    source("src/main/java")
-    setDestinationDir(layout.buildDirectory.dir("docs/javadoc").get().asFile)
-    (options as StandardJavadocDocletOptions).apply {
-        noTimestamp(true)
-        addBooleanOption("-no-fonts", true)
-        addBooleanOption("Xdoclint:all,-missing", true) // Parameters are described in the prose.
-        addBooleanOption("Werror", true)
-    }
-}
-androidComponents.onVariants(androidComponents.selector().withBuildType("release")) { variant ->
-    javadoc.configure { classpath = variant.compileClasspath + files(androidComponents.sdkComponents.bootClasspath) }
-}
-tasks.named("check") { dependsOn(javadoc) }
+tasks.named("check") { dependsOn(javadoc, tasks.withType<VerifyNativeNotices>(), tasks.withType<VerifyNativeAar>()) }
 val javadocJar = tasks.register<Jar>("releaseJavadocJar") {
     archiveClassifier = "javadoc"
-    destinationDirectory = layout.buildDirectory.dir("libs")
     from(javadoc)
 }
 
@@ -129,7 +119,6 @@ dependencies {
 publishing {
     publications {
         register<MavenPublication>("release") {
-            artifactId = "tsnet"
             afterEvaluate { from(components["release"]) }
             artifact(javadocJar)
             pom {
