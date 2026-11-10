@@ -35,10 +35,10 @@ with Go 1.27.3. Recheck each entry on every update and drop fixes upstream has m
   `InjectEvent` on each started node's monitor (via the unstable `Server.Sys().NetMon`). Apps report
   the best non-VPN network: with another VPN active, the default network stays the VPN, so a control
   connection dialled over lingering cellular hung until the two-minute long-poll timeout (seen on a
-  Pixel 11 Pro XL with the Tailscale app connected). Apps request that network with `requestNetwork`:
-  Android limits a best-matching callback to foreground networks and, after Wi-Fi loss, delivered only
-  `onLost` in about a third of `NetworkChangeTest` runs on the API 37.2 emulator (none in ten runs
-  with a request).
+  Pixel 11 Pro XL with the Tailscale app connected). Apps request that network with `requestNetwork`.
+  For apps without `CHANGE_NETWORK_STATE`, Android limits best-matching callbacks to foreground
+  networks and does not rematch them when background cellular becomes foreground: after Wi-Fi loss,
+  `NetworkChangeTest` got only `onLost` in 10 of 10 runs on a Pixel 8 Pro and the API 37.2 emulator.
 - **Go `crypto/x509` reads the wrong Android CA store** (a Go issue). It reads only
   `/system/etc/security/cacerts`, missing the Conscrypt APEX store used since Android 14 (updated by
   Play system updates), and ignores roots the user disabled. Workaround: load the APEX (or system)

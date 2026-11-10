@@ -101,8 +101,8 @@ connectivityManager.requestNetwork(TailnetNode.PHYSICAL_NETWORK, callback, handl
 
 Use `PHYSICAL_NETWORK` rather than the default network: while another VPN app, such as Tailscale's,
 is active, the default network stays that VPN when Wi-Fi or cellular changes, and the node would keep
-using a dead control connection for minutes. Request it rather than register a best-matching callback,
-which Android can leave without a network after Wi-Fi loss. Reports apply to all nodes in the process.
+using a dead control connection for minutes. Without `CHANGE_NETWORK_STATE`, which the request needs,
+a best-matching callback misses cellular after Wi-Fi loss. Reports apply to all nodes in the process.
 Native TLS uses Android's system CA store, excluding disabled roots; user-added CAs and the app's
 network security configuration do not apply.
 
