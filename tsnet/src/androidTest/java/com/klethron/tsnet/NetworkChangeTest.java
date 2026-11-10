@@ -22,7 +22,7 @@ import org.junit.Test;
 
 /**
  * Runs a loopback two-node tailnet while a node started through the public API follows the
- * default network, then disables Wi-Fi so the default network really changes. Both tailnet nodes
+ * network, then disables Wi-Fi so the network really changes. Both tailnet nodes
  * must rebind and keep exchanging data. Requires a device without a VPN whose default network is
  * Wi-Fi with cellular behind it.
  */
@@ -34,7 +34,8 @@ public final class NetworkChangeTest {
 
         Path directory = LoginTest.temporaryDirectory("netchange-");
         Path nodeDirectory = LoginTest.temporaryDirectory("netchange-node-");
-        // Learns the default interface names; only the library reports them to the nodes.
+        // Learns the interface names; only the library reports them to the nodes. Without a VPN, the
+        // default network is the best non-VPN network that the library follows.
         LinkedBlockingQueue<String> names = new LinkedBlockingQueue<>();
         ConnectivityManager.NetworkCallback callback = new ConnectivityManager.NetworkCallback() {
             @Override

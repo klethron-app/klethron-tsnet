@@ -1,9 +1,15 @@
 package com.klethron.tsnet;
 
+import android.Manifest;
 import android.content.Context;
+import android.content.pm.PackageManager;
 import android.net.ConnectivityManager;
 import android.net.LinkProperties;
 import android.net.Network;
+import android.net.NetworkCapabilities;
+import android.net.NetworkRequest;
+import android.os.Handler;
+import android.os.Looper;
 import android.os.ParcelFileDescriptor;
 import androidx.annotation.AnyThread;
 import androidx.annotation.WorkerThread;
@@ -26,9 +32,9 @@ import org.jspecify.annotations.Nullable;
 /// network stack and does not route the Android device's traffic.
 ///
 /// [Start][#start] a node, follow [#awaitStatus] until it is [NodeStatus.State#RUNNING] without a
-/// [NodeStatus#loginUrl()], then [#dial]. Running nodes follow the device's default network to
-/// reconnect after Wi-Fi or cellular changes; while another app's VPN is active, that network is the
-/// VPN, which hides such changes. Methods are thread-safe; `@WorkerThread` methods block. Closing the
+/// [NodeStatus#loginUrl()], then [#dial]. Running nodes follow the device's best Wi-Fi, cellular or
+/// other non-VPN internet network to reconnect after it changes, also while another app's VPN is
+/// active. Methods are thread-safe; `@WorkerThread` methods block. Closing the
 /// node ends its connections and cancels blocked calls, which then throw [ClosedChannelException].
 /// Zero or negative timeouts do not wait: [#awaitStatus] returns at once, [#dial] and [#logout]
 /// time out at once. The first use of this class in a process loads its native library.
@@ -37,8 +43,8 @@ public final class TailnetNode implements AutoCloseable {
         System.loadLibrary("klethron_tsnet");
     }
 
-    /// Reports the default network to all nodes in this process; registered while any node runs.
-    private static final ConnectivityManager.NetworkCallback DEFAULT_NETWORK = new ConnectivityManager.NetworkCallback() {
+    /// Reports the network to all nodes in this process; registered while any node runs.
+    private static final ConnectivityManager.NetworkCallback NETWORK = new ConnectivityManager.NetworkCallback() {
         @Override
         public void onLinkPropertiesChanged(Network network, LinkProperties properties) {
             String name = properties.getInterfaceName();
@@ -53,7 +59,12 @@ public final class TailnetNode implements AutoCloseable {
             nativeSetDefaultNetwork(new byte[0], 0);
         }
     };
-    private static int running; // Guarded by DEFAULT_NETWORK, as is connectivity.
+    /// Another app's VPN, often a split tunnel that the node's traffic bypasses, would be the default
+    /// network and hide changes of the network underneath.
+    private static final NetworkRequest PHYSICAL_NETWORK = new NetworkRequest.Builder()
+            .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+            .addCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN).build();
+    private static int running; // Guarded by NETWORK, as is connectivity.
     private static @Nullable ConnectivityManager connectivity;
 
     private final long handle;
@@ -85,11 +96,20 @@ public final class TailnetNode implements AutoCloseable {
             throw new IllegalArgumentException("State directory must be absolute and hostname non-empty");
         }
         String config = stateDirectory.getPath() + '\0' + hostname + '\0' + controlUrl;
-        synchronized (DEFAULT_NETWORK) {
+        synchronized (NETWORK) {
             if (running == 0) {
-                // Reports the current default network at once, on a framework thread.
-                connectivity = context.getApplicationContext().getSystemService(ConnectivityManager.class);
-                connectivity.registerDefaultNetworkCallback(DEFAULT_NETWORK);
+                // Registering reports the current network at once. Without CHANGE_NETWORK_STATE, Android
+                // limits best-matching callbacks to foreground networks, and after Wi-Fi loss they never
+                // move to cellular, so follow the default network instead.
+                Context application = context.getApplicationContext();
+                connectivity = application.getSystemService(ConnectivityManager.class);
+                String permission = Manifest.permission.CHANGE_NETWORK_STATE;
+                if (application.checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED) {
+                    connectivity.registerBestMatchingNetworkCallback(PHYSICAL_NETWORK, NETWORK,
+                            new Handler(Looper.getMainLooper()));
+                } else {
+                    connectivity.registerDefaultNetworkCallback(NETWORK);
+                }
             }
             running++;
         }
@@ -97,16 +117,16 @@ public final class TailnetNode implements AutoCloseable {
         try {
             handle = nativeStart(config.getBytes(StandardCharsets.UTF_8));
         } finally {
-            if (handle < 0) stopFollowingDefaultNetwork();
+            if (handle < 0) stopFollowingNetwork();
         }
         check(handle);
         return new TailnetNode(handle);
     }
 
-    private static void stopFollowingDefaultNetwork() {
-        synchronized (DEFAULT_NETWORK) {
+    private static void stopFollowingNetwork() {
+        synchronized (NETWORK) {
             if (--running == 0 && connectivity != null) {
-                connectivity.unregisterNetworkCallback(DEFAULT_NETWORK);
+                connectivity.unregisterNetworkCallback(NETWORK);
                 nativeSetDefaultNetwork(new byte[0], 0); // Unknown until the next start reports it.
             }
         }
@@ -200,7 +220,7 @@ public final class TailnetNode implements AutoCloseable {
     @Override
     public void close() {
         nativeClose(handle);
-        if (!closed.getAndSet(true)) stopFollowingDefaultNetwork();
+        if (!closed.getAndSet(true)) stopFollowingNetwork();
     }
 
     /// Maps node.go's negative results to exceptions.

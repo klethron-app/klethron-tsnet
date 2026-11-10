@@ -24,9 +24,13 @@ with Go 1.27.4. Recheck each entry on every update and drop fixes upstream has m
 - **Android netmon cannot see default-network changes.** It polls only every ten minutes and its
   default-route interface is empty without a host report, so change deltas never set
   `RebindLikelyRequired` (no UDP rebind, re-STUN or DERP reconnect). Workaround: while nodes run,
-  `TailnetNode` follows `registerDefaultNetworkCallback` and calls
-  `UpdateLastKnownDefaultRouteInterface`/`UpdateLastKnownDefaultGateway`, then `InjectEvent` on each
-  started node's monitor (via the unstable `Server.Sys().NetMon`).
+  `TailnetNode` follows the best `INTERNET`, `NOT_VPN` network with `registerBestMatchingNetworkCallback`
+  and calls `UpdateLastKnownDefaultRouteInterface`/`UpdateLastKnownDefaultGateway`, then `InjectEvent`
+  on each started node's monitor (via the unstable `Server.Sys().NetMon`). Without
+  `CHANGE_NETWORK_STATE`, Android adds `FOREGROUND` to the request and does not rematch it when
+  background cellular becomes foreground: it got only `onLost` after Wi-Fi loss in 10 of 10 runs on a
+  Pixel 8 Pro and the API 37.2 emulator (10 of 10 passed with the permission). The library declares it
+  and falls back to `registerDefaultNetworkCallback` if an app removes it.
 - **Go `crypto/x509` reads the wrong Android CA store** (a Go issue). It reads only
   `/system/etc/security/cacerts`, missing the Conscrypt APEX store used since Android 14 (updated by
   Play system updates), and ignores roots the user disabled. Workaround: load the APEX (or system)
@@ -90,13 +94,11 @@ with Go 1.27.4. Recheck each entry on every update and drop fixes upstream has m
 
 ## Limits
 
-- **Another VPN hides network changes.** While another app's VPN is active, the app's default network
-  stays that VPN when Wi-Fi or cellular changes, so a control connection dialled over lingering
-  cellular hung until the two-minute long-poll timeout (Pixel 11 Pro XL with the Tailscale app). Apps
-  cannot read a VPN's underlying networks, and following non-VPN networks needs `CHANGE_NETWORK_STATE`
-  (`requestNetwork`, or a best-matching callback: without the permission, Android limits it to
-  foreground networks and does not rematch it when background cellular becomes foreground, so it got
-  only `onLost` after Wi-Fi loss in 10 of 10 runs on a Pixel 8 Pro and the API 37.2 emulator).
+- **Another app's VPN.** Its network would be the default and hide Wi-Fi and cellular changes: a
+  control connection dialled over lingering cellular then hung until the two-minute long-poll timeout
+  (Pixel 11 Pro XL with the Tailscale app). Apps cannot read a VPN's underlying networks, so nodes
+  follow the best non-VPN network, which split tunnels such as Tailscale's leave their traffic on. With
+  a full-tunnel VPN, traffic uses the VPN while nodes follow the network below it; untested.
 - Live-tailnet coverage is still needed for default-network changes, 16 KiB devices, DERP-to-direct
   upgrades, restrictive NATs, subnet routes, IPv6 peers, throughput, prolonged outages, scheduled key
   expiry, revocation while stopped and Play split delivery.

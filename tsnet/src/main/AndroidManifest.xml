@@ -1,5 +1,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
-    <!-- Nodes follow the default network. -->
+    <!-- Nodes follow the best non-VPN network. The change permission lets that callback follow
+         Wi-Fi to cellular; the library never requests or changes networks. -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
 </manifest>

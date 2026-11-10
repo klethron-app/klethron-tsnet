@@ -20,7 +20,7 @@ var (
 )
 
 // Upstream netmon cannot discover Android's default route; TailnetNode's network callback reports
-// it instead. The interface name and IPv4 gateway are process-global upstream, so this updates
+// the best non-VPN network instead. The interface name and IPv4 gateway are process-global upstream, so this updates
 // every node.
 //
 //export klethron_set_default_network

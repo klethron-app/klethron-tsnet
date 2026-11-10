@@ -31,7 +31,8 @@ android {
 }
 ```
 
-The library's manifest adds the `INTERNET` and `ACCESS_NETWORK_STATE` permissions to your app.
+The library's manifest adds the `INTERNET`, `ACCESS_NETWORK_STATE` and `CHANGE_NETWORK_STATE`
+permissions to your app. All three are granted at install without a prompt.
 
 ## Connect
 
@@ -78,10 +79,10 @@ logout or key expiry. The app decides how long to keep the node alive and whethe
 
 ## Network
 
-Running nodes follow the device's default network, so they reconnect after switching Wi-Fi or mobile
-networks. While another VPN app, such as Tailscale's, is active, the default network stays that VPN
-when Wi-Fi or cellular changes, so a node can keep using a dead control connection for minutes; see
-[known limitations](UPSTREAM.md#limits). Native TLS uses Android's system CA store, excluding
+Running nodes follow the device's best non-VPN network, so they reconnect after switching Wi-Fi or
+mobile networks, also while another VPN app, such as Tailscale's, is active. Without
+`CHANGE_NETWORK_STATE`, Android would not let them follow Wi-Fi to cellular; if you remove that
+permission, they follow the default network, which stays the VPN while one is active. Native TLS uses Android's system CA store, excluding
 disabled roots; user-added CAs and the app's network security configuration do not apply.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) to build, test or use a checkout. Original code is
