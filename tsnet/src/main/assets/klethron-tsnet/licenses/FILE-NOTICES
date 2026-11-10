@@ -5,7 +5,7 @@ module's licence (GO-MODULES.tsv, GO-LICENSE, TAILSCALE-LICENSE). Notices are
 copied without comment markers. Both ABIs unless noted.
 
 Reviewed for Go 1.27.3, NDK 30.0.16248370 and GO-MODULES.tsv SHA-256
-3e3a3e7d1f8c77d39d4d5255a548c5b046c8b5aa8e4f0bb3a1af6b8162085f19.
+0c5358e1f10ab7854558f91cee5a78bd93e71a67313915eb77ed63d19a53d746.
 
 1. Go standard library: math/{acosh,asinh,atanh,erf,expm1,j0,j1,jn,lgamma,
    log,log1p,remainder,sqrt}.go (from FreeBSD msun)

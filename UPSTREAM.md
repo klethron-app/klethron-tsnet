@@ -32,7 +32,10 @@ with Go 1.27.3. Recheck each entry on every update and drop fixes upstream has m
   default-route interface is empty without a host report, so change deltas never set
   `RebindLikelyRequired` (no UDP rebind, re-STUN or DERP reconnect). Workaround: public
   `setDefaultNetwork` calls `UpdateLastKnownDefaultRouteInterface`/`UpdateLastKnownDefaultGateway`, then
-  `InjectEvent` on each started node's monitor (via the unstable `Server.Sys().NetMon`).
+  `InjectEvent` on each started node's monitor (via the unstable `Server.Sys().NetMon`). Apps report
+  the best non-VPN network: with another VPN active, the default network stays the VPN, so a control
+  connection dialled over lingering cellular hung until the two-minute long-poll timeout (seen on a
+  Pixel 11 Pro XL with the Tailscale app connected).
 - **Go `crypto/x509` reads the wrong Android CA store** (a Go issue). It reads only
   `/system/etc/security/cacerts`, missing the Conscrypt APEX store used since Android 14 (updated by
   Play system updates), and ignores roots the user disabled. Workaround: load the APEX (or system)
@@ -56,7 +59,9 @@ with Go 1.27.3. Recheck each entry on every update and drop fixes upstream has m
   `login()`.
 - **Logout resets prefs.** The fresh profile after logout has default prefs (Tailscale's control URL, the
   device hostname); `EditPrefs` would send re-login to the wrong control server, and the control client
-  keeps its creation-time URL anyway. Workaround: `login()` uses LocalAPI `Start` with tsnet's prefs.
+  keeps its creation-time URL anyway. Workaround: `login()` uses LocalAPI `Start` with tsnet's prefs
+  when the prefs differ or say logged out. `Start` always restarts the control client through `NoState`,
+  so renewing a running node's login calls only `StartLoginInteractive`.
   [PR #21857](https://github.com/tailscale/tailscale/pull/21857) adds login orchestration, but its
   helper is private and not yet exposed through LocalAPI.
 - **`LoginFinished` precedes saving the new node key.** `controlclient.Auto` reports `Persist` only with a

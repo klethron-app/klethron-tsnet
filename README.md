@@ -76,7 +76,7 @@ logout or key expiry. The app decides how long to keep the node alive and whethe
 
 ## Network changes
 
-Forward Android's default-network changes with [`setDefaultNetwork`][setDefaultNetwork] so the node
+Forward changes of the best non-VPN network with [`setDefaultNetwork`][setDefaultNetwork] so the node
 can reconnect after switching Wi-Fi or mobile networks. Register this callback while using the library
 and unregister it when finished:
 
@@ -89,10 +89,12 @@ ConnectivityManager.NetworkCallback callback = new ConnectivityManager.NetworkCa
         TailnetNode.setDefaultNetwork(null);
     }
 };
-connectivityManager.registerDefaultNetworkCallback(callback);
+connectivityManager.registerBestMatchingNetworkCallback(TailnetNode.PHYSICAL_NETWORK, callback, handler);
 ```
 
-Reports apply to all nodes in the process. Native TLS uses Android's system CA store, excluding
+Use `PHYSICAL_NETWORK` rather than the default network: while another VPN app, such as Tailscale's,
+is active, the default network stays that VPN when Wi-Fi or cellular changes, and the node would keep
+using a dead control connection for minutes. Reports apply to all nodes in the process. Native TLS uses Android's system CA store, excluding
 disabled roots; user-added CAs and the app's network security configuration do not apply.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) to build, test or use a checkout. Original code is

@@ -369,12 +369,21 @@ func (n *node) login() int {
 	if err != nil {
 		return n.failed(ctx, resultLoginFailed)
 	}
-	// As upstream Server.Start. A logout replaced the prefs with defaults, including Tailscale's
-	// control URL and the device's hostname, and the control client keeps the URL it started with.
-	prefs := ipn.NewPrefs()
-	prefs.Hostname, prefs.ControlURL, prefs.WantRunning = n.server.Hostname, n.server.ControlURL, true
-	if err := client.Start(ctx, ipn.Options{UpdatePrefs: prefs}); err != nil {
+	current, err := client.GetPrefs(ctx)
+	if err != nil {
 		return n.failed(ctx, resultLoginFailed)
+	}
+	// A logout, even a failed one, stops the node, and a successful one resets the prefs to
+	// defaults, including Tailscale's control URL and the device's hostname. Restore them as
+	// upstream Server.Start; the control client keeps the URL it started with. Start also restarts
+	// the control client, which would interrupt a running node, so skip it when renewing a login.
+	if current.LoggedOut || !current.WantRunning || current.ControlURL != n.server.ControlURL ||
+		current.Hostname != n.server.Hostname {
+		prefs := ipn.NewPrefs()
+		prefs.Hostname, prefs.ControlURL, prefs.WantRunning = n.server.Hostname, n.server.ControlURL, true
+		if err := client.Start(ctx, ipn.Options{UpdatePrefs: prefs}); err != nil {
+			return n.failed(ctx, resultLoginFailed)
+		}
 	}
 	if err := client.StartLoginInteractive(ctx); err != nil {
 		return n.failed(ctx, resultLoginFailed)

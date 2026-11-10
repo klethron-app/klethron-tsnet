@@ -39,10 +39,16 @@ val omittedFeatures = listOf(
     "ssh", "webclient", "drive", "appconnectors", "clientupdate",
     // The node only connects out: no PeerAPI server, advertised routes or exit node, nor exit node use.
     "peerapiserver", "advertiseroutes", "advertiseexitnode", "useexitnode", "exitnodehealth",
-    // No log upload/buffering, debug hooks (including SSLKEYLOGFILE), metrics or on-disk netmap cache.
-    "logtail", "debug", "usermetrics", "clientmetrics", "cachenetmap",
+    // No peer relay server, port listing or admin-driven remote configuration.
+    "relayserver", "portlist", "remoteconfig",
+    // No log upload/buffering, debug hooks (including SSLKEYLOGFILE), packet capture, flow logs,
+    // rejection diagnostics, metrics or on-disk netmap and DNS caches.
+    "logtail", "debug", "capture", "netlog", "connreject", "usermetrics", "clientmetrics", "cachenetmap",
+    "dnsresolvecache",
     // Ignore host-process environment and policy: proxy variables, OAuth secrets, MDM settings.
     "useproxy", "oauthkey", "syspolicy",
+    // Not applicable: Linux GRO, TPMs, cloud metadata, captive-portal probes, Unix-socket LocalAPI users.
+    "gro", "tpm", "cloud", "captiveportal", "unixsocketidentity",
     // No TLS certificates for this node's own listeners.
     "acme",
     // TLS trusts only Android's system CA store, not Tailscale's baked-in Let's Encrypt roots.

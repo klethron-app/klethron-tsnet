@@ -2,6 +2,8 @@ package com.klethron.tsnet;
 
 import android.Manifest;
 import android.net.LinkProperties;
+import android.net.NetworkCapabilities;
+import android.net.NetworkRequest;
 import android.os.ParcelFileDescriptor;
 import androidx.annotation.AnyThread;
 import androidx.annotation.RequiresPermission;
@@ -18,15 +20,14 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import org.jspecify.annotations.Nullable;
 
-/// A Tailscale device running inside your app. It joins a private network (a
-/// [tailnet](https://tailscale.com/kb/1136/tailnet)) with its own identity and opens TCP connections
-/// to other devices, without routing the Android device's traffic through a VPN.
+/// An embedded tsnet node: one device in a [tailnet](https://tailscale.com/kb/1136/tailnet), with
+/// keys stored in a caller-owned directory. It opens outbound TCP connections through a userspace
+/// network stack and does not route the Android device's traffic.
 ///
-/// Call [#start] once, follow [#awaitStatus] to authorize the device, then [#dial] to connect.
-/// Keep the node open while using its connections, and [#close] it when finished. Calls may run
-/// concurrently; run blocking operations on a worker thread. Report network changes through
-/// [#setDefaultNetwork] so connections can recover when Wi-Fi or cellular changes.
-/// The first use of this class in a process loads its native library.
+/// Call [#start] once, follow [#awaitStatus] until the node is authorized and running, then [#dial].
+/// Closing the node ends its connections. Methods are thread-safe; `@WorkerThread` methods block.
+/// Report network changes through [#setDefaultNetwork]. The first use of this class in a process
+/// loads its native library.
 public final class TailnetNode implements AutoCloseable {
     static {
         System.loadLibrary("klethron_tsnet");
@@ -34,8 +35,7 @@ public final class TailnetNode implements AutoCloseable {
 
     private final long handle;
 
-    /// Creates a disconnected node; [#start] joins the network. The first creation in a process
-    /// reads Android's system CA store from disk.
+    /// Creates an unstarted node. The first creation in a process reads Android's system CA store.
     @WorkerThread
     public TailnetNode() {
         handle = nativeCreate();
@@ -156,11 +156,21 @@ public final class TailnetNode implements AutoCloseable {
         return nativeTailscaleVersion();
     }
 
-    /// Reports the default network to all nodes in this process so they can reconnect after changes.
-    /// Forward [android.net.ConnectivityManager.NetworkCallback#onLinkPropertiesChanged] from a
-    /// [android.net.ConnectivityManager#registerDefaultNetworkCallback(android.net.ConnectivityManager.NetworkCallback)]
-    /// callback, and pass `null` on [android.net.ConnectivityManager.NetworkCallback#onLost].
-    /// Keep the callback registered while nodes are in use.
+    /// The network to report through [#setDefaultNetwork]: the best one with internet access that is
+    /// not a VPN. Register it with
+    /// [android.net.ConnectivityManager#registerBestMatchingNetworkCallback]. While another app's
+    /// VPN is active, the app's default network stays that VPN when Wi-Fi or cellular changes.
+    public static final NetworkRequest PHYSICAL_NETWORK = new NetworkRequest.Builder()
+            .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+            .addCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)
+            .build();
+
+    /// Reports the network that carries tailnet traffic to all nodes in this process, so they can
+    /// reconnect after changes. Forward
+    /// [android.net.ConnectivityManager.NetworkCallback#onLinkPropertiesChanged] from a callback
+    /// registered for [#PHYSICAL_NETWORK], and pass `null` on
+    /// [android.net.ConnectivityManager.NetworkCallback#onLost]. Keep the callback registered while
+    /// nodes are in use.
     ///
     /// @throws IllegalArgumentException if the interface name exceeds Linux's 15-byte limit
     @AnyThread

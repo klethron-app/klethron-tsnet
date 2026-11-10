@@ -10,6 +10,8 @@ import android.net.ConnectivityManager;
 import android.net.LinkProperties;
 import android.net.Network;
 import android.net.NetworkCapabilities;
+import android.os.Handler;
+import android.os.Looper;
 import android.os.ParcelFileDescriptor;
 import androidx.test.platform.app.InstrumentationRegistry;
 import java.io.FileInputStream;
@@ -57,7 +59,8 @@ public final class NetworkChangeTest {
         boolean registered = false;
         try {
             assertEquals("ok", nativeProbeStart(directory.toString().getBytes(StandardCharsets.UTF_8)));
-            connectivity.registerDefaultNetworkCallback(callback);
+            connectivity.registerBestMatchingNetworkCallback(TailnetNode.PHYSICAL_NETWORK, callback,
+                    new Handler(Looper.getMainLooper()));
             registered = true;
             String wifi = nextName(names);
             assertEquals("ok", nativeProbeAwait(wifi.getBytes(StandardCharsets.UTF_8)));

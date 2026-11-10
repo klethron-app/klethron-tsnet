@@ -229,8 +229,10 @@ public final class LoginTest {
 
             // Re-authenticating keeps the node running until the user opens the new URL.
             node.login();
-            status = await(node, s -> s.loginUrl() != null);
-            assertEquals(NodeStatus.State.RUNNING, status.state());
+            status = await(node, s -> {
+                assertEquals("Re-authentication interrupted the node", NodeStatus.State.RUNNING, s.state());
+                return s.loginUrl() != null;
+            });
             assertTrue("Unexpected login URL", status.loginUrl().startsWith(controlUrl + "/auth/"));
             assertEquals("klethron-expiry-test", nativeProbeHostnames());
             complete(status);

@@ -1,7 +1,8 @@
-/// Connect an Android app to a Tailscale private network (a tailnet) and open TCP connections to
-/// its devices. [TailnetNode] manages the app's network identity; [NodeStatus] reports login and
-/// connection progress. The library uses [tsnet](https://github.com/tailscale/tailscale/tree/main/tsnet)
-/// inside the app's process, without a device-wide VPN.
+/// Java bindings for Tailscale's [tsnet](https://github.com/tailscale/tailscale/tree/main/tsnet),
+/// embedded in the app's process. A node is a Tailscale device with its own keys and a userspace
+/// network stack; it needs neither the Tailscale app nor a VPN. [TailnetNode] starts, authorizes
+/// and closes a node and opens outbound TCP connections through it; [NodeStatus] is a snapshot of
+/// its state.
 @NullMarked
 @CheckReturnValue
 package com.klethron.tsnet;
