@@ -71,7 +71,8 @@ with Go 1.27.4. Recheck each entry on every update and drop fixes upstream has m
 - **`Start` is not context-aware, and concurrent `Start`/`Close` is forbidden.** LocalAPI `Start` also
   ignores its context and, run after `Close`, creates a control client that retries forever.
   Workaround: `TailnetNode.start` returns a node only once started, and a per-node read-write lock
-  lets `close` cancel calls, then wait for them.
+  lets `close` cancel calls, then wait for them; `login` waits for LocalAPI `Start` even when
+  cancelled.
 - **Netmap cache persists peer data.** With control's `CacheNetworkMaps` capability, upstream writes peer
   names, addresses and keys under `profile-data/`, even for ephemeral in-memory nodes. Workaround:
   `ts_omit_cachenetmap`.

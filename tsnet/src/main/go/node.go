@@ -307,8 +307,7 @@ const (
 )
 
 // whenOpen returns a context for a call, ending at the timeout or when the node closes, and a
-// function to call when done, or resultClosed. Close waits for the call: LocalAPI's Start ignores
-// contexts and could outlive Server.Close.
+// function to call when done, or resultClosed. Close waits for the call to finish.
 func (n *node) whenOpen(timeout time.Duration) (context.Context, func(), int) {
 	n.lifecycle.RLock()
 	if n.ctx.Err() != nil {
@@ -402,11 +401,13 @@ func (n *node) login() int {
 	// defaults, including Tailscale's control URL and the device's hostname. Restore them as
 	// upstream Server.Start; the control client keeps the URL it started with. Start also restarts
 	// the control client, which would interrupt a running node, so skip it when renewing a login.
+	// LocalAPI's Start ignores cancellation, and run after Server.Close it would create a control
+	// client that retries forever, so wait for it even when the node closes: it is local work.
 	if current.LoggedOut || !current.WantRunning || current.ControlURL != n.server.ControlURL ||
 		current.Hostname != n.server.Hostname {
 		prefs := ipn.NewPrefs()
 		prefs.Hostname, prefs.ControlURL, prefs.WantRunning = n.server.Hostname, n.server.ControlURL, true
-		if err := n.client.Start(ctx, ipn.Options{UpdatePrefs: prefs}); err != nil {
+		if err := n.client.Start(context.WithoutCancel(ctx), ipn.Options{UpdatePrefs: prefs}); err != nil {
 			return n.failed(ctx, resultLoginFailed)
 		}
 	}
@@ -420,7 +421,8 @@ func (n *node) login() int {
 // descriptor. The peer's EOF reaches the app as end of stream while the app may keep writing.
 // Unix sockets cannot signal a reset, so failures and closing ctx also appear as end of stream.
 // The app's EOF (closing the descriptor or shutting down its output) closes the connection once
-// its written data reaches the peer; half-closing towards the peer is not supported.
+// its written data reaches the peer, or resets it if received data is unread; half-closing
+// towards the peer is not supported.
 func relay(ctx context.Context, conn net.Conn) (int, error) {
 	fds, err := syscall.Socketpair(syscall.AF_UNIX, syscall.SOCK_STREAM|syscall.SOCK_CLOEXEC, 0)
 	if err != nil {
