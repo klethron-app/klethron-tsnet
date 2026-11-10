@@ -2,7 +2,7 @@ package com.klethron.tsnet;
 
 import android.net.InetAddresses;
 import java.net.InetAddress;
-import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import org.jspecify.annotations.Nullable;
 
@@ -64,40 +64,30 @@ public final class NodeStatus {
     private final @Nullable String error;
     private final List<Peer> peers;
 
-    private NodeStatus(long owner, long version, State state, @Nullable Revocation revocation, @Nullable String loginUrl,
-            List<InetAddress> addresses, @Nullable String error, List<Peer> peers) {
-        this.owner = owner;
-        this.version = version;
-        this.state = state;
-        this.revocation = revocation;
-        this.loginUrl = loginUrl;
-        this.addresses = addresses;
-        this.error = error;
-        this.peers = peers;
-    }
-
-    /// Parses native "version\nSTATE\nREVOCATION\nloginURL\naddresses\nerror" records, followed by
+    /// Parses a native "version\nSTATE\nREVOCATION\nloginURL\naddresses\nerror" record, followed by
     /// "\ndnsName\tos\tonline\taddresses\tsshHostKeys" peer lines; empty fields are absent. Lists
     /// are comma-separated.
-    static NodeStatus parse(long owner, String record) {
+    NodeStatus(long owner, String record) {
         String[] fields = record.split("\n", -1);
-        List<Peer> peers = new ArrayList<>();
-        for (int i = 6; i < fields.length; i++) {
-            String[] peer = fields[i].split("\t", -1);
-            List<String> keys = peer[4].isEmpty() ? List.of() : List.of(peer[4].split(","));
-            peers.add(new Peer(peer[0], peer[1], Boolean.parseBoolean(peer[2]), addresses(peer[3]), keys));
-        }
-        return new NodeStatus(owner, Long.parseLong(fields[0]), State.valueOf(fields[1]),
-                fields[2].isEmpty() ? null : Revocation.valueOf(fields[2]), fields[3].isEmpty() ? null : fields[3],
-                addresses(fields[4]), fields[5].isEmpty() ? null : fields[5], List.copyOf(peers));
+        this.owner = owner;
+        version = Long.parseLong(fields[0]);
+        state = State.valueOf(fields[1]);
+        revocation = fields[2].isEmpty() ? null : Revocation.valueOf(fields[2]);
+        loginUrl = fields[3].isEmpty() ? null : fields[3];
+        addresses = addresses(fields[4]);
+        error = fields[5].isEmpty() ? null : fields[5];
+        peers = Arrays.stream(fields, 6, fields.length).map(line -> {
+            String[] peer = line.split("\t", -1);
+            return new Peer(peer[0], peer[1], Boolean.parseBoolean(peer[2]), addresses(peer[3]), list(peer[4]));
+        }).toList();
     }
 
-    private static List<InetAddress> addresses(String list) {
-        List<InetAddress> addresses = new ArrayList<>();
-        for (String address : list.split(",")) {
-            if (!address.isEmpty()) addresses.add(InetAddresses.parseNumericAddress(address));
-        }
-        return List.copyOf(addresses);
+    private static List<String> list(String commaSeparated) {
+        return commaSeparated.isEmpty() ? List.of() : List.of(commaSeparated.split(","));
+    }
+
+    private static List<InetAddress> addresses(String commaSeparated) {
+        return list(commaSeparated).stream().map(InetAddresses::parseNumericAddress).toList();
     }
 
     /// The node's connection and authorization state.

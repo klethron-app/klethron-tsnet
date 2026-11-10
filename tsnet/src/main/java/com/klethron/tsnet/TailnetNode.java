@@ -90,7 +90,7 @@ public final class TailnetNode implements AutoCloseable {
         if (record == null) {
             throw new IllegalStateException("Node is closed");
         }
-        return NodeStatus.parse(handle, record);
+        return new NodeStatus(handle, record);
     }
 
     /// Opens a TCP connection to a tailnet address or
