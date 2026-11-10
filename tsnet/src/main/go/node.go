@@ -170,8 +170,8 @@ func peerLines(ctx context.Context, client *local.Client, notify *ipn.Notify) *s
 
 // peerLine returns "\nname\tOS\tonline\taddresses\tSSH host keys", with comma-separated lists and
 // addresses IPv4 first, or "" for peers hidden as by "tailscale status": nodes that may only connect
-// to this one, and Mullvad exit nodes, which do not accept connections. It replaces commas in names
-// and the OS, and drops host keys that are not printable ASCII or contain commas.
+// to this one, and Mullvad exit nodes, which do not accept connections. It drops host keys that are
+// not printable ASCII or contain commas.
 func peerLine(peer *ipnstate.PeerStatus) string {
 	name := strings.TrimSuffix(peer.DNSName, ".")
 	if peer.ShareeNode || name == "" || strings.HasSuffix(name, ".mullvad.ts.net") || len(peer.TailscaleIPs) == 0 {
@@ -183,13 +183,8 @@ func peerLine(peer *ipnstate.PeerStatus) string {
 			keys = append(keys, key)
 		}
 	}
-	return "\n" + strings.Join([]string{field(name, 255), field(peer.OS, 32), strconv.FormatBool(peer.Online),
+	return "\n" + strings.Join([]string{printable(name, 255), printable(peer.OS, 32), strconv.FormatBool(peer.Online),
 		addressList(peer.TailscaleIPs...), strings.Join(keys, ",")}, "\t")
-}
-
-// field returns printable(s, limit) without commas.
-func field(s string, limit int) string {
-	return strings.ReplaceAll(printable(s, limit), ",", "?")
 }
 
 // publish applies notify and, unless nil, the peer lines.
