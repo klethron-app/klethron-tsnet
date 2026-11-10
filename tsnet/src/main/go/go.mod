@@ -3,8 +3,8 @@ module github.com/klethron-app/klethron-tsnet/tsnet
 go 1.27.3
 
 require (
-	golang.org/x/sys v0.49.0
-	tailscale.com v1.105.0-pre.0.20261109203758-6372b9a43a5c
+	golang.org/x/sys v0.50.0
+	tailscale.com v1.105.0-pre.0.20261110152448-444baf1ef522
 )
 
 require (

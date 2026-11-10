@@ -3,8 +3,8 @@
 Notices ship in the AAR under `assets/klethron-tsnet/licenses/`, from
 `tsnet/src/main/assets/klethron-tsnet/licenses/` (both variants) and `tsnet/src/debug/…` (debug only):
 
-- Tailscale (BSD-3-Clause), pinned to `6372b9a43a5cbc3628bf65bd0ec40b4823510d2d`: licence, patent notice
-  and `TAILSCALE-MODIFICATIONS`, which documents the two local patches.
+- Tailscale (BSD-3-Clause), pinned to `444baf1ef522e3aa635c3fcb8a036a1d75eda021`: licence, patent notice
+  and `TAILSCALE-MODIFICATIONS`, which documents the local patch.
 - Go's runtime licence and patent notice, also covering Tailscale's Go-derived `tempfork` sources.
 - JSpecify 1.0.1 (Apache-2.0): a transitive Maven dependency, not bundled; its
   [licence](https://github.com/jspecify/jspecify/blob/v1.0.1/LICENSE) is included as `JSPECIFY-LICENSE`.
@@ -20,7 +20,7 @@ Notices were copied verbatim from the checksum-verified module cache: each modul
 patent notice, plus the nested `internal/snapref` and `zstd/internal/xxhash` licences of the compression
 module, which are in the Android import graph.
 
-Both patches are applied to an isolated copy through a temporary `tailscale.com => ./tailscale`
+The patch is applied to an isolated copy through a temporary `tailscale.com => ./tailscale`
 replacement. The inventory's Tailscale checksum identifies the **unmodified upstream module**.
 
 `./gradlew build` runs `verifyReleaseNativeNotices` and `verifyDebugNativeNotices`. They inspect each AAR's

@@ -1,9 +1,9 @@
 # Upstream issues
 
 Upstream issues at Tailscale
-[`6372b9a43a5c`](https://github.com/tailscale/tailscale/commit/6372b9a43a5cbc3628bf65bd0ec40b4823510d2d)
+[`444baf1ef522`](https://github.com/tailscale/tailscale/commit/444baf1ef522e3aa635c3fcb8a036a1d75eda021)
 with Go 1.27.3. Recheck each entry on every update and drop fixes upstream has made.
-`BuildGoLibrary.kt` hash-checks the patches; `TAILSCALE-MODIFICATIONS` documents them.
+`BuildGoLibrary.kt` hash-checks the patch; `TAILSCALE-MODIFICATIONS` documents it.
 
 ## Patched
 
@@ -12,13 +12,6 @@ with Go 1.27.3. Recheck each entry on every update and drop fixes upstream has m
   empty (but `Valid`) `Persist` over the stored key: the device stays registered with no key to log out
   with, a retry is a silent no-op and a restart asks for a new login. Reproduced in about one of three
   runs. Patch: clear the key only after a successful logout (`control/controlclient/direct.go`).
-- **A netmap in flight can undo a logout** ([#22274](https://github.com/tailscale/tailscale/issues/22274)). `setControlClientStatusLocked` ignores an old control
-  client's status only on entry, then unlocks for `tkaSyncIfNeeded` while handling a netmap. A logout
-  that resets the profile in that window has the old netmap installed on the logged-out profile:
-  `NeedsLogin -> Stopped (nm=true)` with the old addresses, and a re-login then reports `Starting` with
-  them. A netmap is often in flight as a node reaches Running. Seen in 4 of 16 Pixel runs; on a host,
-  in 5 of 10 runs with that window widened by 300 ms. Patch: re-check the client after relocking
-  (`ipn/ipnlocal/local.go`).
 
 ## Worked around
 

@@ -105,13 +105,6 @@ abstract class BuildGoLibrary @Inject constructor(
         val forgetKey = "\tc.mu.Lock()\n\tc.persist = new(persist.Persist).View()\n\tc.mu.Unlock()\n"
         patch("control/controlclient/direct.go", "a28e97e2a6822604182cdcfdd319ea9bb10c29b17e8b4592289c1cf2278160a9",
             forgetKey, "\tif err == nil {\n" + forgetKey.lines().joinToString("") { "\t$it\n" } + "\t}\n")
-        // A netmap handled while unlocked for tailnet lock must not outlive a logout that replaced the
-        // control client meanwhile: it would bring back the old addresses on the logged-out profile.
-        val relock = "\t\tb.mu.Lock()\n\t\t// As we stepped outside of the lock, it's possible for b.cc\n"
-        patch("ipn/ipnlocal/local.go", "b0ea8d84d9f2d2f7ea893d7be89c8bfcf40523825b07355d299446979db7ee37", relock,
-            "\t\tb.mu.Lock()\n\t\tif b.cc != c {\n\t\t\t// A logout or profile change replaced the client while unlocked.\n" +
-                "\t\t\tb.logf(\"Ignoring SetControlClientStatus from old client\")\n\t\t\treturn\n\t\t}\n" +
-                relock.substringAfter("\n"))
         workspace.resolve("go.mod").appendText("\nreplace tailscale.com => ./tailscale\n")
         go(workspace, "build", "-mod=readonly", "-trimpath", "-buildvcs=false",
             "-tags=" + buildTags.get().joinToString(","), "-buildmode=c-shared",

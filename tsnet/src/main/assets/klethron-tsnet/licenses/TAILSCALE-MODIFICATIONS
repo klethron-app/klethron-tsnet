@@ -1,14 +1,13 @@
-Klethron tsnet modifies two tailscale.com source files in an isolated build copy.
-Upstream revision: 6372b9a43a5cbc3628bf65bd0ec40b4823510d2d
+Klethron tsnet modifies one tailscale.com source file in an isolated build copy.
+Upstream revision: 444baf1ef522e3aa635c3fcb8a036a1d75eda021
 Original file SHA-256:
 control/controlclient/direct.go: a28e97e2a6822604182cdcfdd319ea9bb10c29b17e8b4592289c1cf2278160a9
-ipn/ipnlocal/local.go: b0ea8d84d9f2d2f7ea893d7be89c8bfcf40523825b07355d299446979db7ee37
 
-The build verifies upstream modules and rejects changes to these source files.
+The build verifies upstream modules and rejects changes to this source file.
 The shared Go module cache remains unchanged. A temporary go.mod replaces
 tailscale.com with ./tailscale; binary build metadata records that replacement.
-The inventory's Tailscale checksum identifies the upstream module before these
-patches, not the modified copy. BuildGoLibrary.kt applies these changes:
+The inventory's Tailscale checksum identifies the upstream module before this
+patch, not the modified copy. BuildGoLibrary.kt applies this change:
 
 --- a/control/controlclient/direct.go
 +++ b/control/controlclient/direct.go
@@ -26,19 +25,3 @@ TryLogout forgets the node key only when control confirmed the logout. Upstream
 also forgets it after a failed request; the map poll continues and saves the
 empty key over the stored login, leaving the node registered at control with no
 local key with which to log out again.
-
---- a/ipn/ipnlocal/local.go
-+++ b/ipn/ipnlocal/local.go
-@@ -2082,1 +2082,6 @@
- 		b.mu.Lock()
-+		if b.cc != c {
-+			// A logout or profile change replaced the client while unlocked.
-+			b.logf("Ignoring SetControlClientStatus from old client")
-+			return
-+		}
-
-setControlClientStatusLocked unlocks while handling a network map for tailnet
-lock. A logout in that window deletes the profile and replaces the control
-client; upstream then installs the old network map on the logged-out profile,
-which reports Stopped with the old addresses. The status is now ignored, as
-upstream already does for an old client's status on entry.
