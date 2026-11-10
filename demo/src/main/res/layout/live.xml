@@ -31,7 +31,5 @@
             android:layout_height="wrap_content" android:text="@string/exchange" android:enabled="false" />
         <TextView android:id="@+id/result" android:layout_width="match_parent"
             android:layout_height="wrap_content" android:accessibilityLiveRegion="polite" />
-        <Button android:id="@+id/close_node" android:layout_width="match_parent"
-            android:layout_height="wrap_content" android:text="@string/close_node" />
     </LinearLayout>
 </ScrollView>

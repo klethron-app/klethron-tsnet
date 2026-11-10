@@ -39,7 +39,7 @@ import org.jspecify.annotations.Nullable;
 
 /** Explicit, interactive real-tailnet test. No URLs, credentials or peer data go to logs. */
 public final class LiveActivity extends Activity {
-    // Serializes node calls; a closing activity's node closes before a new one starts.
+    // Serializes node calls across instances, including a destroyed instance's close.
     private static final ExecutorService WORKER = Executors.newSingleThreadExecutor();
     private static final Duration TIMEOUT = Duration.ofSeconds(10);
     private final Handler ui = new Handler(Looper.getMainLooper());
@@ -48,24 +48,22 @@ public final class LiveActivity extends Activity {
     private @Nullable TailnetNode node;
     private @Nullable ParcelFileDescriptor held; // Kept-open connection.
     private @Nullable String heldTarget;
-    private int heldExchanges;
     // Only accessed on the UI thread.
     private @Nullable NodeStatus status; // Never saved in a Bundle.
     private boolean busy;
     private boolean started;
-    private boolean registered;
 
     private final ConnectivityManager.NetworkCallback networkCallback = new ConnectivityManager.NetworkCallback() {
         @MainThread // Registered with the main-looper handler `ui`.
         @Override
         public void onLinkPropertiesChanged(Network network, LinkProperties properties) {
-            if (!destroyed) TailnetNode.setDefaultNetwork(properties);
+            TailnetNode.setDefaultNetwork(properties);
         }
 
         @MainThread
         @Override
         public void onLost(Network network) {
-            if (!destroyed) TailnetNode.setDefaultNetwork(null);
+            TailnetNode.setDefaultNetwork(null);
         }
     };
 
@@ -100,7 +98,6 @@ public final class LiveActivity extends Activity {
         ((CheckBox) findViewById(R.id.keep_open)).setOnCheckedChangeListener((view, checked) -> {
             if (!checked) WORKER.execute(this::closeHeld);
         });
-        findViewById(R.id.close_node).setOnClickListener(view -> finish());
     }
 
     @UiThread
@@ -116,7 +113,6 @@ public final class LiveActivity extends Activity {
                 ui.post(() -> {
                     if (destroyed) return;
                     getSystemService(ConnectivityManager.class).registerDefaultNetworkCallback(networkCallback, ui);
-                    registered = true;
                     started = true;
                     busy = false;
                     render();
@@ -165,16 +161,10 @@ public final class LiveActivity extends Activity {
     @UiThread
     private void exchange() {
         String host = ((EditText) findViewById(R.id.peer_host)).getText().toString().trim();
-        int port;
-        try {
-            port = Integer.parseInt(((EditText) findViewById(R.id.peer_port)).getText().toString());
-            if (host.isEmpty() || port < 1 || port > 65535) throw new NumberFormatException();
-        } catch (NumberFormatException invalid) {
-            result(getString(R.string.invalid_destination));
-            return;
-        }
+        String portText = ((EditText) findViewById(R.id.peer_port)).getText().toString();
         boolean keepOpen = ((CheckBox) findViewById(R.id.keep_open)).isChecked();
         runOperation(current -> {
+            int port = Integer.parseInt(portText); // dial validates the host and port range.
             byte[] sent = ("klethron-tsnet:" + UUID.randomUUID() + "\n").getBytes(StandardCharsets.US_ASCII);
             long start = SystemClock.elapsedRealtime();
             if (!keepOpen) {
@@ -198,8 +188,7 @@ public final class LiveActivity extends Activity {
                 throw failure;
             }
             long elapsed = SystemClock.elapsedRealtime() - start;
-            return dialed ? getString(R.string.echo_verified, sent.length, elapsed)
-                    : getString(R.string.echo_verified_open, sent.length, ++heldExchanges, elapsed);
+            return getString(dialed ? R.string.echo_verified : R.string.echo_verified_open, sent.length, elapsed);
         });
     }
 
@@ -224,7 +213,6 @@ public final class LiveActivity extends Activity {
 
     @WorkerThread
     private void closeHeld() {
-        heldExchanges = 0;
         heldTarget = null;
         if (held == null) return;
         try {
@@ -294,11 +282,8 @@ public final class LiveActivity extends Activity {
     @Override
     public void onDestroy() {
         destroyed = true;
-        status = null;
-        if (registered) {
-            getSystemService(ConnectivityManager.class).unregisterNetworkCallback(networkCallback);
-            TailnetNode.setDefaultNetwork(null);
-        }
+        // Not reporting a null network: that would apply to another instance's node too.
+        if (started) getSystemService(ConnectivityManager.class).unregisterNetworkCallback(networkCallback);
         WORKER.execute(() -> {
             closeHeld();
             if (node != null) node.close();

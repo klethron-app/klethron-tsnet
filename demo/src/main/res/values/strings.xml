@@ -9,7 +9,6 @@
     <string name="authorize">Authorize in browser</string>
     <string name="login">Log in / renew key</string>
     <string name="logout">Log out of tailnet</string>
-    <string name="close_node">Close node</string>
     <string name="peer_host">Echo peer: tailnet IP or MagicDNS name</string>
     <string name="pick_peer">Pick peer</string>
     <string name="peer_online">%1$s (%2$s, online)</string>
@@ -23,12 +22,11 @@
     <string name="operation_failed">Operation failed: %1$s</string>
     <string name="echo_verified">Echo verified: %1$d B, %2$d ms (dial + exchange).</string>
     <string name="keep_open">Keep connection open between echoes</string>
-    <string name="echo_verified_open">Echo verified on open connection: %1$d B, reuse %2$d, %3$d ms.</string>
+    <string name="echo_verified_open">Echo verified on open connection: %1$d B, %2$d ms.</string>
     <string name="login_saved">Login saved</string>
     <string name="login_pending">Browser authorization pending; wait before closing</string>
     <string name="login_requested">Login requested; waiting for control</string>
     <string name="logged_out">Logout confirmed</string>
     <string name="backend_error">Backend error: %1$s</string>
     <string name="browser_missing">No browser is available</string>
-    <string name="invalid_destination">Enter a peer and a port from 1 to 65535</string>
 </resources>
