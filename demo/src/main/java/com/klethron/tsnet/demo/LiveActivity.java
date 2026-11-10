@@ -37,7 +37,7 @@ import org.jspecify.annotations.Nullable;
 
 /** Explicit, interactive real-tailnet test. No URLs, credentials or peer data go to logs. */
 public final class LiveActivity extends Activity {
-    // Serializes state-directory ownership even across activity recreation. Close precedes restart.
+    // Serializes node calls; a closing activity's node closes before a new one starts.
     private static final ExecutorService WORKER = Executors.newSingleThreadExecutor();
     private static final Duration TIMEOUT = Duration.ofSeconds(10);
     private final Handler ui = new Handler(Looper.getMainLooper());
@@ -45,6 +45,7 @@ public final class LiveActivity extends Activity {
     // Only accessed on WORKER: lint checks the methods' thread annotations, not field access.
     private @Nullable TailnetNode node;
     private @Nullable ParcelFileDescriptor held; // Kept-open connection.
+    private @Nullable String heldTarget;
     private int heldExchanges;
     // Only accessed on the UI thread.
     private @Nullable NodeStatus status; // Never saved in a Bundle.
@@ -56,8 +57,7 @@ public final class LiveActivity extends Activity {
         @MainThread // Registered with the main-looper handler `ui`.
         @Override
         public void onLinkPropertiesChanged(Network network, LinkProperties properties) {
-            if (destroyed) return;
-            TailnetNode.setDefaultNetwork(properties);
+            if (!destroyed) TailnetNode.setDefaultNetwork(properties);
         }
 
         @MainThread
@@ -167,8 +167,13 @@ public final class LiveActivity extends Activity {
                 return getString(R.string.echo_verified, sent.length, SystemClock.elapsedRealtime() - start);
             }
             // Reuses one stream across exchanges, e.g. to test survival of a network change.
+            String target = host + ":" + port;
+            if (!target.equals(heldTarget)) closeHeld();
             boolean dialed = held == null;
-            if (dialed) held = current.dial(host, port, TIMEOUT);
+            if (dialed) {
+                held = current.dial(host, port, TIMEOUT);
+                heldTarget = target;
+            }
             try {
                 echo(held, sent);
             } catch (Exception failure) {
@@ -201,6 +206,7 @@ public final class LiveActivity extends Activity {
     @WorkerThread
     private void closeHeld() {
         heldExchanges = 0;
+        heldTarget = null;
         if (held == null) return;
         try {
             held.close();

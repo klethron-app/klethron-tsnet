@@ -1,8 +1,6 @@
 # Contributing
 
-The API is under development; backward compatibility is not required. Keep changes small and avoid
-abstractions without a caller. See [AGENTS.md](AGENTS.md) for repository conventions and
-[UPSTREAM.md](UPSTREAM.md) for patches and limitations.
+See [AGENTS.md](AGENTS.md) for conventions and [UPSTREAM.md](UPSTREAM.md) for patches and limitations.
 
 ## Build and test
 
@@ -71,5 +69,5 @@ all signatures against [release-signing-key.asc](release-signing-key.asc).
 
 The release key fingerprint is `361C CF78 F83A DAED D8DC 6DA8 A32D AC0A CDC6 D35B`; the signing subkey is
 `2F78 F885 F811 292A 6199 2A11 8C31 C50B B472 B529` (expires 2028-11-08). Keep the primary key offline.
-Renew the subkey's expiry to preserve the fingerprint pinned by Gradle dependency verification;
+Extend the subkey's expiry rather than replacing it, so its fingerprint stays valid for verifiers;
 commit the updated public key and upload it to `keys.openpgp.org` and `keyserver.ubuntu.com`.

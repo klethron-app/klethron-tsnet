@@ -13,7 +13,7 @@ Requires **Android 14 (API 34)** or later. The AAR includes native libraries for
 
 **Under development.** Login, persistent identity, TCP dialing, logout and revocation have been tested
 locally and on a real tailnet. Broader network and device coverage is still needed; see
-[known limitations](UPSTREAM.md). See the
+[known limitations](UPSTREAM.md#limits). See the
 [Javadoc](https://javadoc.io/doc/com.klethron/tsnet/latest/) for the full API.
 
 ## Install

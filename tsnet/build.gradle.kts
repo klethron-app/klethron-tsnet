@@ -1,3 +1,5 @@
+import com.android.build.api.artifact.SingleArtifact
+
 plugins {
     alias(libs.plugins.android.library)
     `maven-publish`
@@ -69,18 +71,12 @@ androidComponents.onVariants { variant ->
     }
 }
 
-val verifyNativeAar = tasks.register<VerifyNativeAar>("verifyNativeAar") {
-    dependsOn("bundleReleaseAar")
-    aar.set(layout.buildDirectory.file("outputs/aar/tsnet-release.aar"))
-    report.set(layout.buildDirectory.file("reports/native/sizes.tsv"))
-}
-tasks.named("check") { dependsOn(verifyNativeAar) }
-
 // Audit the binaries actually packaged in each variant, not the wider go.mod graph.
-for (buildType in listOf("release", "debug")) {
-    val verifyNotices = tasks.register<VerifyNativeNotices>("verify" + buildType.replaceFirstChar { it.uppercase() } + "NativeNotices") {
-        dependsOn("bundle" + buildType.replaceFirstChar { it.uppercase() } + "Aar")
-        aar.set(layout.buildDirectory.file("outputs/aar/tsnet-$buildType.aar"))
+androidComponents.onVariants { variant ->
+    val buildType = variant.buildType!!
+    val aar = variant.artifacts.get(SingleArtifact.AAR)
+    val verifyNotices = tasks.register<VerifyNativeNotices>("verify${variant.name.replaceFirstChar { it.uppercase() }}NativeNotices") {
+        this.aar.set(aar)
         notices.set(layout.projectDirectory.dir("src/main/assets/klethron-tsnet/licenses"))
         if (buildType == "debug") debugNotices.set(layout.projectDirectory.dir("src/debug/assets/klethron-tsnet/licenses"))
         goVersion.set(libs.versions.go)
@@ -88,6 +84,13 @@ for (buildType in listOf("release", "debug")) {
         report.set(layout.buildDirectory.file("reports/native/notices-$buildType.tsv"))
     }
     tasks.named("check") { dependsOn(verifyNotices) }
+    if (buildType == "release") {
+        val verifyNativeAar = tasks.register<VerifyNativeAar>("verifyNativeAar") {
+            this.aar.set(aar)
+            report.set(layout.buildDirectory.file("reports/native/sizes.tsv"))
+        }
+        tasks.named("check") { dependsOn(verifyNativeAar) }
+    }
 }
 
 // AGP's Dokka-based Javadoc drops the code spans and links of Markdown doc comments; the JDK renders them.

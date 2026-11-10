@@ -1,3 +1,3 @@
--keepclasseswithmembernames,includedescriptorclasses class com.klethron.tsnet.** {
+-keepclasseswithmembernames class com.klethron.tsnet.TailnetNode {
     native <methods>;
 }

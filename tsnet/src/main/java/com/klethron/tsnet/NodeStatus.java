@@ -1,7 +1,7 @@
 package com.klethron.tsnet;
 
+import android.net.InetAddresses;
 import java.net.InetAddress;
-import java.net.UnknownHostException;
 import java.util.ArrayList;
 import java.util.List;
 import org.jspecify.annotations.Nullable;
@@ -61,12 +61,7 @@ public final class NodeStatus {
         String[] fields = record.split("\n", -1);
         List<InetAddress> addresses = new ArrayList<>();
         for (String address : fields[4].split(",")) {
-            if (address.isEmpty()) continue;
-            try {
-                addresses.add(InetAddress.getByName(address)); // A literal: never resolved.
-            } catch (UnknownHostException e) {
-                throw new IllegalStateException("Invalid native address", e);
-            }
+            if (!address.isEmpty()) addresses.add(InetAddresses.parseNumericAddress(address));
         }
         return new NodeStatus(owner, Long.parseLong(fields[0]), State.valueOf(fields[1]),
                 fields[2].isEmpty() ? null : Revocation.valueOf(fields[2]), fields[3].isEmpty() ? null : fields[3],
@@ -85,10 +80,10 @@ public final class NodeStatus {
         return revocation;
     }
 
-    /// The browser authorization URL, or `null` when no authorization is pending. Whoever opens
-    /// this URL can claim the node: send it only to the user's browser; never log or share it.
-    /// It clears once the new login is saved. Closing before then can lose that login.
-    /// A URL can also appear while [State#RUNNING] when renewing an existing login.
+    /// The browser authorization URL, or `null` when none is pending; it can also appear while
+    /// [State#RUNNING] when renewing a login. Whoever opens it can claim the node: send it only to
+    /// the user's browser, never log or share it. It clears once the new login is saved; closing
+    /// before then can lose that login.
     public @Nullable String loginUrl() {
         return loginUrl;
     }

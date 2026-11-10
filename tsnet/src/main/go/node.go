@@ -26,11 +26,11 @@ import (
 
 // node serializes upstream Start and Close, which must not run concurrently, publishes the
 // latest backend status to waiting callers and dials through the tailnet. Start does not wait
-// for the network, so Close waits at most for local initialization.
+// for the network, and calls end when the node closes, so Close waits at most for local work.
 type node struct {
 	server *tsnet.Server
 
-	lifecycle sync.Mutex
+	lifecycle sync.RWMutex // Held for reading by calls on a started node.
 	started   bool
 	stop      func() // Stops status watching and default-network reports once started successfully.
 
@@ -118,11 +118,11 @@ func (n *node) close() {
 	_ = n.server.Close()
 }
 
-// watchStatus follows the IPN bus until ctx ends. A new watch starts with the current state, so
-// re-watching after an unexpected disconnect (such as falling behind) loses nothing needed.
+// watchStatus follows the IPN bus until ctx ends. A new watch starts with the current state and
+// self node, so re-watching after an unexpected disconnect (such as falling behind) loses nothing needed.
 func (n *node) watchStatus(ctx context.Context, client *local.Client) {
 	for ctx.Err() == nil {
-		if watcher, err := client.WatchIPNBus(ctx, ipn.NotifyInitialState); err == nil {
+		if watcher, err := client.WatchIPNBus(ctx, ipn.NotifyInitialState|ipn.NotifyInitialStatus); err == nil {
 			for {
 				notify, err := watcher.Next()
 				if err != nil {
@@ -150,8 +150,9 @@ func (n *node) publish(notify ipn.Notify) {
 	if notify.State != nil {
 		status.state = *notify.State
 		switch status.state {
-		case ipn.NoState: // A new profile, as after a logout, has no network map yet.
+		case ipn.NoState: // A new profile, as after a logout, has no network map or pending login yet.
 			n.keyExpiry = time.Time{}
+			status.loginURL = ""
 		case ipn.Running:
 			status.err = ""
 		}
@@ -165,12 +166,23 @@ func (n *node) publish(notify ipn.Notify) {
 	// Every interactive login creates a new node key, which upstream saves before announcing the
 	// first network map with it. Closing the node at LoginFinished, which comes first, would lose the
 	// login. A re-authenticating node stays Running, so the state does not tell either.
-	if self := notify.SelfChange; self != nil {
-		n.keyExpiry = self.KeyExpiry
-		if self.Key != n.selfKey {
-			n.selfKey = self.Key
+	setSelf := func(self key.NodePublic, expiry time.Time) {
+		n.keyExpiry = expiry
+		if self != n.selfKey {
+			n.selfKey = self
 			status.loginURL = ""
 		}
+	}
+	// A watch has no initial SelfChange. Self has a key only with a network map.
+	if initial := notify.InitialStatus; initial != nil && initial.Self != nil && !initial.Self.PublicKey.IsZero() {
+		var expiry time.Time
+		if initial.Self.KeyExpiry != nil {
+			expiry = *initial.Self.KeyExpiry
+		}
+		setSelf(initial.Self.PublicKey, expiry)
+	}
+	if self := notify.SelfChange; self != nil {
+		setSelf(self.Key, self.KeyExpiry)
 	}
 	// As upstream's state machine, which reports NeedsLogin for these reasons too.
 	status.revocation = ""
@@ -258,19 +270,23 @@ const (
 )
 
 // whenStarted returns a context for a call on a started node, ending at the timeout or when the node
-// closes, or a failure result. It waits for a concurrent start.
-func (n *node) whenStarted(timeout time.Duration) (context.Context, context.CancelFunc, int) {
-	n.lifecycle.Lock()
-	started := n.stop != nil
-	n.lifecycle.Unlock()
-	if n.ctx.Err() != nil {
-		return nil, nil, resultClosed
+// closes, and a function to call when done, or a failure result. It waits for a concurrent start,
+// and close waits for the call: LocalAPI's Start ignores contexts and could outlive Server.Close.
+func (n *node) whenStarted(timeout time.Duration) (context.Context, func(), int) {
+	n.lifecycle.RLock()
+	result := resultNotStarted
+	switch {
+	case n.ctx.Err() != nil:
+		result = resultClosed
+	case n.stop != nil:
+		ctx, cancel := context.WithTimeout(n.ctx, timeout)
+		return ctx, func() {
+			cancel()
+			n.lifecycle.RUnlock()
+		}, 0
 	}
-	if !started {
-		return nil, nil, resultNotStarted
-	}
-	ctx, cancel := context.WithTimeout(n.ctx, timeout)
-	return ctx, cancel, 0
+	n.lifecycle.RUnlock()
+	return nil, nil, result
 }
 
 // failed maps a failure of a call with ctx from whenStarted to closed or timed out, if applicable.
@@ -292,11 +308,11 @@ func (n *node) dial(host string, port uint16, timeout time.Duration) int {
 	if host == "" || !utf8.ValidString(host) || strings.ContainsRune(host, 0) || port == 0 {
 		return resultInvalid
 	}
-	ctx, cancel, result := n.whenStarted(timeout)
+	ctx, done, result := n.whenStarted(timeout)
 	if result != 0 {
 		return result
 	}
-	defer cancel()
+	defer done()
 	if !n.awaitRunning(ctx) {
 		return n.failed(ctx, resultTimeout)
 	}
@@ -309,7 +325,7 @@ func (n *node) dial(host string, port uint16, timeout time.Duration) int {
 	// Netstack reaches exactly the peers and subnet routes in the network map. Upstream would dial
 	// other addresses, including Tailscale IPs of unknown nodes, through the device's network.
 	if !dialer.UseNetstackForIP(target.Addr()) {
-		return resultNoRoute
+		return n.failed(ctx, resultNoRoute)
 	}
 	conn, err := dialer.NetstackDialTCP(ctx, target)
 	if err != nil {
@@ -326,11 +342,11 @@ func (n *node) dial(host string, port uint16, timeout time.Duration) int {
 // logout asks control to expire this node's key, then deletes the node's profile from its state,
 // leaving the node in NeedsLogin. It returns 0, also when the node was not logged in, or a failure.
 func (n *node) logout(timeout time.Duration) int {
-	ctx, cancel, result := n.whenStarted(timeout)
+	ctx, done, result := n.whenStarted(timeout)
 	if result != 0 {
 		return result
 	}
-	defer cancel()
+	defer done()
 	client, err := n.server.LocalClient()
 	if err != nil {
 		return n.failed(ctx, resultLogoutFailed)
@@ -344,11 +360,11 @@ func (n *node) logout(timeout time.Duration) int {
 // login starts an interactive login, also after a logout or key expiry, and also when logged in, to
 // re-authenticate. The new login URL is published with the status. It returns 0 or a failure.
 func (n *node) login() int {
-	ctx, cancel, result := n.whenStarted(math.MaxInt64) // Neither call waits for the network.
+	ctx, done, result := n.whenStarted(math.MaxInt64) // Neither call waits for the network.
 	if result != 0 {
 		return result
 	}
-	defer cancel()
+	defer done()
 	client, err := n.server.LocalClient()
 	if err != nil {
 		return n.failed(ctx, resultLoginFailed)
@@ -385,8 +401,9 @@ func (n *node) awaitRunning(ctx context.Context) bool {
 
 // relay copies between conn and one end of a new socket pair, returning the other end's
 // descriptor. The peer's EOF reaches the app as end of stream while the app may keep writing.
-// The app's EOF (closing the descriptor or shutting down its output) ends the connection, so
-// connections never outlive the app's descriptor; half-closing towards the peer is not supported.
+// Unix sockets cannot signal a reset, so failures and closing ctx also appear as end of stream.
+// The app's EOF (closing the descriptor or shutting down its output) closes the connection once
+// its written data reaches the peer; half-closing towards the peer is not supported.
 func relay(ctx context.Context, conn net.Conn) (int, error) {
 	fds, err := syscall.Socketpair(syscall.AF_UNIX, syscall.SOCK_STREAM|syscall.SOCK_CLOEXEC, 0)
 	if err != nil {

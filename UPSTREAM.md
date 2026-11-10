@@ -1,10 +1,9 @@
 # Upstream issues
 
-Upstream behaviour at the pinned revision (Tailscale
-[`6372b9a43a5c`](https://github.com/tailscale/tailscale/commit/6372b9a43a5cbc3628bf65bd0ec40b4823510d2d), Go 1.27.3) that this library
-patches, works around or is limited by. Recheck every entry on each upstream update, and drop a patch
-or workaround once upstream fixes it. Patches are hash-checked in `BuildGoLibrary.kt` and documented in
-`TAILSCALE-MODIFICATIONS`.
+Upstream issues at Tailscale
+[`6372b9a43a5c`](https://github.com/tailscale/tailscale/commit/6372b9a43a5cbc3628bf65bd0ec40b4823510d2d)
+with Go 1.27.3. Recheck each entry on every update and drop fixes upstream has made.
+`BuildGoLibrary.kt` hash-checks the patches; `TAILSCALE-MODIFICATIONS` documents them.
 
 ## Patched
 
@@ -73,8 +72,10 @@ or workaround once upstream fixes it. Patches are hash-checked in `BuildGoLibrar
   `NoState`, which starts a new profile, as after logout).
 - **A watch that falls behind ends with an `ErrMessage`** that is not a backend error. Workaround: drop
   that exact text (unexported `watchIPNBusFellBehindMessage`) before reporting `error()`.
-- **`Start` is not context-aware, and concurrent `Start`/`Close` is forbidden.** Workaround: per-node mutex
-  in Go; `close` waits at most for local initialization.
+- **`Start` is not context-aware, and concurrent `Start`/`Close` is forbidden.** LocalAPI `Start` also
+  ignores its context and, run after `Close`, creates a control client that retries forever.
+  Workaround: a per-node read-write lock; `close` cancels calls, then waits for them and for local
+  initialization.
 - **Netmap cache persists peer data.** With control's `CacheNetworkMaps` capability, upstream writes peer
   names, addresses and keys under `profile-data/`, even for ephemeral in-memory nodes. Workaround:
   `ts_omit_cachenetmap`.
@@ -91,7 +92,9 @@ or workaround once upstream fixes it. Patches are hash-checked in `BuildGoLibrar
 - Live-tailnet coverage is still needed for 16 KiB devices, DERP-to-direct upgrades, restrictive NATs,
   subnet routes, IPv6 peers, throughput, prolonged outages, scheduled key expiry, revocation while
   stopped and Play split delivery.
-
+- **Names without a tailnet DNS route** fall back to the device's resolver when tailnet DNS fails
+  (`tsnet` `dnsResolver.hostLookup`), so the name leaves the tailnet; `dial` still connects only to
+  tailnet addresses. Upstream has no option to disable the fallback.
 - **`ts_omit_serve` breaks the `tsnet` build** (`tsnet.go` calls `SetServeConfig`/`GetServeConfig`
   unconditionally), so serve stays linked. **To report upstream.**
 - `ts_omit_tailnetlock` breaks the debug test servers.
@@ -103,15 +106,10 @@ or workaround once upstream fixes it. Patches are hash-checked in `BuildGoLibrar
   `AllNodes` includes staged rotation keys, including abandoned candidates; the hostname probe counts
   devices by stable ID.
 
-## Resolved upstream
-
-- [PR #22253](https://github.com/tailscale/tailscale/pull/22253) fixes `ts_omit_clientmetrics` builds
-  through `util/syspolicy`. Both variants now omit client metrics.
-
 ## Updating upstream
 
 Resolve `tailscale/tailscale` main to a full SHA; update the Go requirement and sums, the version
-assertions (`TailnetNodeTest`, `MinifiedDemoTest`) and the documented SHA; re-check patch hashes and every
+assertion in `TailnetNodeTest` and the documented SHA; re-check patch hashes and every
 entry above. Re-audit initialization, filesystem and subprocess reachability and state permissions, and
 retest the state format. Update both notice inventories (THIRD-PARTY-NOTICES.md), then rebuild both ABIs
 and repeat the device tests. Omit `serve` once upstream fixes its build; when the omitted feature set

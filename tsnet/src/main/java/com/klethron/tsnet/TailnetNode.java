@@ -26,6 +26,7 @@ import org.jspecify.annotations.Nullable;
 /// Keep the node open while using its connections, and [#close] it when finished. Calls may run
 /// concurrently; run blocking operations on a worker thread. Report network changes through
 /// [#setDefaultNetwork] so connections can recover when Wi-Fi or cellular changes.
+/// The first use of this class in a process loads its native library.
 public final class TailnetNode implements AutoCloseable {
     static {
         System.loadLibrary("klethron_tsnet");
@@ -49,7 +50,7 @@ public final class TailnetNode implements AutoCloseable {
     ///
     /// @param hostname the requested device name; Tailscale may adjust it
     /// @throws IllegalArgumentException if the directory is relative or the hostname is empty or contains NUL
-    /// @throws IllegalStateException if this node was already started or is closed
+    /// @throws IllegalStateException if [#start] was already called, even unsuccessfully, or the node is closed
     /// @throws IOException if initialization fails, including when the process environment sets
     ///     `TS_AUTHKEY` or `TS_AUTH_KEY`; this library only supports browser login
     @WorkerThread
@@ -95,12 +96,15 @@ public final class TailnetNode implements AutoCloseable {
     /// Opens a TCP connection to a tailnet address or
     /// [MagicDNS](https://tailscale.com/kb/1081/magicdns) name. `timeout` covers both waiting for
     /// [NodeStatus.State#RUNNING] and connecting; zero or negative values do not wait.
-    /// Only peers and subnet routes in this node's network map are reachable.
+    /// Only peers and subnet routes in this node's network map are reachable. A name without a tailnet
+    /// DNS route can be looked up through the device's resolver, but the connection stays in the tailnet.
     ///
     /// The caller owns the returned Unix stream socket. Use [java.io.FileInputStream] and
     /// [java.io.FileOutputStream] for blocking I/O, or [android.system.Os] for non-blocking I/O.
-    /// Buffering is bounded. Receiving EOF leaves the connection writable; closing the descriptor
-    /// or shutting down its output ends the whole connection. Closing the node ends all connections.
+    /// Unread data slows the sender in either direction. End of stream leaves the connection writable,
+    /// but a reset or failure also appears as end of stream. Closing the descriptor or shutting down
+    /// its output ends the whole connection once written data is delivered. Closing the node ends all
+    /// connections at once.
     ///
     /// @param host a tailnet IP address or MagicDNS name, at most 255 UTF-8 bytes
     /// @throws IllegalArgumentException if the host is invalid or the port is not 1–65535
@@ -156,7 +160,7 @@ public final class TailnetNode implements AutoCloseable {
     /// Forward [android.net.ConnectivityManager.NetworkCallback#onLinkPropertiesChanged] from a
     /// [android.net.ConnectivityManager#registerDefaultNetworkCallback(android.net.ConnectivityManager.NetworkCallback)]
     /// callback, and pass `null` on [android.net.ConnectivityManager.NetworkCallback#onLost].
-    /// The app owns registration and must keep it active while using nodes. Does not wait for the network.
+    /// Keep the callback registered while nodes are in use.
     ///
     /// @throws IllegalArgumentException if the interface name exceeds Linux's 15-byte limit
     @AnyThread
@@ -196,7 +200,9 @@ public final class TailnetNode implements AutoCloseable {
             case -7 -> throw new ConnectException("Tailnet connection failed");
             case -8 -> throw new IOException("Logout failed");
             case -9 -> throw new IOException("Login failed");
-            default -> { }
+            default -> {
+                if (result < 0) throw new IOException("Native failure " + result);
+            }
         }
     }
 

@@ -8,7 +8,8 @@ abi=$(adb shell getprop ro.product.cpu.abi)
 pages=$(adb shell getconf PAGESIZE)
 selinux=$(adb shell getenforce)
 printf 'API=%s ABI=%s page_size=%s SELinux=%s\n' "$api" "$abi" "$pages" "$selinux" | tee "$reports/device.txt"
-[[ $api == "$1" && $abi == x86_64 && $pages == "$2" && $selinux == Enforcing ]]
+[[ $api == "$1" && $abi == x86_64 && $pages == "$2" && $selinux == Enforcing ]] ||
+    { echo "Expected an SELinux Enforcing x86_64 device with API $1 and $2-byte pages" >&2; exit 1; }
 adb shell svc wifi enable
 adb shell svc data enable
 

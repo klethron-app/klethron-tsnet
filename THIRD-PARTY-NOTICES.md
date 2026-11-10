@@ -20,9 +20,8 @@ Notices were copied verbatim from the checksum-verified module cache: each modul
 patent notice, plus the nested `internal/snapref` and `zstd/internal/xxhash` licences of the compression
 module, which are in the Android import graph.
 
-The patch is applied to an isolated copy through a temporary `tailscale.com => ./tailscale` replacement.
-Binary metadata records that replacement, so the inventory's Tailscale checksum identifies the
-**unmodified upstream module**, not the patched source.
+Both patches are applied to an isolated copy through a temporary `tailscale.com => ./tailscale`
+replacement. The inventory's Tailscale checksum identifies the **unmodified upstream module**.
 
 `./gradlew build` runs `verifyReleaseNativeNotices` and `verifyDebugNativeNotices`. They inspect each AAR's
 libraries and fail on missing or stale modules, version or checksum drift, any other replacement, a
@@ -36,8 +35,6 @@ toolchain or module change requires a new per-file review. Reports are in
 Reviewed 2026-11-09 for the release libraries: all 2,758 Go, assembly, C, header and embedded files that
 `go list -deps` selects for either ABI (1,385 from the standard library), searched for copyright, licence,
 SPDX, public-domain and "derived/adapted/copied from" text and for `Code generated` headers.
-The update to `6372b9a43a5c` and omission of client metrics add no notices or modules; the module
-licences, embedded resources and subprocess call sites are unchanged.
 
 - **Per-file notices** beyond the module licences are in `FILE-NOTICES`: Sun (FreeBSD msun) and Cephes
   code in Go's `math`, Inferno's MIT `memmove` (x86_64), gVisor's BSD-licensed `pkg/sync`, half-rs (MIT)

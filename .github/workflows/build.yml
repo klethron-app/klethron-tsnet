@@ -166,7 +166,8 @@ jobs:
           central() { curl --fail-with-body --silent --show-error -H @<(printf '%s\n' "$auth") "$@"; }
           id=$(central -F bundle=@bundle.zip "$api/upload?name=tsnet-${GITHUB_REF_NAME#v}&publishingType=AUTOMATIC")
           for _ in $(seq 300); do
-            status=$(central -X POST "$api/status?id=$id")
+            # Retry only the idempotent status call: a repeated upload would create another deployment.
+            status=$(central --retry 5 --retry-all-errors -X POST "$api/status?id=$id")
             case $(jq -r .deploymentState <<<"$status") in
               PUBLISHED) echo "Deployment $id published"; exit 0 ;;
               FAILED) jq .errors <<<"$status"; exit 1 ;;

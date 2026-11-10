@@ -1,6 +1,5 @@
 package com.klethron.tsnet.demo;
 
-import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
 import android.app.Activity;
@@ -78,9 +77,9 @@ public final class MinifiedDemoTest {
                     assertTrue("No result from the demo", SystemClock.uptimeMillis() < deadline);
                     instrumentation.runOnMainSync(() -> result[0] = button.isEnabled() ? button.getText().toString() : null);
                 }
-                assertEquals("Loaded v1.105.0-pre.0.20261109203758-6372b9a43a5c\n"
-                                + "Node created and closed. No network started.",
-                        result[0]);
+                // TailnetNodeTest checks the exact version.
+                assertTrue(result[0], result[0].startsWith("Loaded v1.")
+                        && result[0].endsWith("\nNode created and closed. No network started."));
             }
         } finally {
             instrumentation.runOnMainSync(activity::finish);

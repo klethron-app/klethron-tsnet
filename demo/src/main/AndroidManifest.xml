@@ -3,8 +3,9 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <application android:label="Klethron tsnet demo" android:allowBackup="false"
         android:supportsRtl="true" android:theme="@android:style/Theme.Material.Light.NoActionBar">
-        <!-- Recreation would close the node, losing a pending login: handle configuration changes in place. -->
-        <activity android:name=".LiveActivity" android:exported="false"
+        <!-- One instance owns the state directory. Recreation would close the node, losing a pending login:
+             handle configuration changes in place. -->
+        <activity android:name=".LiveActivity" android:exported="false" android:launchMode="singleTask"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|density|uiMode|fontScale|fontWeightAdjustment|keyboard|keyboardHidden|navigation|locale|layoutDirection" />
         <activity android:name=".MainActivity" android:exported="true">
             <intent-filter>

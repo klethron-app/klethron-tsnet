@@ -68,7 +68,7 @@ public final class LoginTest {
             // Never print login URLs, even in test failures.
             assertTrue("Unexpected login URL", status.loginUrl().startsWith(controlUrl + "/auth/"));
             assertFalse(status.toString().contains("/auth/"));
-            assertTrue(nativeProbeComplete(status.loginUrl().getBytes(StandardCharsets.UTF_8)));
+            complete(status);
 
             status = await(node, s -> s.state() == NodeStatus.State.RUNNING);
             assertNull(status.loginUrl());
@@ -102,8 +102,8 @@ public final class LoginTest {
             NodeStatus status = await(node, s -> s.loginUrl() != null);
             firstUrl = status.loginUrl();
             node.logout(WAIT); // Not logged in: no effect.
-            assertEquals(firstUrl, node.awaitStatus(null, WAIT).loginUrl());
-            assertTrue(nativeProbeComplete(firstUrl.getBytes(StandardCharsets.UTF_8)));
+            assertEquals(firstUrl, node.awaitStatus(null, Duration.ZERO).loginUrl());
+            complete(status);
             assertFalse(await(node, s -> s.state() == NodeStatus.State.RUNNING).addresses().isEmpty());
 
             assertThrows(SocketTimeoutException.class, () -> node.logout(Duration.ZERO));
@@ -123,12 +123,17 @@ public final class LoginTest {
             assertFalse("Login URL was reused", firstUrl.equals(status.loginUrl()));
             // Logout reset the prefs, including control URL and hostname; login restores both.
             assertTrue("Unexpected login URL", status.loginUrl().startsWith(controlUrl + "/auth/"));
-            assertTrue(nativeProbeComplete(status.loginUrl().getBytes(StandardCharsets.UTF_8)));
+            complete(status);
             assertFalse(await(node, s -> s.state() == NodeStatus.State.RUNNING).addresses().isEmpty());
             // Control keeps the logged-out registration: testcontrol ignores the logout's expiry.
             assertEquals("klethron-logout-test\nklethron-logout-test", nativeProbeHostnames());
+            // Logout discards a pending re-authentication URL with the key it would authorize.
+            node.login();
+            await(node, s -> s.loginUrl() != null);
             node.logout(WAIT);
-            assertTrue(await(node, s -> s.state() == NodeStatus.State.NEEDS_LOGIN).addresses().isEmpty());
+            status = await(node, s -> s.state() == NodeStatus.State.NEEDS_LOGIN);
+            assertNull(status.loginUrl());
+            assertTrue(status.addresses().isEmpty());
         }
         assertOnlyStateFile();
 
@@ -140,7 +145,7 @@ public final class LoginTest {
                 return s.loginUrl() != null;
             });
             assertFalse("Login URL was reused", firstUrl.equals(status.loginUrl()));
-            assertTrue(nativeProbeComplete(status.loginUrl().getBytes(StandardCharsets.UTF_8)));
+            complete(status);
             assertFalse(await(node, s -> s.state() == NodeStatus.State.RUNNING).addresses().isEmpty());
             node.close();
             assertThrows(IllegalStateException.class, () -> node.logout(WAIT));
@@ -155,7 +160,7 @@ public final class LoginTest {
         try (TailnetNode node = new TailnetNode()) {
             node.start(directory.toFile(), "klethron-logout-failure-test", controlUrl);
             NodeStatus status = await(node, s -> s.loginUrl() != null);
-            assertTrue(nativeProbeComplete(status.loginUrl().getBytes(StandardCharsets.UTF_8)));
+            complete(status);
             addresses = await(node, s -> s.state() == NodeStatus.State.RUNNING).addresses();
             nativeProbeRejectRegistrations(true);
             assertThrows(IOException.class, () -> node.logout(WAIT));
@@ -193,7 +198,7 @@ public final class LoginTest {
         try (TailnetNode node = new TailnetNode()) {
             node.start(directory.toFile(), "klethron-expiry-test", controlUrl);
             NodeStatus status = await(node, s -> s.loginUrl() != null);
-            assertTrue(nativeProbeComplete(status.loginUrl().getBytes(StandardCharsets.UTF_8)));
+            complete(status);
             addresses = await(node, s -> s.state() == NodeStatus.State.RUNNING).addresses();
 
             assertNull(status.revocation());
@@ -216,7 +221,7 @@ public final class LoginTest {
             assertTrue("Unexpected login URL", status.loginUrl().startsWith(controlUrl + "/auth/"));
             // Control stages the replacement key alongside the old key for the same device.
             assertEquals("klethron-expiry-test", nativeProbeHostnames());
-            assertTrue(nativeProbeComplete(status.loginUrl().getBytes(StandardCharsets.UTF_8)));
+            complete(status);
             status = await(node, s -> s.state() == NodeStatus.State.RUNNING);
             assertNull(status.loginUrl());
             assertNull(status.revocation());
@@ -228,7 +233,7 @@ public final class LoginTest {
             assertEquals(NodeStatus.State.RUNNING, status.state());
             assertTrue("Unexpected login URL", status.loginUrl().startsWith(controlUrl + "/auth/"));
             assertEquals("klethron-expiry-test", nativeProbeHostnames());
-            assertTrue(nativeProbeComplete(status.loginUrl().getBytes(StandardCharsets.UTF_8)));
+            complete(status);
             // The URL is cleared once the new key is saved, so closing then keeps the login.
             status = await(node, s -> s.loginUrl() == null);
             assertEquals(NodeStatus.State.RUNNING, status.state());
@@ -253,7 +258,7 @@ public final class LoginTest {
         try (TailnetNode node = new TailnetNode()) {
             node.start(directory.toFile(), "klethron-removal-test", controlUrl);
             NodeStatus status = await(node, s -> s.loginUrl() != null);
-            assertTrue(nativeProbeComplete(status.loginUrl().getBytes(StandardCharsets.UTF_8)));
+            complete(status);
             await(node, s -> s.state() == NodeStatus.State.RUNNING);
         }
         // testcontrol keeps streaming to a running node, so it notices at its next start.
@@ -269,7 +274,7 @@ public final class LoginTest {
             assertEquals(NodeStatus.State.NEEDS_LOGIN, status.state());
             assertEquals(NodeStatus.Revocation.NODE_REMOVED, status.revocation());
             nativeProbeRemove(false);
-            assertTrue(nativeProbeComplete(status.loginUrl().getBytes(StandardCharsets.UTF_8)));
+            complete(status);
             status = await(node, s -> s.state() == NodeStatus.State.RUNNING);
             assertNull(status.revocation());
             assertFalse(status.addresses().isEmpty());
@@ -292,7 +297,7 @@ public final class LoginTest {
             nativeProbeRejectRegistrations(false);
             status = await(node, s -> s.loginUrl() != null);
             assertEquals("invalid authkey", status.error());
-            assertTrue(nativeProbeComplete(status.loginUrl().getBytes(StandardCharsets.UTF_8)));
+            complete(status);
             status = await(node, s -> s.state() == NodeStatus.State.RUNNING);
             assertNull(status.error());
         }
@@ -305,7 +310,7 @@ public final class LoginTest {
         try (TailnetNode node = new TailnetNode()) {
             node.start(directory.toFile(), "klethron-approval-test", controlUrl);
             NodeStatus status = await(node, s -> s.loginUrl() != null);
-            assertTrue(nativeProbeComplete(status.loginUrl().getBytes(StandardCharsets.UTF_8)));
+            complete(status);
             status = await(node, s -> s.state() == NodeStatus.State.NEEDS_MACHINE_AUTH);
             assertNull(status.loginUrl());
             assertEquals(1, nativeProbeApproveMachines());
@@ -317,17 +322,18 @@ public final class LoginTest {
 
     @Test(timeout = 60000)
     public void closeWakesWaitersAndRejectsLaterCalls() throws Exception {
-        TailnetNode node = new TailnetNode();
-        node.start(directory.toFile(), "klethron-close-test", controlUrl);
-        NodeStatus status = await(node, s -> s.loginUrl() != null);
-        CompletableFuture<Throwable> waiter = CompletableFuture.supplyAsync(() ->
-                assertThrows(IllegalStateException.class, () -> node.awaitStatus(status, Duration.ofMinutes(5))));
-        Thread.sleep(200); // Let the waiter block.
-        node.close();
-        assertNotNull(waiter.get(10, TimeUnit.SECONDS));
-        node.close();
-        assertThrows(IllegalStateException.class, () -> node.awaitStatus(null, WAIT));
-        assertThrows(IllegalStateException.class, () -> node.start(directory.toFile(), "late", controlUrl));
+        try (TailnetNode node = new TailnetNode()) {
+            node.start(directory.toFile(), "klethron-close-test", controlUrl);
+            NodeStatus status = await(node, s -> s.loginUrl() != null);
+            CompletableFuture<Throwable> waiter = CompletableFuture.supplyAsync(() ->
+                    assertThrows(IllegalStateException.class, () -> node.awaitStatus(status, Duration.ofMinutes(5))));
+            Thread.sleep(200); // Best effort: let the waiter block.
+            node.close();
+            assertNotNull(waiter.get(10, TimeUnit.SECONDS));
+            node.close();
+            assertThrows(IllegalStateException.class, () -> node.awaitStatus(null, WAIT));
+            assertThrows(IllegalStateException.class, () -> node.start(directory.toFile(), "late", controlUrl));
+        }
     }
 
     @Test(timeout = 30000)
@@ -362,6 +368,11 @@ public final class LoginTest {
             if (condition.test(status)) return status;
         } while (System.nanoTime() < deadline);
         throw new AssertionError("Timed out at " + status);
+    }
+
+    /// Completes the pending login in place of the user's browser.
+    private static void complete(NodeStatus status) {
+        assertTrue(nativeProbeComplete(status.loginUrl().getBytes(StandardCharsets.UTF_8)));
     }
 
     static Path temporaryDirectory(String prefix) throws Exception {

@@ -7,6 +7,7 @@ package main
 import "C"
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"unsafe"
@@ -49,7 +50,7 @@ func androidInterfaces() ([]netmon.Interface, error) {
 			continue
 		}
 		if _, bits := mask.Size(); bits != len(ip)*8 {
-			return nil, fmt.Errorf("getifaddrs: invalid address mask")
+			continue // Not a prefix mask.
 		}
 		name := C.GoString(entry.ifa_name)
 		index, found := byName[name]
@@ -58,20 +59,27 @@ func androidInterfaces() ([]netmon.Interface, error) {
 			if err != nil {
 				return nil, err
 			}
-			if err := unix.IoctlIfreq(fd, unix.SIOCGIFINDEX, req); err != nil {
-				return nil, fmt.Errorf("interface index: %w", err)
+			iface := &net.Interface{Name: name}
+			var flags uint16
+			err = unix.IoctlIfreq(fd, unix.SIOCGIFINDEX, req)
+			if err == nil {
+				iface.Index = int(req.Uint32())
+				err = unix.IoctlIfreq(fd, unix.SIOCGIFMTU, req)
 			}
-			iface := &net.Interface{Name: name, Index: int(req.Uint32())}
-			if err := unix.IoctlIfreq(fd, unix.SIOCGIFMTU, req); err != nil {
-				return nil, fmt.Errorf("interface MTU: %w", err)
+			if err == nil {
+				iface.MTU = int(req.Uint32())
+				// Query flags explicitly: bionic can return success even if its
+				// own flag lookup failed, leaving ifa_flags unset.
+				err = unix.IoctlIfreq(fd, unix.SIOCGIFFLAGS, req)
+				flags = req.Uint16()
 			}
-			iface.MTU = int(req.Uint32())
-			// Query flags explicitly: bionic can return success even if its
-			// own flag lookup failed, leaving ifa_flags unset.
-			if err := unix.IoctlIfreq(fd, unix.SIOCGIFFLAGS, req); err != nil {
-				return nil, fmt.Errorf("interface flags: %w", err)
+			if errors.Is(err, unix.ENODEV) {
+				byName[name] = -1 // Removed since getifaddrs, as during network changes.
+				continue
 			}
-			flags := req.Uint16()
+			if err != nil {
+				return nil, fmt.Errorf("interface %s: %w", name, err)
+			}
 			for _, flag := range []struct {
 				native uint16
 				goFlag net.Flags
@@ -87,6 +95,9 @@ func androidInterfaces() ([]netmon.Interface, error) {
 			index = len(result)
 			byName[name] = index
 			result = append(result, netmon.Interface{Interface: iface, AltAddrs: []net.Addr{}})
+		}
+		if index < 0 {
+			continue
 		}
 		result[index].AltAddrs = append(result[index].AltAddrs, &net.IPNet{IP: ip, Mask: mask})
 	}

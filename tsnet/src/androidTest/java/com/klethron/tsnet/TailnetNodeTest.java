@@ -8,6 +8,10 @@ import java.time.Duration;
 import org.junit.Test;
 
 public final class TailnetNodeTest {
+    static {
+        System.loadLibrary("klethron_tsnet");
+    }
+
     @Test
     public void reportsLinkedTailscaleVersion() {
         assertTrue(TailnetNode.tailscaleVersion().startsWith("v1."));
@@ -34,7 +38,6 @@ public final class TailnetNodeTest {
 
     @Test
     public void concurrentCloseWaitsForShutdown() {
-        assertTrue(TailnetNode.tailscaleVersion().startsWith("v1.")); // Load the library.
         assertTrue(nativeConcurrentClose());
     }
 

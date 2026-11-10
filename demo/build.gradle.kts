@@ -18,14 +18,13 @@ android {
         minSdk = libs.versions.minSdk.get().toInt()
         targetSdk = libs.versions.targetSdk.get().toInt()
         versionCode = 1
-        versionName = "0.1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     buildTypes {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
-            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))
+            // No default rules, whose JNI keep rule would hide gaps in the library's consumer rules.
             testProguardFiles("test-rules.pro")
             // This demo is a consumer test, not a distributable application.
             signingConfig = signingConfigs.getByName("debug")

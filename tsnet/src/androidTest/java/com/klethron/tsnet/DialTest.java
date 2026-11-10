@@ -2,6 +2,7 @@ package com.klethron.tsnet;
 
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
@@ -140,12 +141,7 @@ public final class DialTest {
     public void slowsAPeerWhileTheAppDoesNotRead() throws Exception {
         try (TailnetNode node = startNode();
                 ParcelFileDescriptor connection = node.dial(peer, 7073, WAIT)) {
-            // Until the peer has written and then made no progress for a second.
-            long flooded = 0;
-            for (long last = 0; flooded == 0 || flooded != last; Thread.sleep(1000)) {
-                last = flooded;
-                flooded = LoginTest.nativeProbeFlooded();
-            }
+            long flooded = awaitFloodStalled();
             Log.i("DialTest", "Peer stalled after writing " + flooded + " unread bytes");
             assertTrue("Peer was not slowed: " + flooded, flooded < FLOOD);
             FileDescriptor fd = nonBlocking(connection);
@@ -185,12 +181,7 @@ public final class DialTest {
     public void closesAnUnreadConnectionWithNode() throws Exception {
         try (TailnetNode node = startNode();
                 ParcelFileDescriptor connection = node.dial(peer, 7073, WAIT)) {
-            long flooded = 0;
-            for (long last = 0; flooded == 0 || flooded != last; Thread.sleep(1000)) {
-                last = flooded;
-                flooded = LoginTest.nativeProbeFlooded();
-            }
-            assertTrue("Peer was not slowed", flooded < FLOOD);
+            assertTrue("Peer was not slowed", awaitFloodStalled() < FLOOD);
             node.close();
             // With unread data, closing only the tailnet socket leaves the relay blocked.
             assertTrue("Relay stayed open", poll(connection.getFileDescriptor(), 0, 10000));
@@ -215,21 +206,22 @@ public final class DialTest {
 
     @Test(timeout = 60000)
     public void refusesInvalidCallsAndClosesConnectionsWithNode() throws Exception {
-        TailnetNode node = new TailnetNode();
-        assertThrows(IllegalStateException.class, () -> node.dial(peer, 7070, WAIT));
-        assertThrows(IllegalArgumentException.class, () -> node.dial("", 7070, WAIT));
-        assertThrows(IllegalArgumentException.class, () -> node.dial("a".repeat(256), 7070, WAIT));
-        assertThrows(IllegalArgumentException.class, () -> node.dial(peer, 0, WAIT));
-        assertThrows(IllegalArgumentException.class, () -> node.dial(peer, 65536, WAIT));
-        node.start(directory.resolve("node").toFile(), "klethron-dialer", controlUrl);
-        assertThrows(IllegalArgumentException.class, () -> node.dial("a\0b", 7070, WAIT));
-        try (ParcelFileDescriptor connection = node.dial(peer, 7070, WAIT)) {
-            node.close();
-            assertEquals(-1, new FileInputStream(connection.getFileDescriptor()).read());
-            // EPIPE, rather than a SIGPIPE that would end the process.
-            assertThrows(IOException.class, () -> new FileOutputStream(connection.getFileDescriptor()).write(1));
+        try (TailnetNode node = new TailnetNode()) {
+            assertThrows(IllegalStateException.class, () -> node.dial(peer, 7070, WAIT));
+            assertThrows(IllegalArgumentException.class, () -> node.dial("", 7070, WAIT));
+            assertThrows(IllegalArgumentException.class, () -> node.dial("a".repeat(256), 7070, WAIT));
+            assertThrows(IllegalArgumentException.class, () -> node.dial(peer, 0, WAIT));
+            assertThrows(IllegalArgumentException.class, () -> node.dial(peer, 65536, WAIT));
+            node.start(directory.resolve("node").toFile(), "klethron-dialer", controlUrl);
+            assertThrows(IllegalArgumentException.class, () -> node.dial("a\0b", 7070, WAIT));
+            try (ParcelFileDescriptor connection = node.dial(peer, 7070, WAIT)) {
+                node.close();
+                assertEquals(-1, new FileInputStream(connection.getFileDescriptor()).read());
+                // EPIPE, rather than a SIGPIPE that would end the process.
+                assertThrows(IOException.class, () -> new FileOutputStream(connection.getFileDescriptor()).write(1));
+            }
+            assertThrows(IllegalStateException.class, () -> node.dial(peer, 7070, WAIT));
         }
-        assertThrows(IllegalStateException.class, () -> node.dial(peer, 7070, WAIT));
     }
 
     @Test(timeout = 60000)
@@ -241,30 +233,43 @@ public final class DialTest {
             node.logout(WAIT);
             // The peer is gone from this node's tailnet: nothing is echoed, and new dials wait for a login.
             write(connection, new byte[] {2});
-            StructPollfd poll = new StructPollfd();
-            poll.fd = connection.getFileDescriptor();
-            poll.events = (short) OsConstants.POLLIN;
-            assertEquals(0, Os.poll(new StructPollfd[] {poll}, 2000));
+            assertFalse(poll(connection.getFileDescriptor(), OsConstants.POLLIN, 2000));
             assertThrows(SocketTimeoutException.class, () -> node.dial(peer, 7070, Duration.ofMillis(500)));
         }
     }
 
     @Test(timeout = 60000)
     public void timesOutAndWakesOnCloseWhileNotRunning() throws Exception {
-        TailnetNode node = new TailnetNode();
-        node.start(directory.resolve("node").toFile(), "klethron-dialer", "http://127.0.0.1:1");
-        assertThrows(SocketTimeoutException.class, () -> node.dial(peer, 7070, Duration.ofMillis(200)));
-        CompletableFuture<Throwable> dialer = CompletableFuture.supplyAsync(() ->
-                assertThrows(IllegalStateException.class, () -> node.dial(peer, 7070, Duration.ofMinutes(5))));
-        Thread.sleep(200); // Let the dial block.
-        node.close();
-        dialer.get(10, TimeUnit.SECONDS);
+        try (TailnetNode node = new TailnetNode()) {
+            node.start(directory.resolve("node").toFile(), "klethron-dialer", "http://127.0.0.1:1");
+            assertThrows(SocketTimeoutException.class, () -> node.dial(peer, 7070, Duration.ofMillis(200)));
+            CompletableFuture<Throwable> dialer = CompletableFuture.supplyAsync(() ->
+                    assertThrows(IllegalStateException.class, () -> node.dial(peer, 7070, Duration.ofMinutes(5))));
+            Thread.sleep(200); // Best effort: let the dial block.
+            node.close();
+            dialer.get(10, TimeUnit.SECONDS);
+        }
     }
 
     private TailnetNode startNode() throws IOException {
         TailnetNode node = new TailnetNode();
-        node.start(directory.resolve("node").toFile(), "klethron-dialer", controlUrl);
+        try {
+            node.start(directory.resolve("node").toFile(), "klethron-dialer", controlUrl);
+        } catch (IOException | RuntimeException e) {
+            node.close();
+            throw e;
+        }
         return node;
+    }
+
+    /// Waits until the peer on port 7073 has written and then made no progress for a second.
+    private static long awaitFloodStalled() throws InterruptedException {
+        long flooded = 0;
+        for (long last = 0; flooded == 0 || flooded != last; Thread.sleep(1000)) {
+            last = flooded;
+            flooded = LoginTest.nativeProbeFlooded();
+        }
+        return flooded;
     }
 
     /// Bytes of the probe pattern (byte `i` is `i % 251`) that the peer floods on port 7073 and

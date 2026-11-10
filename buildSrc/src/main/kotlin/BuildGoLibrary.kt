@@ -44,20 +44,24 @@ abstract class BuildGoLibrary @Inject constructor(
             exec.exec {
                 workingDir(directory)
                 commandLine("go", *args)
-                environment(env + mapOf("GOTOOLCHAIN" to "local", "GOWORK" to "off"))
+                // Override ambient settings that would change the shipped code without changing inputs.
+                environment(env + mapOf("GOTOOLCHAIN" to "local", "GOWORK" to "off", "GOFLAGS" to "",
+                    "GOEXPERIMENT" to "", "GOAMD64" to "v1", "GOARM64" to "v8.0",
+                    "CGO_CFLAGS" to "-O2 -g", "CGO_CPPFLAGS" to "", "CGO_LDFLAGS" to "-O2 -g"))
                 standardOutput = output
             }
             return output.toString(Charsets.UTF_8)
         }
         val source = sources.get().asFile
         if (!go(source, "version").startsWith("go version go${goVersion.get()} ")) {
-            throw GradleException("Install Go ${goVersion.get()}, then rerun ./gradlew :tsnet:assembleRelease")
+            throw GradleException("Install Go ${goVersion.get()}, then rerun ./gradlew build")
         }
+        // The NDK ships Linux binaries for x86_64 only, and universal macOS binaries as darwin-x86_64.
         val host = when (System.getProperty("os.name")) {
-            "Linux" -> "linux-x86_64"
+            "Linux" -> if (System.getProperty("os.arch") == "amd64") "linux-x86_64" else null
             "Mac OS X" -> "darwin-x86_64"
-            else -> throw GradleException("Build native code on Linux or macOS with ./gradlew build")
-        }
+            else -> null
+        } ?: throw GradleException("Build native code on Linux x86_64 or macOS with ./gradlew build")
         val ndk = sdkDirectory.dir("ndk/${ndkVersion.get()}").get().asFile
         val (arch, triple) = when (abi.get()) {
             "arm64-v8a" -> "arm64" to "aarch64-linux-android"
@@ -76,13 +80,15 @@ abstract class BuildGoLibrary @Inject constructor(
         go(source, "mod", "verify")
         val upstream = File(module["Dir"] as String)
         val workspace = temporaryDir.resolve("go")
-        files.sync { from(source); into(workspace) }
         files.sync {
-            from(upstream)
-            into(workspace.resolve("tailscale"))
-            // Module-cache directories are read-only; our private build copy must be writable.
-            dirPermissions { unix("0755") }
-            filePermissions { unix("0644") }
+            into(workspace)
+            from(source)
+            from(upstream) {
+                into("tailscale")
+                // Module-cache directories are read-only; our private build copy must be writable.
+                dirPermissions { unix("0755") }
+                filePermissions { unix("0644") }
+            }
         }
         fun patch(path: String, expectedHash: String, before: String, after: String) {
             val original = upstream.resolve(path).readBytes()

@@ -30,11 +30,11 @@ func newServer() *tsnet.Server {
 
 // Java holds node IDs, never Go pointers. IDs are not reused, so a call racing or following
 // close finds no node instead of a different one.
-var nodes struct {
+var nodes = struct {
 	sync.Mutex
 	byID map[int64]*node
 	last int64
-}
+}{byID: make(map[int64]*node)}
 
 func lookupNode(id C.longlong) *node {
 	nodes.Lock()
@@ -47,9 +47,6 @@ func klethron_node_create() C.longlong {
 	n := newNode(newServer())
 	nodes.Lock()
 	defer nodes.Unlock()
-	if nodes.byID == nil {
-		nodes.byID = make(map[int64]*node)
-	}
 	nodes.last++
 	nodes.byID[nodes.last] = n
 	return C.longlong(nodes.last)
