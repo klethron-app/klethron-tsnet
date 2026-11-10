@@ -6,9 +6,9 @@ import java.util.ArrayList;
 import java.util.List;
 import org.jspecify.annotations.Nullable;
 
-/// A snapshot of a [TailnetNode]'s connection, login progress and assigned IP addresses.
+/// A snapshot of a [TailnetNode]'s connection, login progress, assigned IP addresses and peers.
 /// Pass it to [TailnetNode#awaitStatus] to wait for a change. Snapshots are immutable.
-/// [#toString()] omits login URLs and error text, which may contain private information.
+/// [#toString()] omits login URLs, error text and peers, which may contain private information.
 public final class NodeStatus {
     /// Connection and authorization progress.
     public enum State {
@@ -36,6 +36,20 @@ public final class NodeStatus {
         NODE_REMOVED,
     }
 
+    /// Another device in this node's tailnet, to show for selection and pass to [TailnetNode#dial].
+    ///
+    /// @param dnsName the [MagicDNS](https://tailscale.com/kb/1081/magicdns) name without a trailing
+    ///     dot, such as `host.tailnet-name.ts.net`. Its first label is the device's machine name.
+    /// @param os the operating system the device reports, such as `linux`, `macOS`, `windows`, `iOS`
+    ///     or `android`, or empty if unknown
+    /// @param online whether Tailscale reports the device as connected; `false` if unknown
+    /// @param addresses the device's Tailscale IP addresses, IPv4 first
+    public record Peer(String dnsName, String os, boolean online, List<InetAddress> addresses) {
+        public Peer {
+            addresses = List.copyOf(addresses);
+        }
+    }
+
     final long owner;
     final long version;
     private final State state;
@@ -43,9 +57,10 @@ public final class NodeStatus {
     private final @Nullable String loginUrl;
     private final List<InetAddress> addresses;
     private final @Nullable String error;
+    private final List<Peer> peers;
 
     private NodeStatus(long owner, long version, State state, @Nullable Revocation revocation, @Nullable String loginUrl,
-            List<InetAddress> addresses, @Nullable String error) {
+            List<InetAddress> addresses, @Nullable String error, List<Peer> peers) {
         this.owner = owner;
         this.version = version;
         this.state = state;
@@ -53,19 +68,29 @@ public final class NodeStatus {
         this.loginUrl = loginUrl;
         this.addresses = addresses;
         this.error = error;
+        this.peers = peers;
     }
 
-    /// Parses native "version\nSTATE\nREVOCATION\nloginURL\naddresses\nerror" records; empty fields
-    /// are absent.
+    /// Parses native "version\nSTATE\nREVOCATION\nloginURL\naddresses\nerror" records, followed by
+    /// "\ndnsName,os,online,addresses" peer lines; empty fields are absent. Addresses are comma-separated.
     static NodeStatus parse(long owner, String record) {
         String[] fields = record.split("\n", -1);
-        List<InetAddress> addresses = new ArrayList<>();
-        for (String address : fields[4].split(",")) {
-            if (!address.isEmpty()) addresses.add(InetAddresses.parseNumericAddress(address));
+        List<Peer> peers = new ArrayList<>();
+        for (int i = 6; i < fields.length; i++) {
+            String[] peer = fields[i].split(",", 4);
+            peers.add(new Peer(peer[0], peer[1], Boolean.parseBoolean(peer[2]), addresses(peer[3])));
         }
         return new NodeStatus(owner, Long.parseLong(fields[0]), State.valueOf(fields[1]),
                 fields[2].isEmpty() ? null : Revocation.valueOf(fields[2]), fields[3].isEmpty() ? null : fields[3],
-                List.copyOf(addresses), fields[5].isEmpty() ? null : fields[5]);
+                addresses(fields[4]), fields[5].isEmpty() ? null : fields[5], List.copyOf(peers));
+    }
+
+    private static List<InetAddress> addresses(String list) {
+        List<InetAddress> addresses = new ArrayList<>();
+        for (String address : list.split(",")) {
+            if (!address.isEmpty()) addresses.add(InetAddresses.parseNumericAddress(address));
+        }
+        return List.copyOf(addresses);
     }
 
     /// The node's connection and authorization state.
@@ -101,9 +126,18 @@ public final class NodeStatus {
         return error;
     }
 
+    /// The other devices in this node's network map, sorted by [Peer#dnsName()]; empty before joining
+    /// and after logout. Omits devices that may only connect to this node and Mullvad exit nodes.
+    /// Peers can remain listed while not [State#RUNNING], as after key expiry, but are unreachable.
+    /// Each change, including a peer going online or offline, is a status change.
+    public List<Peer> peers() {
+        return peers;
+    }
+
     @Override
     public String toString() {
         return "NodeStatus{" + state + (revocation == null ? "" : ", " + revocation) + ", addresses=" + addresses
-                + (loginUrl == null ? "" : ", loginUrl=<omitted>") + (error == null ? "" : ", error=<omitted>") + "}";
+                + (loginUrl == null ? "" : ", loginUrl=<omitted>") + (error == null ? "" : ", error=<omitted>")
+                + ", peers=" + peers.size() + "}";
     }
 }

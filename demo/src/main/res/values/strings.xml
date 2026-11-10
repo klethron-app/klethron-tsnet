@@ -11,6 +11,9 @@
     <string name="logout">Log out of tailnet</string>
     <string name="close_node">Close node</string>
     <string name="peer_host">Echo peer: tailnet IP or MagicDNS name</string>
+    <string name="pick_peer">Pick peer</string>
+    <string name="peer_online">%1$s (%2$s, online)</string>
+    <string name="peer_offline">%1$s (%2$s, offline)</string>
     <string name="peer_port">TCP port</string>
     <string name="default_peer_port" translatable="false">7070</string>
     <string name="exchange">Verify TCP echo</string>

@@ -146,6 +146,16 @@ Java_com_klethron_tsnet_LoginTest_nativeProbeHostnames(JNIEnv *env, jclass type)
     return take_string(env, klethron_login_probe_hostnames());
 }
 
+JNIEXPORT jboolean JNICALL
+Java_com_klethron_tsnet_LoginTest_nativeProbeSetPeerOnline(JNIEnv *env, jclass type, jboolean online) {
+    return klethron_login_probe_set_peer_online(online) != 0;
+}
+
+JNIEXPORT void JNICALL
+Java_com_klethron_tsnet_LoginTest_nativeProbeAddPeers(JNIEnv *env, jclass type) {
+    klethron_login_probe_add_peers();
+}
+
 JNIEXPORT void JNICALL
 Java_com_klethron_tsnet_CrashTest_nativeProbe(JNIEnv *env, jclass type, jint mode) {
     klethron_crash_probe(mode);

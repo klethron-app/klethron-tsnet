@@ -12,7 +12,7 @@ Requires **Android 14 (API 34)** or later. The AAR includes native libraries for
 **x86_64**, with 16 KiB page support. Consumers need no Go compiler or NDK.
 
 **Under development.** Login, persistent identity, TCP dialing, logout and revocation have been tested
-locally and on a real tailnet. Broader network and device coverage is still needed; see
+locally and on a real tailnet. Peer listing has been tested locally. Broader network and device coverage is still needed; see
 [known limitations](UPSTREAM.md#limits). See the
 [Javadoc](https://javadoc.io/doc/com.klethron/tsnet/latest/) for the full API.
 
@@ -69,6 +69,10 @@ try (TailnetNode node = new TailnetNode()) {
 the node; pass it only to the user's browser. Wait for the URL to clear before closing, so the login is saved.
 Starting with the same directory then resumes that identity.
 
+[`NodeStatus.peers`][peers] lists the other devices this node can see, with their MagicDNS name, operating
+system, online state and addresses, so users can pick a device instead of typing its name. Each change,
+including a device going online or offline, is a status change.
+
 [`dial`][dial] accepts a tailnet IP address or MagicDNS name and returns a socket descriptor owned by the
 caller. It reaches peers and subnet routes only. [`close`][close] ends its connections but preserves
 its identity. [`logout`][logout] ends tailnet access; [`login`][login] starts authorization again after
@@ -103,6 +107,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) to build, test or use a checkout. Origina
 
 [TailnetNode]: https://javadoc.io/doc/com.klethron/tsnet/latest/com/klethron/tsnet/TailnetNode.html
 [awaitStatus]: https://javadoc.io/doc/com.klethron/tsnet/latest/com/klethron/tsnet/TailnetNode.html#awaitStatus(com.klethron.tsnet.NodeStatus,java.time.Duration)
+[peers]: https://javadoc.io/doc/com.klethron/tsnet/latest/com/klethron/tsnet/NodeStatus.html#peers()
 [dial]: https://javadoc.io/doc/com.klethron/tsnet/latest/com/klethron/tsnet/TailnetNode.html#dial(java.lang.String,int,java.time.Duration)
 [close]: https://javadoc.io/doc/com.klethron/tsnet/latest/com/klethron/tsnet/TailnetNode.html#close()
 [logout]: https://javadoc.io/doc/com.klethron/tsnet/latest/com/klethron/tsnet/TailnetNode.html#logout(java.time.Duration)

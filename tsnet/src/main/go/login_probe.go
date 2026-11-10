@@ -9,11 +9,13 @@ import "C"
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"log"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"os"
 	"slices"
 	"strings"
@@ -217,6 +219,57 @@ func klethron_login_probe_await_received(timeoutMillis C.longlong) C.longlong {
 	case <-time.After(milliseconds(timeoutMillis)):
 		return -2
 	}
+}
+
+// klethron_login_probe_set_peer_online sets whether control reports the in-memory peer as
+// online, which it does not by default. It returns whether the peer is registered.
+//
+//export klethron_login_probe_set_peer_online
+func klethron_login_probe_set_peer_online(online C.int) C.int {
+	loginProbe.Lock()
+	defer loginProbe.Unlock()
+	if loginProbe.control == nil {
+		return 0
+	}
+	for _, node := range loginProbe.control.AllNodes() {
+		if node.Hostinfo.Hostname() == "klethron-peer" {
+			node.Online = new(online != 0)
+			loginProbe.control.UpdateNode(node)
+			return 1
+		}
+	}
+	return 0
+}
+
+// klethron_login_probe_add_peers registers three unreachable devices: an offline Linux device
+// named klethron-other, with addresses 100.101.0.1 and fd7a:115c:a1e0::101:1, a sharee node and
+// a Mullvad exit node.
+//
+//export klethron_login_probe_add_peers
+func klethron_login_probe_add_peers() {
+	loginProbe.Lock()
+	defer loginProbe.Unlock()
+	if loginProbe.control == nil {
+		return
+	}
+	add := func(id int, name string, hostinfo *tailcfg.Hostinfo, addresses ...string) {
+		node := &tailcfg.Node{
+			ID: tailcfg.NodeID(1000 + id), StableID: tailcfg.StableNodeID(fmt.Sprintf("KLETHRON%d", id)),
+			Name: name, Key: key.NewNode().Public(), Machine: key.NewMachine().Public(),
+			DiscoKey: key.NewDisco().Public(), MachineAuthorized: true, Hostinfo: hostinfo.View(),
+		}
+		for _, address := range addresses {
+			ip := netip.MustParseAddr(address)
+			prefix := netip.PrefixFrom(ip, ip.BitLen())
+			node.Addresses = append(node.Addresses, prefix)
+			node.AllowedIPs = append(node.AllowedIPs, prefix)
+		}
+		loginProbe.control.UpdateNode(node)
+	}
+	// IPv6 first, which the library reorders.
+	add(1, "klethron-other.tail-scale.ts.net.", &tailcfg.Hostinfo{OS: "linux"}, "fd7a:115c:a1e0::101:1", "100.101.0.1")
+	add(2, "klethron-sharee.tail-scale.ts.net.", &tailcfg.Hostinfo{OS: "linux", ShareeNode: true}, "100.101.0.2")
+	add(3, "us-nyc-wg-301.mullvad.ts.net.", &tailcfg.Hostinfo{OS: "linux"}, "100.101.0.3")
 }
 
 // klethron_login_probe_complete acts as the user's browser, approving a login URL. Like real

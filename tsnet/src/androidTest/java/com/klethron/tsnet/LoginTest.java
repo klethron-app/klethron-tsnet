@@ -362,7 +362,7 @@ public final class LoginTest {
         }
     }
 
-    private static NodeStatus await(TailnetNode node, Predicate<NodeStatus> condition) {
+    static NodeStatus await(TailnetNode node, Predicate<NodeStatus> condition) {
         long deadline = System.nanoTime() + WAIT.toNanos();
         NodeStatus status = null;
         do {
@@ -414,6 +414,13 @@ public final class LoginTest {
 
     /// Lets the stalled port read.
     static native void nativeProbeRelease();
+
+    /// Sets whether control reports the peer as online; returns whether the peer is registered.
+    static native boolean nativeProbeSetPeerOnline(boolean online);
+
+    /// Registers an offline Linux device `klethron-other` with addresses 100.101.0.1 and
+    /// fd7a:115c:a1e0::101:1, a sharee node and a Mullvad exit node. None is reachable.
+    static native void nativeProbeAddPeers();
 
     private static native boolean nativeProbeComplete(byte[] loginUrl);
 

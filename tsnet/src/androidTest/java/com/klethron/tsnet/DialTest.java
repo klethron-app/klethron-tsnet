@@ -6,6 +6,7 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
+import android.net.InetAddresses;
 import android.os.HandlerThread;
 import android.os.MessageQueue;
 import android.os.MessageQueue.OnFileDescriptorEventListener;
@@ -29,6 +30,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.Arrays;
+import java.util.List;
 import java.util.Random;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
@@ -81,6 +83,39 @@ public final class DialTest {
                     assertArrayEquals(sent, received);
                 }
             }
+        }
+    }
+
+    @Test(timeout = 90000)
+    public void listsPeersAndTheirChanges() throws Exception {
+        try (TailnetNode node = startNode()) {
+            NodeStatus status = LoginTest.await(node, s -> s.state() == NodeStatus.State.RUNNING && !s.peers().isEmpty());
+            assertEquals(1, status.peers().size());
+            NodeStatus.Peer listed = status.peers().get(0);
+            assertEquals(PEER_NAME, listed.dnsName());
+            assertEquals("android", listed.os());
+            assertFalse(listed.online());
+            assertEquals(InetAddresses.parseNumericAddress(peer), listed.addresses().get(0));
+            assertEquals(2, listed.addresses().size());
+            assertTrue(status.toString(), status.toString().endsWith(", peers=1}"));
+            assertFalse(status.toString().contains("klethron-peer"));
+            try (ParcelFileDescriptor connection = node.dial(listed.dnsName(), 7070, WAIT)) {
+                write(connection, "x".getBytes(StandardCharsets.US_ASCII));
+                assertEquals('x', new FileInputStream(connection.getFileDescriptor()).read());
+            }
+
+            assertTrue(LoginTest.nativeProbeSetPeerOnline(true));
+            NodeStatus.Peer online = new NodeStatus.Peer(PEER_NAME, "android", true, listed.addresses());
+            assertEquals(List.of(online), LoginTest.await(node, s -> !s.peers().equals(List.of(listed))).peers());
+
+            // Hides the sharee and Mullvad nodes; sorts by name and lists IPv4 first.
+            LoginTest.nativeProbeAddPeers();
+            NodeStatus.Peer other = new NodeStatus.Peer("klethron-other.tail-scale.ts.net", "linux", false, List.of(
+                    InetAddresses.parseNumericAddress("100.101.0.1"), InetAddresses.parseNumericAddress("fd7a:115c:a1e0::101:1")));
+            assertEquals(List.of(other, online), LoginTest.await(node, s -> s.peers().size() > 1).peers());
+
+            node.logout(WAIT);
+            assertEquals(List.of(), LoginTest.await(node, s -> s.state() == NodeStatus.State.NEEDS_LOGIN).peers());
         }
     }
 

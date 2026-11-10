@@ -84,6 +84,10 @@ with Go 1.27.3. Recheck each entry on every update and drop fixes upstream has m
 - **Netmap cache persists peer data.** With control's `CacheNetworkMaps` capability, upstream writes peer
   names, addresses and keys under `profile-data/`, even for ephemeral in-memory nodes. Workaround:
   `ts_omit_cachenetmap`.
+- **Peer status hides fewer peers than the CLI suggests.** `tailscale status` hides Mullvad exit nodes
+  only when `ExitNodeOption` is set, which `ts_omit_useexitnode` leaves false. Workaround: hide peers
+  named `*.mullvad.ts.net` (and sharee nodes, as the CLI does). IPN bus peer deltas do not report the
+  network map clearing on logout. Workaround: read `Status` after each state or peer notification.
 - **Subprocess call sites are linked.** Tailscale packages in the release graph have 21 `os/exec` call
   sites. All but one are unreachable here by build tag, `runtime.GOOS` (Android is not `linux`), an
   omitted feature, a pref we never set, or a real TUN (tsnet uses a fake one). The exception: netstack

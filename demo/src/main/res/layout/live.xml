@@ -16,6 +16,8 @@
             android:layout_height="wrap_content" android:text="@string/login" android:enabled="false" />
         <Button android:id="@+id/logout" android:layout_width="match_parent"
             android:layout_height="wrap_content" android:text="@string/logout" android:enabled="false" />
+        <Button android:id="@+id/pick_peer" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:text="@string/pick_peer" android:enabled="false" />
         <EditText android:id="@+id/peer_host" android:layout_width="match_parent"
             android:layout_height="wrap_content" android:hint="@string/peer_host"
             android:inputType="textUri" android:singleLine="true" android:importantForAutofill="no" />

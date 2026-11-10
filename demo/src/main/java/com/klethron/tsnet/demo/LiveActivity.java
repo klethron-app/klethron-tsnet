@@ -1,6 +1,7 @@
 package com.klethron.tsnet.demo;
 
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.ActivityNotFoundException;
 import android.content.Intent;
 import android.net.ConnectivityManager;
@@ -30,6 +31,7 @@ import java.net.SocketTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Arrays;
+import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -93,6 +95,7 @@ public final class LiveActivity extends Activity {
             current.logout(TIMEOUT);
             return getString(R.string.logged_out);
         }));
+        findViewById(R.id.pick_peer).setOnClickListener(view -> pickPeer());
         findViewById(R.id.exchange).setOnClickListener(view -> exchange());
         ((CheckBox) findViewById(R.id.keep_open)).setOnCheckedChangeListener((view, checked) -> {
             if (!checked) WORKER.execute(this::closeHeld);
@@ -144,6 +147,19 @@ public final class LiveActivity extends Activity {
         } catch (IllegalStateException closed) {
             // onDestroy closes the node and wakes this waiter.
         }
+    }
+
+    @UiThread
+    private void pickPeer() {
+        if (status == null) return;
+        List<NodeStatus.Peer> peers = status.peers();
+        String[] labels = new String[peers.size()];
+        for (int i = 0; i < labels.length; i++) {
+            NodeStatus.Peer peer = peers.get(i);
+            labels[i] = getString(peer.online() ? R.string.peer_online : R.string.peer_offline, peer.dnsName(), peer.os());
+        }
+        new AlertDialog.Builder(this).setTitle(R.string.pick_peer).setItems(labels, (dialog, which) ->
+                ((EditText) findViewById(R.id.peer_host)).setText(peers.get(which).dnsName())).show();
     }
 
     @UiThread
@@ -262,6 +278,7 @@ public final class LiveActivity extends Activity {
         findViewById(R.id.login).setEnabled(!busy && started);
         findViewById(R.id.logout).setEnabled(!busy && started);
         findViewById(R.id.authorize).setEnabled(status != null && status.loginUrl() != null);
+        findViewById(R.id.pick_peer).setEnabled(status != null && !status.peers().isEmpty());
         // Also enabled when not RUNNING, to verify that access ends, e.g. after logout.
         findViewById(R.id.exchange).setEnabled(!busy && started);
         if (status != null) {

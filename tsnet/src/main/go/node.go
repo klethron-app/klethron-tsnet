@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -19,6 +20,7 @@ import (
 
 	"tailscale.com/client/local"
 	"tailscale.com/ipn"
+	"tailscale.com/ipn/ipnstate"
 	"tailscale.com/tsconst"
 	"tailscale.com/tsnet"
 	"tailscale.com/types/key"
@@ -51,6 +53,7 @@ type nodeStatus struct {
 	loginURL   string
 	ip4, ip6   netip.Addr
 	err        string // The latest backend error since the node last ran, as printable ASCII.
+	peers      string // The record's peer lines, each preceded by a newline.
 }
 
 func newNode(server *tsnet.Server) *node {
@@ -118,17 +121,18 @@ func (n *node) close() {
 	_ = n.server.Close()
 }
 
-// watchStatus follows the IPN bus until ctx ends. A new watch starts with the current state and
-// self node, so re-watching after an unexpected disconnect (such as falling behind) loses nothing needed.
+// watchStatus follows the IPN bus until ctx ends. A new watch starts with the current state, self
+// node and peers, so re-watching after an unexpected disconnect (such as falling behind) loses nothing
+// needed. Peer changes include online changes, as full nodes.
 func (n *node) watchStatus(ctx context.Context, client *local.Client) {
 	for ctx.Err() == nil {
-		if watcher, err := client.WatchIPNBus(ctx, ipn.NotifyInitialState|ipn.NotifyInitialStatus); err == nil {
+		if watcher, err := client.WatchIPNBus(ctx, ipn.NotifyInitialState|ipn.NotifyInitialStatus|ipn.NotifyPeerChanges); err == nil {
 			for {
 				notify, err := watcher.Next()
 				if err != nil {
 					break
 				}
-				n.publish(notify)
+				n.publish(notify, peerLines(ctx, client, &notify))
 			}
 			watcher.Close()
 		}
@@ -139,7 +143,53 @@ func (n *node) watchStatus(ctx context.Context, client *local.Client) {
 	}
 }
 
-func (n *node) publish(notify ipn.Notify) {
+// peerLines returns the record's peer lines when notify may change them, or nil to keep the
+// published ones. Upstream builds the status from its network map, which a logout clears, so
+// rather than apply the notified changes, read the status after each change.
+func peerLines(ctx context.Context, client *local.Client, notify *ipn.Notify) *string {
+	status := notify.InitialStatus
+	if status == nil {
+		if notify.State == nil && len(notify.PeersChanged) == 0 && len(notify.PeersRemoved) == 0 {
+			return nil
+		}
+		var err error
+		if status, err = client.Status(ctx); err != nil {
+			return nil
+		}
+	}
+	var lines []string
+	for _, peer := range status.Peer {
+		if line := peerLine(peer); line != "" {
+			lines = append(lines, line)
+		}
+	}
+	slices.Sort(lines)
+	joined := strings.Join(lines, "")
+	return &joined
+}
+
+// peerLine returns "\nname,OS,online,addresses", with comma-separated addresses, IPv4 first, or ""
+// for peers hidden as by "tailscale status": nodes that may only connect to this one, and Mullvad
+// exit nodes, which do not accept connections. Names are DNS names; field replaces commas in the OS.
+func peerLine(peer *ipnstate.PeerStatus) string {
+	name := strings.TrimSuffix(peer.DNSName, ".")
+	if peer.ShareeNode || name == "" || strings.HasSuffix(name, ".mullvad.ts.net") || len(peer.TailscaleIPs) == 0 {
+		return ""
+	}
+	fields := []string{field(name, 255), field(peer.OS, 32), strconv.FormatBool(peer.Online)}
+	for _, ip := range slices.SortedFunc(slices.Values(peer.TailscaleIPs), netip.Addr.Compare) {
+		fields = append(fields, ip.String())
+	}
+	return "\n" + strings.Join(fields, ",")
+}
+
+// field returns printable(s, limit) without commas.
+func field(s string, limit int) string {
+	return strings.ReplaceAll(printable(s, limit), ",", "?")
+}
+
+// publish applies notify and, unless nil, the peer lines.
+func (n *node) publish(notify ipn.Notify, peers *string) {
 	ip4, ip6 := n.server.TailscaleIPs()
 	// Set before upstream reports NeedsLogin for it; health notifications may arrive later.
 	_, removed := n.server.Sys().HealthTracker.Get().CurrentState().Warnings[tsconst.HealthWarnableNodeRemoved]
@@ -147,6 +197,9 @@ func (n *node) publish(notify ipn.Notify) {
 	defer n.mu.Unlock()
 	status := n.status
 	status.ip4, status.ip6 = ip4, ip6
+	if peers != nil {
+		status.peers = *peers
+	}
 	if notify.State != nil {
 		status.state = *notify.State
 		switch status.state {
@@ -457,7 +510,7 @@ var javaStates = map[ipn.State]string{
 }
 
 // record is "version\nSTATE\nREVOCATION\nloginURL\naddresses\nerror", with comma-separated address
-// literals. All printable ASCII apart from the separators.
+// literals, followed by the peer lines. All printable ASCII apart from the separators.
 func (s nodeStatus) record(version uint64) string {
 	state, ok := javaStates[s.state]
 	if !ok {
@@ -469,5 +522,5 @@ func (s nodeStatus) record(version uint64) string {
 			addresses = append(addresses, ip.String())
 		}
 	}
-	return fmt.Sprintf("%d\n%s\n%s\n%s\n%s\n%s", version, state, s.revocation, s.loginURL, strings.Join(addresses, ","), s.err)
+	return fmt.Sprintf("%d\n%s\n%s\n%s\n%s\n%s%s", version, state, s.revocation, s.loginURL, strings.Join(addresses, ","), s.err, s.peers)
 }
