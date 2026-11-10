@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"maps"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -134,18 +135,7 @@ func startPeer(dir string) string {
 			return ""
 		}
 		peer.closers = append(peer.closers, func() { _ = ln.Close() })
-		go func() {
-			for {
-				conn, err := ln.Accept()
-				if err != nil {
-					return
-				}
-				go func() {
-					defer conn.Close()
-					handle(conn)
-				}()
-			}
-		}()
+		go serve(ln, handle)
 	}
 	return ip.String()
 }
@@ -337,20 +327,11 @@ func approveMachines(control *testcontrol.Server, _ string) string {
 // separated by newlines. Like approveMachines, it counts devices by machine key, but keeps a
 // device's conflicting hostnames visible to assertions.
 func hostnames(control *testcontrol.Server, _ string) string {
-	type device struct {
-		machine key.MachinePublic
-		name    string
-	}
-	var names []string
-	seen := make(set.Set[device])
+	names := make(map[string]string) // By machine key and hostname.
 	for _, node := range control.AllNodes() {
-		if d := (device{node.Machine, node.Hostinfo.Hostname()}); !seen.Contains(d) {
-			seen.Add(d)
-			names = append(names, d.name)
-		}
+		names[node.Machine.String()+" "+node.Hostinfo.Hostname()] = node.Hostinfo.Hostname()
 	}
-	slices.Sort(names)
-	return strings.Join(names, "\n")
+	return strings.Join(slices.Sorted(maps.Values(names)), "\n")
 }
 
 func stopControl(string) string {

@@ -4,6 +4,7 @@ package main
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"crypto/rand"
 	"crypto/tls"
@@ -68,22 +69,15 @@ func probeTailnet(dir string, relayOnly bool) string {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	tailnet, problem := startLoopbackTailnet(ctx, dir, nil)
+	tailnet, problem := startLoopbackTailnet(ctx, dir)
 	defer tailnet.close()
-	if problem != "" {
-		return problem
+	if problem == "" {
+		problem = tailnet.verify(ctx, relayOnly)
 	}
-	if problem := tailnet.exchange(ctx); problem != "" {
-		return problem
+	if problem == "" {
+		problem = tailnet.exchange(ctx) // Again over the verified path.
 	}
-	if problem := tailnet.awaitPath(ctx, relayOnly); problem != "" {
-		return problem
-	}
-	// Exchange again over the verified path.
-	if problem := tailnet.exchange(ctx); problem != "" {
-		return problem
-	}
-	return "ok"
+	return cmp.Or(problem, "ok")
 }
 
 // loopbackTailnet is a dialer and an echoing listener node, joined by in-process control and DERP servers.
@@ -91,12 +85,12 @@ type loopbackTailnet struct {
 	dialer, listener *tsnet.Server
 	listenerIP       netip.Addr
 	closers          []func()
-	onRebind         func(*tsnet.Server, string)
+	rebound          sync.Map // *tsnet.Server -> interface named by its latest rebind
 }
 
 // startLoopbackTailnet returns a fixed diagnostic on failure. Close the result in either case.
-func startLoopbackTailnet(ctx context.Context, dir string, onRebind func(*tsnet.Server, string)) (*loopbackTailnet, string) {
-	t := &loopbackTailnet{onRebind: onRebind}
+func startLoopbackTailnet(ctx context.Context, dir string) (*loopbackTailnet, string) {
+	t := new(loopbackTailnet)
 	derpMap, stopDERP, err := startLoopbackDERP()
 	if err != nil {
 		return t, "loopback derp failed"
@@ -120,7 +114,7 @@ func startLoopbackTailnet(ctx context.Context, dir string, onRebind func(*tsnet.
 		return t, "tailnet listen failed"
 	}
 	t.closers = append(t.closers, func() { _ = ln.Close() })
-	go serveEcho(ln)
+	go serve(ln, func(conn net.Conn) { _, _ = io.Copy(conn, conn) })
 	return t, ""
 }
 
@@ -133,19 +127,14 @@ func (t *loopbackTailnet) close() {
 
 func (t *loopbackTailnet) startNode(ctx context.Context, dir, controlURL, hostname string) (*tsnet.Server, netip.Addr, string) {
 	server := newServer()
-	if t.onRebind != nil {
-		server.Logf = func(format string, args ...any) {
-			// Observe successful UDP rebinding without formatting or retaining log messages.
-			if format == "Rebind; defIf=%q, ips=%v" {
-				t.onRebind(server, args[0].(string))
-			}
+	server.Logf = func(format string, args ...any) {
+		// Observe successful UDP rebinding without formatting or retaining log messages.
+		if format == "Rebind; defIf=%q, ips=%v" {
+			t.rebound.Store(server, args[0])
 		}
 	}
-	server.Dir = dir
-	server.Hostname = hostname
-	server.ControlURL = controlURL
-	server.Store = new(mem.Store)
-	server.Ephemeral = true
+	server.Dir, server.Hostname, server.ControlURL = dir, hostname, controlURL
+	server.Store, server.Ephemeral = new(mem.Store), true
 	t.closers = append(t.closers, func() { _ = server.Close() })
 	status, err := server.Up(ctx)
 	if err != nil {
@@ -160,8 +149,12 @@ func (t *loopbackTailnet) startNode(ctx context.Context, dir, controlURL, hostna
 	return server, netip.Addr{}, "no tailnet IPv4 address"
 }
 
-// awaitPath waits until a disco ping uses a direct UDP path, or only DERP if relayOnly.
-func (t *loopbackTailnet) awaitPath(ctx context.Context, relayOnly bool) string {
+// verify exchanges data, which waits for the peer, then waits until a disco ping uses a direct UDP
+// path, or only DERP if relayOnly.
+func (t *loopbackTailnet) verify(ctx context.Context, relayOnly bool) string {
+	if problem := t.exchange(ctx); problem != "" {
+		return problem
+	}
 	client, err := t.dialer.LocalClient()
 	if err != nil {
 		return "local client failed"
@@ -185,7 +178,8 @@ func (t *loopbackTailnet) awaitPath(ctx context.Context, relayOnly bool) string 
 	}
 }
 
-func serveEcho(ln net.Listener) {
+// serve handles each connection that ln accepts on its own goroutine, then closes it.
+func serve(ln net.Listener, handle func(net.Conn)) {
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
@@ -193,7 +187,7 @@ func serveEcho(ln net.Listener) {
 		}
 		go func() {
 			defer conn.Close()
-			_, _ = io.Copy(conn, conn)
+			handle(conn)
 		}()
 	}
 }
@@ -231,19 +225,17 @@ func (t *loopbackTailnet) exchange(ctx context.Context) string {
 // startLoopbackDERP serves one DERP region and STUN on 127.0.0.1 with a self-signed certificate.
 // InsecureForTests makes clients skip verification of that certificate: this is not a TLS proof.
 func startLoopbackDERP() (*tailcfg.DERPMap, func(), error) {
+	stunConn, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	if err != nil {
+		return nil, nil, err
+	}
+	go serveSTUN(stunConn)
 	relay := derpserver.New(key.NewNode(), logger.Discard)
 	server := httptest.NewUnstartedServer(derpserver.Handler(relay))
 	server.Config.ErrorLog = log.New(io.Discard, "", 0)
 	// DERP upgrades HTTP/1.1 connections.
 	server.Config.TLSNextProto = map[string]func(*http.Server, *tls.Conn, http.Handler){}
 	server.StartTLS()
-	stunConn, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
-	if err != nil {
-		server.Close()
-		relay.Close()
-		return nil, nil, err
-	}
-	go serveSTUN(stunConn)
 	stop := func() {
 		_ = stunConn.Close()
 		server.CloseClientConnections()
@@ -274,7 +266,6 @@ func serveSTUN(conn *net.UDPConn) {
 			return
 		}
 		if id, err := stun.ParseBindingRequest(buffer[:n]); err == nil {
-			source = netip.AddrPortFrom(source.Addr().Unmap(), source.Port())
 			_, _ = conn.WriteToUDPAddrPort(stun.Response(id, source), source)
 		}
 	}

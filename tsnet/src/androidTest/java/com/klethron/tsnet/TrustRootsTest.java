@@ -7,25 +7,17 @@ import java.security.KeyStore;
 import java.security.MessageDigest;
 import java.util.Collections;
 import java.util.HexFormat;
+import java.util.List;
 import java.util.Set;
 import java.util.TreeSet;
-import org.json.JSONArray;
-import org.json.JSONObject;
 import org.junit.Test;
 
 public final class TrustRootsTest {
     @Test
     public void goTrustsExactlyAndroidSystemRoots() throws Exception {
-        JSONObject report = new JSONObject(Probe.call("roots"));
-        assertTrue("Platform roots must replace Go's system pool", report.getBoolean("SystemPool"));
-        Set<String> actual = new TreeSet<>();
-        JSONArray roots = report.getJSONArray("Roots");
-        for (int i = 0; i < roots.length(); i++) {
-            actual.add(roots.getString(i));
-        }
         Set<String> expected = systemRootFingerprints();
         assertTrue("Expected Android system roots", expected.size() > 100);
-        assertEquals(expected, actual);
+        assertEquals(expected, new TreeSet<>(List.of(Probe.call("roots").split("\n"))));
     }
 
     /** SHA-256 hex fingerprints of Android's current system roots, without user-disabled roots. */

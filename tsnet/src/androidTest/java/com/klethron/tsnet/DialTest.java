@@ -16,7 +16,6 @@ import android.system.Os;
 import android.system.OsConstants;
 import android.system.StructPollfd;
 import android.util.Log;
-import java.io.ByteArrayOutputStream;
 import java.io.FileDescriptor;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
@@ -124,7 +123,8 @@ public final class DialTest {
         try (TailnetNode node = startNode();
                 ParcelFileDescriptor connection = node.dial(peer, 7071, WAIT)) {
             // The peer greets and closes its side; this side remains writable.
-            assertEquals("klethron\n", readToEnd(connection));
+            assertEquals("klethron\n", new String(new FileInputStream(connection.getFileDescriptor()).readAllBytes(),
+                    StandardCharsets.US_ASCII));
             write(connection, "after".getBytes(StandardCharsets.US_ASCII));
             connection.close();
             // Closing the descriptor ends the peer's connection after delivering what was written.
@@ -181,9 +181,11 @@ public final class DialTest {
             assertTrue("Peer was not slowed: " + flooded, flooded < FLOOD);
             FileDescriptor fd = nonBlocking(connection);
             byte[] buffer = new byte[64 << 10];
+            byte[] expected = new byte[buffer.length];
             long received = 0;
             for (int read; (read = readWhenReady(fd, buffer)) > 0; received += read) {
-                assertPattern(received, buffer, read);
+                assertTrue("Unexpected bytes after " + received,
+                        Arrays.equals(buffer, 0, read, pattern(received, expected), 0, read));
             }
             assertEquals(FLOOD, received);
         }
@@ -310,14 +312,6 @@ public final class DialTest {
         return bytes;
     }
 
-    private static void assertPattern(long offset, byte[] bytes, int length) {
-        for (int i = 0; i < length; i++) {
-            if (bytes[i] != (byte) ((offset + i) % 251)) {
-                throw new AssertionError("Unexpected byte at offset " + (offset + i));
-            }
-        }
-    }
-
     private static FileDescriptor nonBlocking(ParcelFileDescriptor connection) throws ErrnoException {
         FileDescriptor fd = connection.getFileDescriptor();
         Os.fcntlInt(fd, OsConstants.F_SETFL, Os.fcntlInt(fd, OsConstants.F_GETFL, 0) | OsConstants.O_NONBLOCK);
@@ -348,11 +342,5 @@ public final class DialTest {
         } catch (IOException e) {
             throw new AssertionError(e);
         }
-    }
-
-    private static String readToEnd(ParcelFileDescriptor connection) throws IOException {
-        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
-        new FileInputStream(connection.getFileDescriptor()).transferTo(bytes);
-        return bytes.toString(StandardCharsets.UTF_8);
     }
 }

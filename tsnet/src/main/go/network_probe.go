@@ -3,11 +3,11 @@
 package main
 
 import (
+	"cmp"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net"
-	"sort"
 
 	"tailscale.com/net/netmon"
 )
@@ -24,28 +24,22 @@ func probeInterfaces(string) string {
 		result.GoError = err.Error()
 	}
 	ifaces, err := netmon.GetInterfaceList()
-	if err == nil {
-		for _, iface := range ifaces {
-			var addrs []net.Addr
-			addrs, err = iface.Addrs()
-			if err != nil {
-				break
-			}
-			for _, addr := range addrs {
-				prefix := addr.(*net.IPNet)
-				ones, _ := prefix.Mask.Size()
-				result.Interfaces = append(result.Interfaces, fmt.Sprintf("%s|%d|%d|%t|%t|%t|%t|%s/%d",
-					hex.EncodeToString([]byte(iface.Name)), iface.Index, iface.MTU,
-					iface.Flags&net.FlagUp != 0, iface.Flags&net.FlagLoopback != 0,
-					iface.Flags&net.FlagPointToPoint != 0, iface.Flags&net.FlagMulticast != 0,
-					hex.EncodeToString(prefix.IP), ones))
-			}
+	for _, iface := range ifaces {
+		addrs, addrsErr := iface.Addrs()
+		err = cmp.Or(err, addrsErr)
+		for _, addr := range addrs {
+			prefix := addr.(*net.IPNet)
+			ones, _ := prefix.Mask.Size()
+			result.Interfaces = append(result.Interfaces, fmt.Sprintf("%s|%d|%d|%t|%t|%t|%t|%s/%d",
+				hex.EncodeToString([]byte(iface.Name)), iface.Index, iface.MTU,
+				iface.Flags&net.FlagUp != 0, iface.Flags&net.FlagLoopback != 0,
+				iface.Flags&net.FlagPointToPoint != 0, iface.Flags&net.FlagMulticast != 0,
+				hex.EncodeToString(prefix.IP), ones))
 		}
 	}
 	if err != nil {
 		result.Error = err.Error()
 	}
-	sort.Strings(result.Interfaces)
 	data, _ := json.Marshal(result) // Strings and slices only; cannot fail.
 	return string(data)
 }

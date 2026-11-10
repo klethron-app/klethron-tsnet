@@ -5,7 +5,6 @@ import static org.junit.Assert.assertTrue;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
-import org.json.JSONObject;
 import org.junit.Test;
 
 /**
@@ -17,10 +16,9 @@ public final class ControlPlaneTest {
     public void reachesRealControlPlaneUntilLoginWithoutWritingFiles() throws Exception {
         Path directory = LoginTest.temporaryDirectory("control-");
         try {
-            JSONObject report = new JSONObject(Probe.call("control", directory));
-            assertEquals("ok", report.getString("Result"));
-            assertTrue("The verified control chain must end at an Android system root",
-                    TrustRootsTest.systemRootFingerprints().contains(report.getString("Root")));
+            String root = Probe.call("control", directory);
+            assertTrue("The verified control chain must end at an Android system root, not " + root,
+                    TrustRootsTest.systemRootFingerprints().contains(root));
             try (var files = Files.list(directory)) {
                 assertEquals("Startup until login must not write files", 0, files.count());
             }

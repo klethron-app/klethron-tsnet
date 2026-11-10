@@ -3,6 +3,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"sync"
 	"time"
@@ -15,8 +16,6 @@ import (
 var networkProbe struct {
 	sync.Mutex
 	tailnet *loopbackTailnet
-	// Interface named by each node's latest rebinding change.
-	rebound *sync.Map // *tsnet.Server -> string
 }
 
 func startNetworkProbe(dir string) string {
@@ -26,33 +25,19 @@ func startNetworkProbe(dir string) string {
 	tailnetProbeMu.Lock()
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	rebound := new(sync.Map)
-	tailnet, problem := startLoopbackTailnet(ctx, dir, func(node *tsnet.Server, name string) {
-		rebound.Store(node, name)
-	})
-	// The first exchange waits for the peer; then require a direct path.
+	tailnet, problem := startLoopbackTailnet(ctx, dir)
 	if problem == "" {
-		problem = tailnet.exchange(ctx)
+		problem = tailnet.verify(ctx, false)
 	}
-	if problem == "" {
-		problem = tailnet.awaitPath(ctx, false)
-	}
-	if problem != "" {
-		tailnet.close()
-		tailnetProbeMu.Unlock()
-		return problem
+	for _, node := range []*tsnet.Server{tailnet.dialer, tailnet.listener} {
+		// Without a host report, Android netmon has no default route and never rebinds.
+		if problem == "" && node.Sys().NetMon.Get().InterfaceState().DefaultRouteInterface != "" {
+			problem = "unreported default route"
+		}
 	}
 	networkProbe.Lock()
 	defer networkProbe.Unlock()
 	networkProbe.tailnet = tailnet
-	networkProbe.rebound = rebound
-	for _, node := range []*tsnet.Server{tailnet.dialer, tailnet.listener} {
-		monitor := node.Sys().NetMon.Get()
-		// Without a host report, Android netmon has no default route and never rebinds.
-		if monitor.InterfaceState().DefaultRouteInterface != "" {
-			problem = "unreported default route"
-		}
-	}
 	if problem != "" {
 		stopNetworkProbeLocked()
 		return problem
@@ -71,21 +56,15 @@ func awaitNetworkChange(name string) string {
 			networkProbe.Unlock()
 			return "not started"
 		}
-		done := true
-		for _, node := range []*tsnet.Server{networkProbe.tailnet.dialer, networkProbe.tailnet.listener} {
-			rebound, ok := networkProbe.rebound.Load(node)
-			done = done && ok && rebound == name && node.Sys().NetMon.Get().InterfaceState().DefaultRouteInterface == name
-		}
 		tailnet := networkProbe.tailnet
 		networkProbe.Unlock()
+		done := true
+		for _, node := range []*tsnet.Server{tailnet.dialer, tailnet.listener} {
+			rebound, ok := tailnet.rebound.Load(node)
+			done = done && ok && rebound == name && node.Sys().NetMon.Get().InterfaceState().DefaultRouteInterface == name
+		}
 		if done {
-			if problem := tailnet.exchange(ctx); problem != "" {
-				return problem
-			}
-			if problem := tailnet.awaitPath(ctx, false); problem != "" {
-				return problem
-			}
-			return "ok"
+			return cmp.Or(tailnet.verify(ctx, false), "ok")
 		}
 		select {
 		case <-ctx.Done():
