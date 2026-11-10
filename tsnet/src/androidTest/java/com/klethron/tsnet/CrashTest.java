@@ -63,23 +63,24 @@ public final class CrashTest {
             @Override
             public void onServiceDisconnected(ComponentName name) {}
         };
-        long start = System.currentTimeMillis();
         assertTrue(context.bindService(new Intent(context, CrashService.class), connection, Context.BIND_AUTO_CREATE));
         try {
+            IBinder binder = service.get(10, TimeUnit.SECONDS);
+            // Match this process's exit: the system restarts the bound service after a crash, and
+            // that process's later exit, or an earlier test's crash, must not be mistaken for it.
+            ActivityManager activities = context.getSystemService(ActivityManager.class);
+            int pid = activities.getRunningAppProcesses().stream()
+                    .filter(process -> process.processName.equals(context.getPackageName() + ":crash"))
+                    .findFirst().orElseThrow().pid;
             Parcel data = Parcel.obtain();
             try {
-                service.get(10, TimeUnit.SECONDS)
-                        .transact(IBinder.FIRST_CALL_TRANSACTION + mode, data, null, IBinder.FLAG_ONEWAY);
+                binder.transact(IBinder.FIRST_CALL_TRANSACTION + mode, data, null, IBinder.FLAG_ONEWAY);
             } finally {
                 data.recycle();
             }
-            ActivityManager activities = context.getSystemService(ActivityManager.class);
             for (int i = 0; i < 100; i++) {
-                for (ApplicationExitInfo exit : activities.getHistoricalProcessExitReasons(null, 0, 0)) {
-                    if (exit.getProcessName().equals(context.getPackageName() + ":crash") && exit.getTimestamp() >= start) {
-                        return exit;
-                    }
-                }
+                List<ApplicationExitInfo> exits = activities.getHistoricalProcessExitReasons(null, pid, 1);
+                if (!exits.isEmpty()) return exits.get(0);
                 Thread.sleep(100);
             }
         } finally {
