@@ -101,6 +101,10 @@ with Go 1.27.3. Recheck each entry on every update and drop fixes upstream has m
 - Live-tailnet coverage is still needed for 16 KiB devices, DERP-to-direct upgrades, restrictive NATs,
   subnet routes, IPv6 peers, throughput, prolonged outages, scheduled key expiry, revocation while
   stopped and Play split delivery.
+- **The `PHYSICAL_NETWORK` callback can miss cellular after Wi-Fi loss.** On the API 37.2 emulator,
+  about one `NetworkChangeTest` run in three fails: Android delivers `onLost` for Wi-Fi but never
+  moves the best-matching request to cellular, although default-network requests move in the same
+  rematch. Not yet checked on hardware.
 - **Names without a tailnet DNS route** fall back to the device's resolver when tailnet DNS fails
   (`tsnet` `dnsResolver.hostLookup`), so the name leaves the tailnet; `dial` still connects only to
   tailnet addresses. Upstream has no option to disable the fallback.
