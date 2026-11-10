@@ -25,7 +25,7 @@ import org.junit.Test;
  * Acts as the consuming app: forwards ConnectivityManager's default network to
  * {@link TailnetNode#setDefaultNetwork} while a loopback two-node tailnet runs, then disables Wi-Fi
  * so the default network really changes. Both nodes must rebind and keep exchanging data.
- * Requires a device whose default network is Wi-Fi with another network (emulator cellular) behind it.
+ * Requires a device without a VPN whose default network is Wi-Fi with cellular behind it.
  */
 public final class NetworkChangeTest {
     @Test(timeout = 180000)
@@ -54,8 +54,7 @@ public final class NetworkChangeTest {
         boolean registered = false;
         try {
             assertEquals("ok", Probe.call("netchangeStart", directory));
-            connectivity.requestNetwork(TailnetNode.PHYSICAL_NETWORK, callback,
-                    new Handler(Looper.getMainLooper()));
+            connectivity.registerDefaultNetworkCallback(callback, new Handler(Looper.getMainLooper()));
             registered = true;
             String wifi = nextName(names);
             assertEquals("ok", Probe.call("netchangeAwait", wifi));

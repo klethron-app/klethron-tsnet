@@ -33,12 +33,7 @@ with Go 1.27.3. Recheck each entry on every update and drop fixes upstream has m
   `RebindLikelyRequired` (no UDP rebind, re-STUN or DERP reconnect). Workaround: public
   `setDefaultNetwork` calls `UpdateLastKnownDefaultRouteInterface`/`UpdateLastKnownDefaultGateway`, then
   `InjectEvent` on each started node's monitor (via the unstable `Server.Sys().NetMon`). Apps report
-  the best non-VPN network: with another VPN active, the default network stays the VPN, so a control
-  connection dialled over lingering cellular hung until the two-minute long-poll timeout (seen on a
-  Pixel 11 Pro XL with the Tailscale app connected). Apps request that network with `requestNetwork`.
-  For apps without `CHANGE_NETWORK_STATE`, Android limits best-matching callbacks to foreground
-  networks and does not rematch them when background cellular becomes foreground: after Wi-Fi loss,
-  `NetworkChangeTest` got only `onLost` in 10 of 10 runs on a Pixel 8 Pro and the API 37.2 emulator.
+  their default network.
 - **Go `crypto/x509` reads the wrong Android CA store** (a Go issue). It reads only
   `/system/etc/security/cacerts`, missing the Conscrypt APEX store used since Android 14 (updated by
   Play system updates), and ignores roots the user disabled. Workaround: load the APEX (or system)
@@ -101,9 +96,16 @@ with Go 1.27.3. Recheck each entry on every update and drop fixes upstream has m
 
 ## Limits
 
-- Live-tailnet coverage is still needed for 16 KiB devices, DERP-to-direct upgrades, restrictive
-  NATs, subnet routes, IPv6 peers, throughput, prolonged outages, scheduled key expiry, revocation
-  while stopped and Play split delivery.
+- **Another VPN hides network changes.** While another app's VPN is active, the app's default network
+  stays that VPN when Wi-Fi or cellular changes, so a control connection dialled over lingering
+  cellular hung until the two-minute long-poll timeout (Pixel 11 Pro XL with the Tailscale app). Apps
+  cannot read a VPN's underlying networks, and following non-VPN networks needs `CHANGE_NETWORK_STATE`
+  (`requestNetwork`, or a best-matching callback: without the permission, Android limits it to
+  foreground networks and does not rematch it when background cellular becomes foreground, so it got
+  only `onLost` after Wi-Fi loss in 10 of 10 runs on a Pixel 8 Pro and the API 37.2 emulator).
+- Live-tailnet coverage is still needed for default-network changes, 16 KiB devices, DERP-to-direct
+  upgrades, restrictive NATs, subnet routes, IPv6 peers, throughput, prolonged outages, scheduled key
+  expiry, revocation while stopped and Play split delivery.
 - **Names without a tailnet DNS route** fall back to the device's resolver when tailnet DNS fails
   (`tsnet` `dnsResolver.hostLookup`), so the name leaves the tailnet; `dial` still connects only to
   tailnet addresses. Upstream has no option to disable the fallback.

@@ -2,8 +2,6 @@ package com.klethron.tsnet;
 
 import android.Manifest;
 import android.net.LinkProperties;
-import android.net.NetworkCapabilities;
-import android.net.NetworkRequest;
 import android.os.ParcelFileDescriptor;
 import androidx.annotation.AnyThread;
 import androidx.annotation.RequiresPermission;
@@ -149,21 +147,12 @@ public final class TailnetNode implements AutoCloseable {
         return nativeTailscaleVersion();
     }
 
-    /// The network to report through [#setDefaultNetwork]: the best one with internet access that is
-    /// not a VPN. Request it with [android.net.ConnectivityManager#requestNetwork], which needs
-    /// `CHANGE_NETWORK_STATE`. While another app's VPN is active, the app's default network stays that
-    /// VPN when Wi-Fi or cellular changes.
-    public static final NetworkRequest PHYSICAL_NETWORK = new NetworkRequest.Builder()
-            .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
-            .addCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)
-            .build();
-
-    /// Reports the network that carries tailnet traffic to all nodes in this process, so they can
-    /// reconnect after changes. Forward
-    /// [android.net.ConnectivityManager.NetworkCallback#onLinkPropertiesChanged] from a callback
-    /// registered for [#PHYSICAL_NETWORK], and pass `null` on
+    /// Reports the default network to all nodes in this process, so they can reconnect after changes.
+    /// Forward [android.net.ConnectivityManager.NetworkCallback#onLinkPropertiesChanged] from
+    /// [android.net.ConnectivityManager#registerDefaultNetworkCallback], and pass `null` on
     /// [android.net.ConnectivityManager.NetworkCallback#onLost]. Keep the callback registered while
-    /// nodes are in use.
+    /// nodes are in use. While another app's VPN is active, the default network is that VPN, which
+    /// hides Wi-Fi and cellular changes.
     ///
     /// @throws IllegalArgumentException if the interface name exceeds Linux's 15-byte limit
     @AnyThread

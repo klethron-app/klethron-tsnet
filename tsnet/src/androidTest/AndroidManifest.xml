@@ -2,9 +2,8 @@
     <!-- Interface queries open sockets; ControlPlaneTest contacts Tailscale's real control plane
          without credentials. Other node probes contact only their own loopback test servers. -->
     <uses-permission android:name="android.permission.INTERNET" />
-    <!-- NetworkChangeTest requests the physical network, as a consuming app would. -->
+    <!-- NetworkChangeTest follows the default network, as a consuming app would. -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
-    <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
     <application>
         <!-- CrashTest crashes this separate process, not the instrumentation. -->
         <service android:name="com.klethron.tsnet.CrashService" android:process=":crash" />

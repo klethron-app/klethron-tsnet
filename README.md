@@ -36,7 +36,6 @@ Declare these permissions in your app's manifest:
 ```xml
 <uses-permission android:name="android.permission.INTERNET" />
 <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
-<uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
 ```
 
 ## Connect
@@ -83,7 +82,7 @@ logout or key expiry. The app decides how long to keep the node alive and whethe
 
 ## Network changes
 
-Forward changes of the best non-VPN network with [`setDefaultNetwork`][setDefaultNetwork] so the node
+Forward changes of the default network with [`setDefaultNetwork`][setDefaultNetwork] so the node
 can reconnect after switching Wi-Fi or mobile networks. Register this callback while using the library
 and unregister it when finished:
 
@@ -96,13 +95,12 @@ ConnectivityManager.NetworkCallback callback = new ConnectivityManager.NetworkCa
         TailnetNode.setDefaultNetwork(null);
     }
 };
-connectivityManager.requestNetwork(TailnetNode.PHYSICAL_NETWORK, callback, handler);
+connectivityManager.registerDefaultNetworkCallback(callback, handler);
 ```
 
-Use `PHYSICAL_NETWORK` rather than the default network: while another VPN app, such as Tailscale's,
-is active, the default network stays that VPN when Wi-Fi or cellular changes, and the node would keep
-using a dead control connection for minutes. Without `CHANGE_NETWORK_STATE`, which the request needs,
-a best-matching callback misses cellular after Wi-Fi loss. Reports apply to all nodes in the process.
+While another VPN app, such as Tailscale's, is active, the default network stays that VPN when Wi-Fi
+or cellular changes, so the node can keep using a dead control connection for minutes; see
+[known limitations](UPSTREAM.md#limits). Reports apply to all nodes in the process.
 Native TLS uses Android's system CA store, excluding disabled roots; user-added CAs and the app's
 network security configuration do not apply.
 
