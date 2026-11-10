@@ -26,8 +26,8 @@ import androidx.annotation.WorkerThread;
 import com.klethron.tsnet.TailnetNode;
 import com.klethron.tsnet.NodeStatus;
 import java.io.File;
+import java.io.FileDescriptor;
 import java.io.IOException;
-import java.net.SocketTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Arrays;
@@ -204,17 +204,19 @@ public final class LiveActivity extends Activity {
         });
     }
 
+    /// Sends `sent` and requires it back, with each write and read limited to TIMEOUT.
     @WorkerThread
     private static void echo(ParcelFileDescriptor connection, byte[] sent) throws Exception {
-        byte[] received = new byte[sent.length];
-        long deadline = SystemClock.elapsedRealtime() + TIMEOUT.toMillis();
+        FileDescriptor fd = connection.getFileDescriptor();
+        StructTimeval timeout = StructTimeval.fromMillis(TIMEOUT.toMillis());
+        Os.setsockoptTimeval(fd, OsConstants.SOL_SOCKET, OsConstants.SO_SNDTIMEO, timeout);
+        Os.setsockoptTimeval(fd, OsConstants.SOL_SOCKET, OsConstants.SO_RCVTIMEO, timeout);
         for (int offset = 0; offset < sent.length;) {
-            socketTimeout(connection, OsConstants.SO_SNDTIMEO, deadline);
-            offset += Os.write(connection.getFileDescriptor(), sent, offset, sent.length - offset);
+            offset += Os.write(fd, sent, offset, sent.length - offset);
         }
+        byte[] received = new byte[sent.length];
         for (int offset = 0; offset < received.length;) {
-            socketTimeout(connection, OsConstants.SO_RCVTIMEO, deadline);
-            int count = Os.read(connection.getFileDescriptor(), received, offset, received.length - offset);
+            int count = Os.read(fd, received, offset, received.length - offset);
             if (count == 0) throw new IOException("Peer closed before echo");
             offset += count;
         }
@@ -232,14 +234,6 @@ public final class LiveActivity extends Activity {
             // Closing a socket-pair end releases it even when close reports an error.
         }
         held = null;
-    }
-
-    private static void socketTimeout(ParcelFileDescriptor connection, int option, long deadline)
-            throws SocketTimeoutException, android.system.ErrnoException {
-        long remaining = deadline - SystemClock.elapsedRealtime();
-        if (remaining <= 0) throw new SocketTimeoutException();
-        Os.setsockoptTimeval(connection.getFileDescriptor(), OsConstants.SOL_SOCKET, option,
-                StructTimeval.fromMillis(remaining));
     }
 
     private interface Operation {
