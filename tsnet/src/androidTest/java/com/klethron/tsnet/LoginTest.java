@@ -13,7 +13,6 @@ import java.io.IOException;
 import java.net.Inet4Address;
 import java.net.InetAddress;
 import java.net.SocketTimeoutException;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
@@ -32,10 +31,6 @@ import org.junit.Test;
  * interactive login. The test completes login in place of the user's browser.
  */
 public final class LoginTest {
-    static {
-        System.loadLibrary("klethron_tsnet");
-    }
-
     private static final Duration WAIT = Duration.ofSeconds(30);
 
     private String controlUrl;
@@ -43,14 +38,14 @@ public final class LoginTest {
 
     @Before
     public void startControl() throws Exception {
-        controlUrl = nativeProbeStart(true);
+        controlUrl = Probe.call("startControl", true);
         assertTrue(controlUrl.startsWith("http://127.0.0.1:"));
         directory = temporaryDirectory("login-🔒-").resolve("node");
     }
 
     @After
     public void stopControl() throws Exception {
-        nativeProbeStop();
+        Probe.call("stopControl");
         deleteDirectory(directory.getParent());
     }
 
@@ -126,7 +121,7 @@ public final class LoginTest {
             complete(status);
             assertFalse(await(node, s -> s.state() == NodeStatus.State.RUNNING).addresses().isEmpty());
             // Control keeps the logged-out registration: testcontrol ignores the logout's expiry.
-            assertEquals("klethron-logout-test\nklethron-logout-test", nativeProbeHostnames());
+            assertEquals("klethron-logout-test\nklethron-logout-test", Probe.call("hostnames"));
             // Logout discards a pending re-authentication URL with the key it would authorize.
             node.login();
             await(node, s -> s.loginUrl() != null);
@@ -162,7 +157,7 @@ public final class LoginTest {
             NodeStatus status = await(node, s -> s.loginUrl() != null);
             complete(status);
             addresses = await(node, s -> s.state() == NodeStatus.State.RUNNING).addresses();
-            nativeProbeRejectRegistrations(true);
+            Probe.call("rejectRegistrations", true);
             assertThrows(IOException.class, () -> node.logout(WAIT));
             status = await(node, s -> s.state() == NodeStatus.State.STOPPED);
             assertEquals(addresses, status.addresses());
@@ -173,7 +168,7 @@ public final class LoginTest {
 
         // The login persisted: a new node resumes it. Once control accepts, the same node that
         // failed to log out retries successfully.
-        nativeProbeRejectRegistrations(false);
+        Probe.call("rejectRegistrations", false);
         try (TailnetNode node = new TailnetNode()) {
             node.start(directory.toFile(), "klethron-logout-failure-test", controlUrl);
             NodeStatus status = await(node, s -> {
@@ -181,9 +176,9 @@ public final class LoginTest {
                 return s.state() == NodeStatus.State.RUNNING;
             });
             assertEquals(addresses, status.addresses());
-            nativeProbeRejectRegistrations(true);
+            Probe.call("rejectRegistrations", true);
             assertThrows(IOException.class, () -> node.logout(WAIT));
-            nativeProbeRejectRegistrations(false);
+            Probe.call("rejectRegistrations", false);
             node.logout(WAIT);
             status = await(node, s -> s.state() == NodeStatus.State.NEEDS_LOGIN);
             assertNull(status.loginUrl());
@@ -202,7 +197,7 @@ public final class LoginTest {
             addresses = await(node, s -> s.state() == NodeStatus.State.RUNNING).addresses();
 
             assertNull(status.revocation());
-            assertEquals(1, nativeProbeExpire());
+            assertEquals("1", Probe.call("expire"));
             status = await(node, s -> s.state() == NodeStatus.State.NEEDS_LOGIN);
             assertEquals(NodeStatus.Revocation.KEY_EXPIRED, status.revocation());
             assertNull(status.loginUrl());
@@ -220,7 +215,7 @@ public final class LoginTest {
             assertEquals(NodeStatus.Revocation.KEY_EXPIRED, status.revocation());
             assertTrue("Unexpected login URL", status.loginUrl().startsWith(controlUrl + "/auth/"));
             // Control stages the replacement key alongside the old key for the same device.
-            assertEquals("klethron-expiry-test", nativeProbeHostnames());
+            assertEquals("klethron-expiry-test", Probe.call("hostnames"));
             complete(status);
             status = await(node, s -> s.state() == NodeStatus.State.RUNNING);
             assertNull(status.loginUrl());
@@ -234,13 +229,13 @@ public final class LoginTest {
                 return s.loginUrl() != null;
             });
             assertTrue("Unexpected login URL", status.loginUrl().startsWith(controlUrl + "/auth/"));
-            assertEquals("klethron-expiry-test", nativeProbeHostnames());
+            assertEquals("klethron-expiry-test", Probe.call("hostnames"));
             complete(status);
             // The URL is cleared once the new key is saved, so closing then keeps the login.
             status = await(node, s -> s.loginUrl() == null);
             assertEquals(NodeStatus.State.RUNNING, status.state());
             assertEquals(addresses, status.addresses());
-            assertEquals("klethron-expiry-test", nativeProbeHostnames());
+            assertEquals("klethron-expiry-test", Probe.call("hostnames"));
         }
         assertOnlyStateFile();
 
@@ -264,7 +259,7 @@ public final class LoginTest {
             await(node, s -> s.state() == NodeStatus.State.RUNNING);
         }
         // testcontrol keeps streaming to a running node, so it notices at its next start.
-        nativeProbeRemove(true);
+        Probe.call("remove", true);
         try (TailnetNode node = new TailnetNode()) {
             node.start(directory.toFile(), "klethron-removal-test", controlUrl);
             NodeStatus status = await(node, s -> s.state() == NodeStatus.State.NEEDS_LOGIN);
@@ -275,7 +270,7 @@ public final class LoginTest {
             status = await(node, s -> s.loginUrl() != null);
             assertEquals(NodeStatus.State.NEEDS_LOGIN, status.state());
             assertEquals(NodeStatus.Revocation.NODE_REMOVED, status.revocation());
-            nativeProbeRemove(false);
+            Probe.call("remove", false);
             complete(status);
             status = await(node, s -> s.state() == NodeStatus.State.RUNNING);
             assertNull(status.revocation());
@@ -286,7 +281,7 @@ public final class LoginTest {
 
     @Test(timeout = 90000)
     public void rejectedLoginReportsAnErrorUntilRunning() throws Exception {
-        nativeProbeRejectRegistrations(true);
+        Probe.call("rejectRegistrations", true);
         try (TailnetNode node = new TailnetNode()) {
             node.start(directory.toFile(), "klethron-rejection-test", controlUrl);
             NodeStatus status = await(node, s -> s.error() != null);
@@ -296,7 +291,7 @@ public final class LoginTest {
             assertFalse(status.toString().contains("authkey"));
 
             // Upstream retries; the error remains while the user logs in.
-            nativeProbeRejectRegistrations(false);
+            Probe.call("rejectRegistrations", false);
             status = await(node, s -> s.loginUrl() != null);
             assertEquals("invalid authkey", status.error());
             complete(status);
@@ -308,14 +303,14 @@ public final class LoginTest {
 
     @Test(timeout = 90000)
     public void deviceApprovalFollowsLogin() throws Exception {
-        nativeProbeRequireMachineAuth();
+        Probe.call("requireMachineAuth");
         try (TailnetNode node = new TailnetNode()) {
             node.start(directory.toFile(), "klethron-approval-test", controlUrl);
             NodeStatus status = await(node, s -> s.loginUrl() != null);
             complete(status);
             status = await(node, s -> s.state() == NodeStatus.State.NEEDS_MACHINE_AUTH);
             assertNull(status.loginUrl());
-            assertEquals(1, nativeProbeApproveMachines());
+            assertEquals("1", Probe.call("approveMachines"));
             status = await(node, s -> s.state() == NodeStatus.State.RUNNING);
             assertFalse(status.addresses().isEmpty());
         }
@@ -345,12 +340,12 @@ public final class LoginTest {
             assertThrows(IllegalArgumentException.class, () -> node.start(new File("relative"), "host"));
             assertThrows(IllegalArgumentException.class, () -> node.start(directory.toFile(), ""));
             assertThrows(IllegalArgumentException.class, () -> node.start(directory.toFile(), "a\0b", controlUrl));
-            nativeProbeSetAuthKeyEnvironment(true);
+            Probe.call("setAuthKeyEnvironment", true);
             try {
                 IOException e = assertThrows(IOException.class, () -> node.start(directory.toFile(), "host", controlUrl));
                 assertTrue(e.getMessage().contains("TS_AUTHKEY"));
             } finally {
-                nativeProbeSetAuthKeyEnvironment(false);
+                Probe.call("setAuthKeyEnvironment", false);
             }
             // Refusals do not consume the node.
             node.start(directory.toFile(), "klethron-refusal-test", controlUrl);
@@ -374,7 +369,7 @@ public final class LoginTest {
 
     /// Completes the pending login in place of the user's browser.
     private static void complete(NodeStatus status) {
-        assertTrue(nativeProbeComplete(status.loginUrl().getBytes(StandardCharsets.UTF_8)));
+        assertEquals("ok", Probe.call("complete", status.loginUrl()));
     }
 
     static Path temporaryDirectory(String prefix) throws Exception {
@@ -397,52 +392,4 @@ public final class LoginTest {
         assertEquals("rw-------", PosixFilePermissions.toString(Files.getPosixFilePermissions(directory.resolve("tailscaled.state"))));
         assertEquals("rwx------", PosixFilePermissions.toString(Files.getPosixFilePermissions(directory)));
     }
-
-    /// Without interactive login, nodes join at once and MagicDNS serves `tail-scale.ts.net`.
-    static native String nativeProbeStart(boolean interactive);
-
-    /// Returns the IPv4 address of a peer that echoes on port 7070, greets on 7071, floods 48 MiB of a
-    /// pattern (byte `i` is `i % 251`) on 7073 and on 7074 reads that pattern once released.
-    static native String nativeProbeStartPeer(byte[] directory);
-
-    /// Bytes the greeting or released stalled port received before the dialer closed, -1 on error,
-    /// -2 on timeout, -3 if a stalled port received a byte outside the pattern.
-    static native long nativeProbeAwaitReceived(long timeoutMillis);
-
-    /// Bytes the flooding port has written.
-    static native long nativeProbeFlooded();
-
-    /// Lets the stalled port read.
-    static native void nativeProbeRelease();
-
-    /// Sets whether control reports the peer as online; returns whether the peer is registered.
-    static native boolean nativeProbeSetPeerOnline(boolean online);
-
-    /// Registers an offline Linux device `klethron-other` with addresses 100.101.0.1 and
-    /// fd7a:115c:a1e0::101:1, a valid SSH host key and one containing a comma, a sharee node and a
-    /// Mullvad exit node. None is reachable.
-    static native void nativeProbeAddPeers();
-
-    private static native boolean nativeProbeComplete(byte[] loginUrl);
-
-    static native void nativeProbeStop();
-
-    /// Makes control answer map requests as for deleted nodes, or no longer.
-    private static native void nativeProbeRemove(boolean removed);
-
-    /// Expires the keys of all registered nodes; returns their number.
-    private static native int nativeProbeExpire();
-
-    /// Makes control require an administrator to approve devices. Call before starting nodes.
-    private static native void nativeProbeRequireMachineAuth();
-
-    /// Approves all registered devices; returns their number.
-    private static native int nativeProbeApproveMachines();
-
-    /// The sorted hostnames that registered devices last reported, separated by newlines.
-    private static native String nativeProbeHostnames();
-
-    private static native void nativeProbeRejectRegistrations(boolean reject);
-
-    private static native void nativeProbeSetAuthKeyEnvironment(boolean set);
 }

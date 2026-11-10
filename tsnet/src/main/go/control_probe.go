@@ -2,11 +2,6 @@
 
 package main
 
-/*
-#include <stdlib.h>
-*/
-import "C"
-
 import (
 	"context"
 	"crypto/sha256"
@@ -22,20 +17,18 @@ import (
 	"tailscale.com/ipn/store/mem"
 )
 
-// This debug-only probe contacts Tailscale's real control plane without credentials. It resolves
-// and verifies the server through the platform, then starts an ephemeral node until control offers
-// an interactive login URL. The URL is checked here and never returned, logged or opened, so the
+// probeControl contacts Tailscale's real control plane without credentials. It resolves and
+// verifies the server through the platform, then starts an ephemeral node until control offers an
+// interactive login URL. The URL is checked here and never returned, logged or opened, so the
 // pending registration cannot be authorized. Results are fixed diagnostics and a public root hash.
-//
-//export klethron_control_probe
-func klethron_control_probe(path *C.char, length C.int) *C.char {
+func probeControl(dir string) string {
 	result := struct{ Result, Root string }{}
-	result.Root, result.Result = probeControl(C.GoStringN(path, length))
+	result.Root, result.Result = controlRoot(dir)
 	data, _ := json.Marshal(result) // Strings only; cannot fail.
-	return C.CString(string(data))
+	return string(data)
 }
 
-func probeControl(dir string) (root, problem string) {
+func controlRoot(dir string) (root, problem string) {
 	if problem := checkProbeEnvironment(dir); problem != "" {
 		return "", problem
 	}

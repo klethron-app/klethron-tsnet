@@ -98,7 +98,4 @@ public final class CrashTest {
             return log.lines().filter(line -> !line.startsWith("--------- beginning of ")).toList();
         }
     }
-
-    /** Called in the crash process, which loads the library. */
-    static native void nativeProbe(int mode);
 }

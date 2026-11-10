@@ -30,8 +30,8 @@ abstract class VerifyNativeAar : DefaultTask() {
             for (entry in zip.entries().asSequence().filter { it.name.endsWith(".so") }) {
                 val bytes = zip.getInputStream(entry).use { it.readBytes() }
                 val binaryText = String(bytes, Charsets.ISO_8859_1)
-                // Every instrumentation bridge exports klethron_*_probe and binds a *Test.nativeProbe method.
-                requireNative(!Regex("klethron_[a-z]+_probe|Test_nativeProbe").containsMatchIn(binaryText),
+                // The instrumentation test bridge exports klethron_probe and binds Probe.nativeCall.
+                requireNative(!Regex("klethron_probe|Probe_nativeCall").containsMatchIn(binaryText),
                     "${entry.name} includes a debug-only test bridge")
                 val elf = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
                 requireNative(elf.getInt(0) == 0x464c457f && bytes[4] == 2.toByte() && bytes[5] == 1.toByte(),

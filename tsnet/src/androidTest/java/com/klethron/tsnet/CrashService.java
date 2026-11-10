@@ -8,17 +8,13 @@ import android.os.Parcel;
 
 /** Crashes its own process in Go on a transaction, so the test process can observe the crash. */
 public final class CrashService extends Service {
-    static {
-        System.loadLibrary("klethron_tsnet");
-    }
-
     @Override
     public IBinder onBind(Intent intent) {
         // Crash on a call, not in onBind, so the service restart after the crash does not repeat it.
         return new Binder() {
             @Override
             protected boolean onTransact(int code, Parcel data, Parcel reply, int flags) {
-                CrashTest.nativeProbe(code - FIRST_CALL_TRANSACTION);
+                Probe.call("crash", code - FIRST_CALL_TRANSACTION);
                 return true;
             }
         };

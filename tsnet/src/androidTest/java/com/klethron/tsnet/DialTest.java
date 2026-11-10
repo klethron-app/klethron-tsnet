@@ -43,10 +43,6 @@ import org.junit.Test;
  * without login and serves MagicDNS; no real tailnet is involved.
  */
 public final class DialTest {
-    static {
-        System.loadLibrary("klethron_tsnet");
-    }
-
     private static final Duration WAIT = Duration.ofSeconds(30);
     private static final String PEER_NAME = "klethron-peer.tail-scale.ts.net";
 
@@ -56,16 +52,16 @@ public final class DialTest {
 
     @Before
     public void startPeer() throws Exception {
-        controlUrl = LoginTest.nativeProbeStart(false);
+        controlUrl = Probe.call("startControl", false);
         assertTrue(controlUrl.startsWith("http://127.0.0.1:"));
         directory = LoginTest.temporaryDirectory("dial-");
-        peer = LoginTest.nativeProbeStartPeer(directory.resolve("peer").toString().getBytes(StandardCharsets.UTF_8));
+        peer = Probe.call("startPeer", directory.resolve("peer"));
         assertTrue("Peer failed to start", peer.startsWith("100."));
     }
 
     @After
     public void stopPeer() throws Exception {
-        LoginTest.nativeProbeStop();
+        Probe.call("stopControl");
         LoginTest.deleteDirectory(directory);
     }
 
@@ -105,13 +101,13 @@ public final class DialTest {
                 assertEquals('x', new FileInputStream(connection.getFileDescriptor()).read());
             }
 
-            assertTrue(LoginTest.nativeProbeSetPeerOnline(true));
+            assertEquals("true", Probe.call("setPeerOnline", true));
             NodeStatus.Peer online = new NodeStatus.Peer(PEER_NAME, "android", true, listed.addresses(), List.of());
             assertEquals(List.of(online), LoginTest.await(node, s -> !s.peers().equals(List.of(listed))).peers());
 
             // Hides the sharee and Mullvad nodes; sorts by name, lists IPv4 first, trims host keys and
             // drops one with a comma.
-            LoginTest.nativeProbeAddPeers();
+            Probe.call("addPeers");
             NodeStatus.Peer other = new NodeStatus.Peer("klethron-other.tail-scale.ts.net", "linux", false, List.of(
                     InetAddresses.parseNumericAddress("100.101.0.1"), InetAddresses.parseNumericAddress("fd7a:115c:a1e0::101:1")),
                     List.of("ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl"));
@@ -131,7 +127,7 @@ public final class DialTest {
             write(connection, "after".getBytes(StandardCharsets.US_ASCII));
             connection.close();
             // Closing the descriptor ends the peer's connection after delivering what was written.
-            assertEquals(5, LoginTest.nativeProbeAwaitReceived(10000));
+            assertEquals("5", Probe.call("awaitReceived", 10000));
         }
     }
 
@@ -205,13 +201,13 @@ public final class DialTest {
             }
             Log.i("DialTest", "App stalled after writing " + written + " unread bytes");
             assertTrue("App was not slowed: " + written, written < FLOOD);
-            LoginTest.nativeProbeRelease();
+            Probe.call("release");
             while (written < FLOOD) {
                 awaitReady(fd, OsConstants.POLLOUT);
                 written += Os.write(fd, pattern(written, chunk), 0, (int) Math.min(chunk.length, FLOOD - written));
             }
             connection.close();
-            assertEquals(FLOOD, LoginTest.nativeProbeAwaitReceived(30000));
+            assertEquals(FLOOD, Long.parseLong(Probe.call("awaitReceived", 30000)));
         }
     }
 
@@ -305,7 +301,7 @@ public final class DialTest {
         long flooded = 0;
         for (long last = 0; flooded == 0 || flooded != last; Thread.sleep(1000)) {
             last = flooded;
-            flooded = LoginTest.nativeProbeFlooded();
+            flooded = Long.parseLong(Probe.call("flooded"));
         }
         return flooded;
     }

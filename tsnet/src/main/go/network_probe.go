@@ -2,11 +2,6 @@
 
 package main
 
-/*
-#include <stdlib.h>
-*/
-import "C"
-
 import (
 	"encoding/hex"
 	"encoding/json"
@@ -17,11 +12,9 @@ import (
 	"tailscale.com/net/netmon"
 )
 
-// Reports interfaces from the registered getter and Go's own discovery error. It does not start
-// a node or contact any endpoint.
-//
-//export klethron_network_probe
-func klethron_network_probe() *C.char {
+// probeInterfaces reports interfaces from the registered getter and Go's own discovery error. It
+// does not start a node or contact any endpoint.
+func probeInterfaces(string) string {
 	result := struct {
 		Error      string
 		GoError    string
@@ -54,5 +47,5 @@ func klethron_network_probe() *C.char {
 	}
 	sort.Strings(result.Interfaces)
 	data, _ := json.Marshal(result) // Strings and slices only; cannot fail.
-	return C.CString(string(data))
+	return string(data)
 }

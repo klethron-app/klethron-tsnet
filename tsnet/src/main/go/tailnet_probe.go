@@ -2,11 +2,6 @@
 
 package main
 
-/*
-#include <stdlib.h>
-*/
-import "C"
-
 import (
 	"bytes"
 	"context"
@@ -57,15 +52,9 @@ func checkProbeEnvironment(dir string) string {
 // The DERP-only knob is process-global, so tailnet probes never overlap.
 var tailnetProbeMu sync.Mutex
 
-// This debug-only probe connects two in-process nodes through a loopback test control server
-// and DERP/STUN server, then exchanges TCP data over the tailnet. No real tailnet, credentials
-// or external network are involved. It returns fixed ASCII diagnostics only.
-//
-//export klethron_tailnet_probe
-func klethron_tailnet_probe(path *C.char, length C.int, relayOnly C.int) *C.char {
-	return C.CString(probeTailnet(C.GoStringN(path, length), relayOnly != 0))
-}
-
+// probeTailnet connects two in-process nodes through a loopback test control server and DERP/STUN
+// server, then exchanges TCP data over the tailnet. No real tailnet, credentials or external
+// network are involved. It returns fixed ASCII diagnostics only.
 func probeTailnet(dir string, relayOnly bool) string {
 	if problem := checkProbeEnvironment(dir); problem != "" {
 		return problem

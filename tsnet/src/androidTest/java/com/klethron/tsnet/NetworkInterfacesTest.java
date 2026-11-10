@@ -15,13 +15,9 @@ import org.json.JSONObject;
 import org.junit.Test;
 
 public final class NetworkInterfacesTest {
-    static {
-        System.loadLibrary("klethron_tsnet");
-    }
-
     @Test
     public void nativeInterfacesMatchAndroidWhereGoDiscoveryIsDenied() throws Exception {
-        JSONObject report = new JSONObject(nativeProbe());
+        JSONObject report = new JSONObject(Probe.call("interfaces"));
         assertEquals("", report.getString("Error"));
         // A negative control, independent of the registered getter. Needs SELinux Enforcing.
         assertTrue(report.getString("GoError"), report.getString("GoError").contains("permission denied"));
@@ -49,6 +45,4 @@ public final class NetworkInterfacesTest {
         assertTrue("Expected IPv4 and IPv6 addresses", hasIPv4 && hasIPv6);
         assertEquals(expected, actual);
     }
-
-    private static native String nativeProbe();
 }

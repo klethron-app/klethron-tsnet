@@ -2,11 +2,6 @@
 
 package main
 
-/*
-#include <stdlib.h>
-*/
-import "C"
-
 import (
 	"crypto/sha256"
 	"crypto/x509"
@@ -15,10 +10,8 @@ import (
 	"sort"
 )
 
-// This debug-only bridge reports SHA-256 fingerprints of public root certificates.
-//
-//export klethron_roots_probe
-func klethron_roots_probe() *C.char {
+// probeRoots reports SHA-256 fingerprints of public root certificates.
+func probeRoots(string) string {
 	usePlatformRoots() // As node creation does.
 	result := struct {
 		Roots      []string
@@ -34,5 +27,5 @@ func klethron_roots_probe() *C.char {
 	result.SystemPool = err == nil && system.Equal(pool)
 	sort.Strings(result.Roots)
 	data, _ := json.Marshal(result) // Strings and booleans only; cannot fail.
-	return C.CString(string(data))
+	return string(data)
 }

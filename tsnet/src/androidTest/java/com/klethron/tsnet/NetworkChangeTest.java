@@ -15,7 +15,6 @@ import android.os.Looper;
 import android.os.ParcelFileDescriptor;
 import androidx.test.platform.app.InstrumentationRegistry;
 import java.io.FileInputStream;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.concurrent.LinkedBlockingQueue;
@@ -29,10 +28,6 @@ import org.junit.Test;
  * Requires a device whose default network is Wi-Fi with another network (emulator cellular) behind it.
  */
 public final class NetworkChangeTest {
-    static {
-        System.loadLibrary("klethron_tsnet");
-    }
-
     @Test(timeout = 180000)
     public void rebindsWhenDefaultNetworkChanges() throws Exception {
         Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
@@ -58,20 +53,20 @@ public final class NetworkChangeTest {
         };
         boolean registered = false;
         try {
-            assertEquals("ok", nativeProbeStart(directory.toString().getBytes(StandardCharsets.UTF_8)));
+            assertEquals("ok", Probe.call("netchangeStart", directory));
             connectivity.registerBestMatchingNetworkCallback(TailnetNode.PHYSICAL_NETWORK, callback,
                     new Handler(Looper.getMainLooper()));
             registered = true;
             String wifi = nextName(names);
-            assertEquals("ok", nativeProbeAwait(wifi.getBytes(StandardCharsets.UTF_8)));
+            assertEquals("ok", Probe.call("netchangeAwait", wifi));
 
             shell("svc wifi disable");
             String other = wifi;
             while (other.isEmpty() || other.equals(wifi)) {
                 other = nextName(names);
             }
-            assertEquals("ok", nativeProbeAwait(other.getBytes(StandardCharsets.UTF_8)));
-            nativeProbeStop();
+            assertEquals("ok", Probe.call("netchangeAwait", other));
+            Probe.call("netchangeStop");
             try (var files = Files.list(directory)) {
                 assertEquals("Nodes must not write node state", 0, files.count());
             }
@@ -80,7 +75,7 @@ public final class NetworkChangeTest {
                 connectivity.unregisterNetworkCallback(callback);
             }
             // Release the probe first: it holds the lock that other tailnet probes wait for.
-            nativeProbeStop();
+            Probe.call("netchangeStop");
             TailnetNode.setDefaultNetwork(null);
             LoginTest.deleteDirectory(directory);
             shell("svc wifi enable");
@@ -113,10 +108,4 @@ public final class NetworkChangeTest {
             in.readAllBytes(); // Wait for completion.
         }
     }
-
-    private static native String nativeProbeStart(byte[] directory);
-
-    private static native String nativeProbeAwait(byte[] interfaceName);
-
-    private static native void nativeProbeStop();
 }

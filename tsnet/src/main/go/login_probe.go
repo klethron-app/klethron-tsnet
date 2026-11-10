@@ -2,11 +2,6 @@
 
 package main
 
-/*
-#include <stdlib.h>
-*/
-import "C"
-
 import (
 	"context"
 	"fmt"
@@ -18,6 +13,7 @@ import (
 	"net/netip"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -44,21 +40,20 @@ var loginProbe struct {
 	removed  atomic.Bool // Map requests fail as for nodes deleted from the tailnet.
 }
 
-// klethron_login_probe_start returns the control URL, or "" on failure.
-//
-//export klethron_login_probe_start
-func klethron_login_probe_start(interactive C.int) *C.char {
+// startControl starts the control server, requiring interactive login if interactive is "true".
+// It returns the control URL, or "" on failure.
+func startControl(interactive string) string {
 	loginProbe.Lock()
 	defer loginProbe.Unlock()
 	if loginProbe.control != nil {
-		return C.CString("")
+		return ""
 	}
 	derpMap, stopDERP, err := startLoopbackDERP()
 	if err != nil {
-		return C.CString("")
+		return ""
 	}
-	control := &testcontrol.Server{DERPMap: derpMap, Logf: logger.Discard, RequireAuth: interactive != 0}
-	if interactive == 0 {
+	control := &testcontrol.Server{DERPMap: derpMap, Logf: logger.Discard, RequireAuth: interactive == "true"}
+	if !control.RequireAuth {
 		control.DNSConfig = &tailcfg.DNSConfig{Proxied: true}
 		control.MagicDNSDomain = "tail-scale.ts.net" // As in upstream's tsnet tests.
 	}
@@ -78,22 +73,20 @@ func klethron_login_probe_start(interactive C.int) *C.char {
 		control.HTTPTestServer.Close()
 		stopDERP()
 	}
-	return C.CString(control.HTTPTestServer.URL)
+	return control.HTTPTestServer.URL
 }
 
-// klethron_login_probe_start_peer starts an in-memory peer that echoes on port 7070. On port 7071
+// startPeer starts an in-memory peer with state in dir that echoes on port 7070. On port 7071
 // it sends a greeting, closes its side, then reports how many bytes it received until the dialer
 // closed. On port 7073 it writes floodBytes of the probe pattern, counting progress, then closes.
 // On port 7074 it reads nothing until released, then reports how many bytes of the probe pattern
 // it received until the dialer closed, or -3 at the first other byte. It returns the peer's
 // tailnet IPv4 address, or "" on failure.
-//
-//export klethron_login_probe_start_peer
-func klethron_login_probe_start_peer(path *C.char, length C.int) *C.char {
+func startPeer(dir string) string {
 	loginProbe.Lock()
 	defer loginProbe.Unlock()
 	if loginProbe.control == nil || loginProbe.control.RequireAuth || loginProbe.received != nil {
-		return C.CString("")
+		return ""
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -103,9 +96,9 @@ func klethron_login_probe_start_peer(path *C.char, length C.int) *C.char {
 		peer.close()
 		stopControl()
 	}
-	server, ip, problem := peer.startNode(ctx, C.GoStringN(path, length), loginProbe.control.HTTPTestServer.URL, "klethron-peer")
+	server, ip, problem := peer.startNode(ctx, dir, loginProbe.control.HTTPTestServer.URL, "klethron-peer")
 	if problem != "" {
-		return C.CString("")
+		return ""
 	}
 	received := make(chan int64, 16)
 	release := make(chan struct{})
@@ -138,7 +131,7 @@ func klethron_login_probe_start_peer(path *C.char, length C.int) *C.char {
 	for port, handle := range handlers {
 		ln, err := server.Listen("tcp", port)
 		if err != nil {
-			return C.CString("")
+			return ""
 		}
 		peer.closers = append(peer.closers, func() { _ = ln.Close() })
 		go func() {
@@ -154,7 +147,7 @@ func klethron_login_probe_start_peer(path *C.char, length C.int) *C.char {
 			}
 		}()
 	}
-	return C.CString(ip.String())
+	return ip.String()
 }
 
 // floodBytes exceeds what the dialer and peer can buffer for one connection: netstack's 8 MiB
@@ -183,74 +176,62 @@ func countReceived(conn net.Conn, pattern bool) int64 {
 	}
 }
 
-// klethron_login_probe_flooded returns the bytes the peer's flooding port has written.
-//
-//export klethron_login_probe_flooded
-func klethron_login_probe_flooded() C.longlong {
-	return C.longlong(loginProbe.flooded.Load())
+// flooded returns the bytes the peer's flooding port has written.
+func flooded(string) string {
+	return strconv.FormatInt(loginProbe.flooded.Load(), 10)
 }
 
-// klethron_login_probe_release lets the peer's stalled port read, once per peer.
-//
-//export klethron_login_probe_release
-func klethron_login_probe_release() {
+// releaseStalled lets the peer's stalled port read, once per peer.
+func releaseStalled(string) string {
 	loginProbe.Lock()
 	defer loginProbe.Unlock()
 	if loginProbe.release != nil {
 		close(loginProbe.release)
 		loginProbe.release = nil
 	}
+	return ""
 }
 
-// klethron_login_probe_await_received returns the count reported by the next greeting or stalled
-// connection that the dialer closed, or -2 if none closed within the timeout.
-//
-//export klethron_login_probe_await_received
-func klethron_login_probe_await_received(timeoutMillis C.longlong) C.longlong {
+// awaitReceived returns the count reported by the next greeting or stalled connection that the
+// dialer closed, or -2 if none closed within the timeout in milliseconds.
+func awaitReceived(timeoutMillis string) string {
 	loginProbe.Lock()
 	reports := loginProbe.received
 	loginProbe.Unlock()
-	if reports == nil {
-		return -2
-	}
+	millis, _ := strconv.Atoi(timeoutMillis)
 	select {
 	case received := <-reports:
-		return C.longlong(received)
-	case <-time.After(milliseconds(timeoutMillis)):
-		return -2
+		return strconv.FormatInt(received, 10)
+	case <-time.After(time.Duration(millis) * time.Millisecond):
+		return "-2"
 	}
 }
 
-// klethron_login_probe_set_peer_online sets whether control reports the in-memory peer as
-// online, which it does not by default. It returns whether the peer is registered.
-//
-//export klethron_login_probe_set_peer_online
-func klethron_login_probe_set_peer_online(online C.int) C.int {
+// setPeerOnline sets whether control reports the in-memory peer as online, which it does not by
+// default. It returns whether the peer is registered.
+func setPeerOnline(online string) string {
 	loginProbe.Lock()
 	defer loginProbe.Unlock()
-	if loginProbe.control == nil {
-		return 0
-	}
-	for _, node := range loginProbe.control.AllNodes() {
-		if node.Hostinfo.Hostname() == "klethron-peer" {
-			node.Online = new(online != 0)
-			loginProbe.control.UpdateNode(node)
-			return 1
+	if loginProbe.control != nil {
+		for _, node := range loginProbe.control.AllNodes() {
+			if node.Hostinfo.Hostname() == "klethron-peer" {
+				node.Online = new(online == "true")
+				loginProbe.control.UpdateNode(node)
+				return "true"
+			}
 		}
 	}
-	return 0
+	return "false"
 }
 
-// klethron_login_probe_add_peers registers three unreachable devices: an offline Linux device
+// addPeers registers three unreachable devices: an offline Linux device
 // named klethron-other, with addresses 100.101.0.1 and fd7a:115c:a1e0::101:1 and SSH host keys
 // sshHostKey and one containing a comma, a sharee node and a Mullvad exit node.
-//
-//export klethron_login_probe_add_peers
-func klethron_login_probe_add_peers() {
+func addPeers(string) string {
 	loginProbe.Lock()
 	defer loginProbe.Unlock()
 	if loginProbe.control == nil {
-		return
+		return ""
 	}
 	add := func(id int, name string, hostinfo *tailcfg.Hostinfo, addresses ...string) {
 		node := &tailcfg.Node{
@@ -271,20 +252,19 @@ func klethron_login_probe_add_peers() {
 	add(1, "klethron-other.tail-scale.ts.net.", other, "fd7a:115c:a1e0::101:1", "100.101.0.1")
 	add(2, "klethron-sharee.tail-scale.ts.net.", &tailcfg.Hostinfo{OS: "linux", ShareeNode: true}, "100.101.0.2")
 	add(3, "us-nyc-wg-301.mullvad.ts.net.", &tailcfg.Hostinfo{OS: "linux"}, "100.101.0.3")
+	return ""
 }
 
 // sshHostKey is in OpenSSH public key format; the library passes keys through without parsing them.
 const sshHostKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl"
 
-// klethron_login_probe_complete acts as the user's browser, approving a login URL. Like real
+// completeLogin acts as the user's browser, approving a login URL, and returns "ok". Like real
 // control, the approval gives a re-login's new node key a fresh expiry.
-//
-//export klethron_login_probe_complete
-func klethron_login_probe_complete(loginURL *C.char, length C.int) C.int {
+func completeLogin(loginURL string) string {
 	loginProbe.Lock()
 	defer loginProbe.Unlock()
 	if loginProbe.control == nil {
-		return 0
+		return "not started"
 	}
 	// testcontrol stages a re-login's new key as a copy of the expired node.
 	for _, node := range loginProbe.control.AllNodes() {
@@ -293,21 +273,19 @@ func klethron_login_probe_complete(loginURL *C.char, length C.int) C.int {
 			loginProbe.control.UpdateNode(node)
 		}
 	}
-	if !loginProbe.control.CompleteAuth(C.GoStringN(loginURL, length)) {
-		return 0
+	if !loginProbe.control.CompleteAuth(loginURL) {
+		return "not completed"
 	}
-	return 1
+	return "ok"
 }
 
-// klethron_login_probe_expire expires the node keys of all registered nodes, as when their key
-// expiry passes or an administrator expires them. It returns the number of nodes.
-//
-//export klethron_login_probe_expire
-func klethron_login_probe_expire() C.int {
+// expireNodes expires the node keys of all registered nodes, as when their key expiry passes or
+// an administrator expires them. It returns the number of nodes.
+func expireNodes(string) string {
 	loginProbe.Lock()
 	defer loginProbe.Unlock()
 	if loginProbe.control == nil {
-		return 0
+		return "0"
 	}
 	nodes := loginProbe.control.AllNodes()
 	loginProbe.expired.Make()
@@ -316,54 +294,49 @@ func klethron_login_probe_expire() C.int {
 		loginProbe.expired.Add(node.Key)
 		loginProbe.control.UpdateNode(node)
 	}
-	return C.int(len(nodes))
+	return strconv.Itoa(len(nodes))
 }
 
-// klethron_login_probe_remove makes control answer map requests as for nodes deleted from the
-// tailnet, or no longer. A running node notices once it starts a new map request.
-//
-//export klethron_login_probe_remove
-func klethron_login_probe_remove(removed C.int) {
-	loginProbe.removed.Store(removed != 0)
+// removeNodes makes control answer map requests as for nodes deleted from the tailnet if removed
+// is "true", or no longer. A running node notices once it starts a new map request.
+func removeNodes(removed string) string {
+	loginProbe.removed.Store(removed == "true")
+	return ""
 }
 
-// klethron_login_probe_reject_registrations makes control reject every registration request,
-// including logouts, with an error. Stopping the server would not: nodes keep their hijacked Noise
-// connection. testcontrol reads the field without locking; no registration is in flight here.
-//
-//export klethron_login_probe_reject_registrations
-func klethron_login_probe_reject_registrations(reject C.int) {
+// rejectRegistrations makes control reject every registration request, including logouts, with an
+// error if reject is "true", or no longer. Stopping the server would not: nodes keep their hijacked
+// Noise connection. testcontrol reads the field without locking; no registration is in flight here.
+func rejectRegistrations(reject string) string {
 	loginProbe.Lock()
 	defer loginProbe.Unlock()
 	if loginProbe.control != nil {
 		loginProbe.control.RequireAuthKey = ""
-		if reject != 0 {
+		if reject == "true" {
 			loginProbe.control.RequireAuthKey = "tskey-test-never-sent"
 		}
 	}
+	return ""
 }
 
-// klethron_login_probe_require_machine_auth makes control require an administrator to approve
-// new devices. testcontrol reads the field without locking; set it before nodes register.
-//
-//export klethron_login_probe_require_machine_auth
-func klethron_login_probe_require_machine_auth() {
+// requireMachineAuth makes control require an administrator to approve new devices. testcontrol
+// reads the field without locking; set it before nodes register.
+func requireMachineAuth(string) string {
 	loginProbe.Lock()
 	defer loginProbe.Unlock()
 	if loginProbe.control != nil {
 		loginProbe.control.RequireMachineAuth = true
 	}
+	return ""
 }
 
-// klethron_login_probe_approve_machines acts as a tailnet administrator, approving all registered
-// devices. It returns the number approved.
-//
-//export klethron_login_probe_approve_machines
-func klethron_login_probe_approve_machines() C.int {
+// approveMachines acts as a tailnet administrator, approving all registered devices. It returns
+// the number approved.
+func approveMachines(string) string {
 	loginProbe.Lock()
 	defer loginProbe.Unlock()
 	if loginProbe.control == nil {
-		return 0
+		return "0"
 	}
 	approved := 0
 	url := loginProbe.control.HTTPTestServer.URL
@@ -372,14 +345,12 @@ func klethron_login_probe_approve_machines() C.int {
 			approved++
 		}
 	}
-	return C.int(approved)
+	return strconv.Itoa(approved)
 }
 
-// klethron_login_probe_hostnames returns the sorted hostnames that registered devices last
-// reported to control, separated by newlines.
-//
-//export klethron_login_probe_hostnames
-func klethron_login_probe_hostnames() *C.char {
+// hostnames returns the sorted hostnames that registered devices last reported to control,
+// separated by newlines.
+func hostnames(string) string {
 	loginProbe.Lock()
 	defer loginProbe.Unlock()
 	var names []string
@@ -397,11 +368,10 @@ func klethron_login_probe_hostnames() *C.char {
 		}
 	}
 	slices.Sort(names)
-	return C.CString(strings.Join(names, "\n"))
+	return strings.Join(names, "\n")
 }
 
-//export klethron_login_probe_stop
-func klethron_login_probe_stop() {
+func stopControl(string) string {
 	loginProbe.Lock()
 	defer loginProbe.Unlock()
 	if loginProbe.control != nil {
@@ -414,16 +384,17 @@ func klethron_login_probe_stop() {
 		loginProbe.expired = nil
 		loginProbe.removed.Store(false)
 	}
+	return ""
 }
 
-// Go copies the process environment when the library loads; Android's Os.setenv cannot change
-// what upstream reads afterwards, but Go's own os.Setenv does.
-//
-//export klethron_login_probe_set_auth_key_environment
-func klethron_login_probe_set_auth_key_environment(set C.int) {
-	if set != 0 {
+// setAuthKeyEnvironment sets TS_AUTHKEY if set is "true", otherwise unsets it. Go copies the
+// process environment when the library loads; Android's Os.setenv cannot change what upstream
+// reads afterwards, but Go's own os.Setenv does.
+func setAuthKeyEnvironment(set string) string {
+	if set == "true" {
 		_ = os.Setenv("TS_AUTHKEY", "tskey-test-not-a-key")
 	} else {
 		_ = os.Unsetenv("TS_AUTHKEY")
 	}
+	return ""
 }

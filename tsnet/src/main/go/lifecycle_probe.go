@@ -2,12 +2,10 @@
 
 package main
 
-import "C"
-
 import "time"
 
-//export klethron_concurrent_close_probe
-func klethron_concurrent_close_probe() C.int {
+// probeConcurrentClose returns "ok" if a second close waits for a first one still shutting down.
+func probeConcurrentClose(string) string {
 	id := klethron_node_create()
 	n := lookupNode(id)
 	entered, release := make(chan struct{}), make(chan struct{})
@@ -25,14 +23,14 @@ func klethron_concurrent_close_probe() C.int {
 		klethron_node_close(id)
 		close(second)
 	}()
-	var waited C.int
+	result := "ok"
 	select {
 	case <-second:
+		result = "second close did not wait"
 	case <-time.After(100 * time.Millisecond):
-		waited = 1
 	}
 	close(release)
 	<-first
 	<-second
-	return waited
+	return result
 }

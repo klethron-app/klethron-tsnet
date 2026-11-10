@@ -14,13 +14,9 @@ import org.json.JSONObject;
 import org.junit.Test;
 
 public final class TrustRootsTest {
-    static {
-        System.loadLibrary("klethron_tsnet");
-    }
-
     @Test
     public void goTrustsExactlyAndroidSystemRoots() throws Exception {
-        JSONObject report = new JSONObject(nativeProbe());
+        JSONObject report = new JSONObject(Probe.call("roots"));
         assertTrue("Platform roots must replace Go's system pool", report.getBoolean("SystemPool"));
         Set<String> actual = new TreeSet<>();
         JSONArray roots = report.getJSONArray("Roots");
@@ -46,6 +42,4 @@ public final class TrustRootsTest {
         }
         return fingerprints;
     }
-
-    private static native String nativeProbe();
 }

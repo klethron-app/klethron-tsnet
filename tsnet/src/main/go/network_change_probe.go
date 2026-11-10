@@ -2,11 +2,6 @@
 
 package main
 
-/*
-#include <stdlib.h>
-*/
-import "C"
-
 import (
 	"context"
 	"sync"
@@ -22,11 +17,6 @@ var networkProbe struct {
 	tailnet *loopbackTailnet
 	// Interface named by each node's latest rebinding change.
 	rebound *sync.Map // *tsnet.Server -> string
-}
-
-//export klethron_netchange_probe_start
-func klethron_netchange_probe_start(path *C.char, length C.int) *C.char {
-	return C.CString(startNetworkProbe(C.GoStringN(path, length)))
 }
 
 func startNetworkProbe(dir string) string {
@@ -64,20 +54,14 @@ func startNetworkProbe(dir string) string {
 		}
 	}
 	if problem != "" {
-		stopNetworkProbe()
+		stopNetworkProbeLocked()
 		return problem
 	}
 	return "ok"
 }
 
-// Waits for both nodes to finish rebinding to the named default interface, then exchanges
-// tailnet data and requires a re-established direct path.
-//
-//export klethron_netchange_probe_await
-func klethron_netchange_probe_await(name *C.char, length C.int) *C.char {
-	return C.CString(awaitNetworkChange(C.GoStringN(name, length)))
-}
-
+// awaitNetworkChange waits for both nodes to finish rebinding to the named default interface, then
+// exchanges tailnet data and requires a re-established direct path.
 func awaitNetworkChange(name string) string {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -111,14 +95,14 @@ func awaitNetworkChange(name string) string {
 	}
 }
 
-//export klethron_netchange_probe_stop
-func klethron_netchange_probe_stop() {
+func stopNetworkProbe(string) string {
 	networkProbe.Lock()
 	defer networkProbe.Unlock()
-	stopNetworkProbe()
+	stopNetworkProbeLocked()
+	return ""
 }
 
-func stopNetworkProbe() {
+func stopNetworkProbeLocked() {
 	if networkProbe.tailnet != nil {
 		networkProbe.tailnet.close()
 		networkProbe.tailnet = nil
