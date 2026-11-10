@@ -121,8 +121,8 @@ public final class LoginTest {
             assertTrue("Unexpected login URL", status.loginUrl().startsWith(controlUrl + "/auth/"));
             complete(status);
             assertFalse(await(node, s -> s.state() == NodeStatus.State.RUNNING).addresses().isEmpty());
-            // Control keeps the logged-out registration: testcontrol ignores the logout's expiry.
-            assertEquals("klethron-logout-test\nklethron-logout-test", Probe.call("hostnames"));
+            // The re-login's registration uses tsnet's hostname again.
+            assertEquals("klethron-logout-test", Probe.call("hostnames"));
             // Logout discards a pending re-authentication URL with the key it would authorize.
             node.login();
             await(node, s -> s.loginUrl() != null);

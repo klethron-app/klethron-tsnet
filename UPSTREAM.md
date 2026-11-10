@@ -108,8 +108,9 @@ with Go 1.27.3. Recheck each entry on every update and drop fixes upstream has m
   nodes' map requests with 400, not control's 404, and keeps streaming to running nodes, so removal is
   simulated with a 404 for map requests that a node sees at its next start. `httptest.Server.Close` does
   not close hijacked Noise connections, so stopping it does not make control unreachable.
-  `AllNodes` includes staged rotation keys, including abandoned candidates; the hostname probe counts
-  devices by stable ID.
+  `AllNodes` lists every key that started registering, including staged rotation keys and a new node's
+  first key, abandoned when `Start`'s interactive login begins first; the probes count devices by
+  machine key.
 
 ## Updating upstream
 

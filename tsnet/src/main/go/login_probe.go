@@ -317,32 +317,35 @@ func requireMachineAuth(control *testcontrol.Server, _ string) string {
 }
 
 // approveMachines acts as a tailnet administrator, approving all registered devices. It returns
-// the number approved.
+// the number of devices approved. testcontrol records a node for each key's first registration
+// request, so one device can have several: its first key, abandoned if Start's interactive login
+// begins before that registration completes, and a rotation's staged key. They share a machine key.
 func approveMachines(control *testcontrol.Server, _ string) string {
-	approved := 0
+	approved := make(set.Set[key.MachinePublic])
 	url := control.HTTPTestServer.URL
 	for _, node := range control.AllNodes() {
 		if control.CompleteDeviceApproval(url, url+"/admin", &node.Key) {
-			approved++
+			approved.Add(node.Machine)
 		}
 	}
-	return strconv.Itoa(approved)
+	return strconv.Itoa(len(approved))
 }
 
 // hostnames returns the sorted hostnames that registered devices last reported to control,
-// separated by newlines.
+// separated by newlines. Like approveMachines, it counts devices by machine key, but keeps a
+// device's conflicting hostnames visible to assertions.
 func hostnames(control *testcontrol.Server, _ string) string {
+	type device struct {
+		machine key.MachinePublic
+		name    string
+	}
 	var names []string
-	seen := make(map[tailcfg.StableNodeID]string)
+	seen := make(set.Set[device])
 	for _, node := range control.AllNodes() {
-		name := node.Hostinfo.Hostname()
-		// Key rotation stages two keys for one device; AllNodes includes both.
-		// Keep distinct devices and conflicting hostnames visible to assertions.
-		if previous, ok := seen[node.StableID]; ok && previous == name {
-			continue
+		if d := (device{node.Machine, node.Hostinfo.Hostname()}); !seen.Contains(d) {
+			seen.Add(d)
+			names = append(names, d.name)
 		}
-		seen[node.StableID] = name
-		names = append(names, name)
 	}
 	slices.Sort(names)
 	return strings.Join(names, "\n")
