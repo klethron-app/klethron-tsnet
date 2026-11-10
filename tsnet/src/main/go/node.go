@@ -51,7 +51,7 @@ type nodeStatus struct {
 	state      ipn.State
 	revocation string // A NodeStatus.Revocation name while NeedsLogin, or "".
 	loginURL   string
-	ip4, ip6   netip.Addr
+	addresses  string // This node's, as addressList.
 	err        string // The latest backend error since the node last ran, as printable ASCII.
 	peers      string // The record's peer lines, each preceded by a newline.
 }
@@ -177,17 +177,14 @@ func peerLine(peer *ipnstate.PeerStatus) string {
 	if peer.ShareeNode || name == "" || strings.HasSuffix(name, ".mullvad.ts.net") || len(peer.TailscaleIPs) == 0 {
 		return ""
 	}
-	var addresses, keys []string
-	for _, ip := range slices.SortedFunc(slices.Values(peer.TailscaleIPs), netip.Addr.Compare) {
-		addresses = append(addresses, ip.String())
-	}
+	var keys []string
 	for _, key := range peer.SSH_HostKeys {
 		if key = strings.TrimSpace(key); key != "" && key == printable(key, 8192) && !strings.Contains(key, ",") {
 			keys = append(keys, key)
 		}
 	}
 	return "\n" + strings.Join([]string{field(name, 255), field(peer.OS, 32), strconv.FormatBool(peer.Online),
-		strings.Join(addresses, ","), strings.Join(keys, ",")}, "\t")
+		addressList(peer.TailscaleIPs...), strings.Join(keys, ",")}, "\t")
 }
 
 // field returns printable(s, limit) without commas.
@@ -197,13 +194,13 @@ func field(s string, limit int) string {
 
 // publish applies notify and, unless nil, the peer lines.
 func (n *node) publish(notify ipn.Notify, peers *string) {
-	ip4, ip6 := n.server.TailscaleIPs()
+	addresses := addressList(n.server.TailscaleIPs())
 	// Set before upstream reports NeedsLogin for it; health notifications may arrive later.
 	_, removed := n.server.Sys().HealthTracker.Get().CurrentState().Warnings[tsconst.HealthWarnableNodeRemoved]
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	status := n.status
-	status.ip4, status.ip6 = ip4, ip6
+	status.addresses = addresses
 	if peers != nil {
 		status.peers = *peers
 	}
@@ -276,15 +273,11 @@ func printable(s string, limit int) string {
 	return string(b)
 }
 
-// loginURL returns raw if it is a printable ASCII absolute HTTP(S) URL, otherwise "".
+// loginURL returns raw if it is an absolute HTTP(S) URL of printable ASCII without spaces, otherwise "".
 func loginURL(raw string) string {
-	for i := 0; i < len(raw); i++ {
-		if raw[i] <= ' ' || raw[i] >= 0x7f {
-			return ""
-		}
-	}
 	u, err := url.Parse(raw)
-	if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" {
+	if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" ||
+		strings.ContainsFunc(raw, func(r rune) bool { return r <= ' ' || r > '~' }) {
 		return ""
 	}
 	return raw
@@ -293,24 +286,24 @@ func loginURL(raw string) string {
 // await returns the status record once its version differs from after, or the timeout elapses.
 // It returns false once the node is closed.
 func (n *node) await(after uint64, timeout time.Duration) (string, bool) {
-	timer := time.NewTimer(timeout)
-	defer timer.Stop()
+	ctx, cancel := context.WithTimeout(n.ctx, timeout)
+	defer cancel()
+	status, version := n.wait(ctx, func(_ nodeStatus, version uint64) bool { return version != after })
+	return status.record(version), n.ctx.Err() == nil
+}
+
+// wait returns the latest status and its version once done accepts them or ctx ends.
+func (n *node) wait(ctx context.Context, done func(nodeStatus, uint64) bool) (nodeStatus, uint64) {
 	for {
 		n.mu.Lock()
 		status, version, changed := n.status, n.version, n.changed
 		n.mu.Unlock()
-		if n.ctx.Err() != nil {
-			return "", false
-		}
-		if version != after {
-			return status.record(version), true
+		if done(status, version) || ctx.Err() != nil {
+			return status, version
 		}
 		select {
 		case <-changed:
-		case <-n.ctx.Done():
-			return "", false
-		case <-timer.C:
-			return status.record(version), true
+		case <-ctx.Done():
 		}
 	}
 }
@@ -376,7 +369,8 @@ func (n *node) dial(host string, port uint16, timeout time.Duration) int {
 		return result
 	}
 	defer done()
-	if !n.awaitRunning(ctx) {
+	status, _ := n.wait(ctx, func(s nodeStatus, _ uint64) bool { return s.state == ipn.Running })
+	if status.state != ipn.Running {
 		return n.failed(ctx, resultTimeout)
 	}
 	// Resolves MagicDNS names through the tailnet's DNS configuration.
@@ -454,23 +448,6 @@ func (n *node) login() int {
 	return 0
 }
 
-// awaitRunning waits until the node runs, returning false when ctx ends first.
-func (n *node) awaitRunning(ctx context.Context) bool {
-	for {
-		n.mu.Lock()
-		state, changed := n.status.state, n.changed
-		n.mu.Unlock()
-		if state == ipn.Running {
-			return true
-		}
-		select {
-		case <-changed:
-		case <-ctx.Done():
-			return false
-		}
-	}
-}
-
 // relay copies between conn and one end of a new socket pair, returning the other end's
 // descriptor. The peer's EOF reaches the app as end of stream while the app may keep writing.
 // Unix sockets cannot signal a reset, so failures and closing ctx also appear as end of stream.
@@ -526,11 +503,16 @@ func (s nodeStatus) record(version uint64) string {
 	if !ok {
 		state = "NO_STATE"
 	}
-	var addresses []string
-	for _, ip := range []netip.Addr{s.ip4, s.ip6} {
+	return fmt.Sprintf("%d\n%s\n%s\n%s\n%s\n%s%s", version, state, s.revocation, s.loginURL, s.addresses, s.err, s.peers)
+}
+
+// addressList returns the valid addresses, IPv4 first, comma-separated.
+func addressList(ips ...netip.Addr) string {
+	var list []string
+	for _, ip := range slices.SortedFunc(slices.Values(ips), netip.Addr.Compare) {
 		if ip.IsValid() {
-			addresses = append(addresses, ip.String())
+			list = append(list, ip.String())
 		}
 	}
-	return fmt.Sprintf("%d\n%s\n%s\n%s\n%s\n%s%s", version, state, s.revocation, s.loginURL, strings.Join(addresses, ","), s.err, s.peers)
+	return strings.Join(list, ",")
 }
