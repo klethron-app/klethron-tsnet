@@ -1,7 +1,7 @@
 # Upstream issues
 
 Upstream issues at Tailscale
-[`444baf1ef522`](https://github.com/tailscale/tailscale/commit/444baf1ef522e3aa635c3fcb8a036a1d75eda021)
+[`5b6c39b94d50`](https://github.com/tailscale/tailscale/commit/5b6c39b94d50beac39dd7302d6f75f14e281a01f)
 with Go 1.27.3. Recheck each entry on every update and drop fixes upstream has made.
 `BuildGoLibrary.kt` hash-checks the patch; `TAILSCALE-MODIFICATIONS` documents it.
 
@@ -102,8 +102,6 @@ with Go 1.27.3. Recheck each entry on every update and drop fixes upstream has m
 - **Names without a tailnet DNS route** fall back to the device's resolver when tailnet DNS fails
   (`tsnet` `dnsResolver.hostLookup`), so the name leaves the tailnet; `dial` still connects only to
   tailnet addresses. Upstream has no option to disable the fallback.
-- **`ts_omit_serve` breaks the `tsnet` build** (`tsnet.go` calls `SetServeConfig`/`GetServeConfig`
-  unconditionally), so serve stays linked. **To report upstream.**
 - `ts_omit_tailnetlock` breaks the debug test servers.
 - Test infrastructure: `testcontrol` ignores a logout's expiry (control-side deregistration is untested)
   and copies an expired node on re-login (a probe gives the new key a fresh expiry). It answers unknown
@@ -119,5 +117,5 @@ Resolve `tailscale/tailscale` main to a full SHA; update the Go requirement and 
 assertion in `TailnetNodeTest` and the documented SHA; re-check patch hashes and every
 entry above. Re-audit initialization, filesystem and subprocess reachability and state permissions, and
 retest the state format. Update both notice inventories (THIRD-PARTY-NOTICES.md), then rebuild both ABIs
-and repeat the device tests. Omit `serve` once upstream fixes its build; when the omitted feature set
-changes, revalidate it on a real tailnet with the user.
+and repeat the device tests. When the omitted feature set changes, revalidate it on a real tailnet with
+the user.

@@ -3,12 +3,12 @@
 Notices ship in the AAR under `assets/klethron-tsnet/licenses/`, from
 `tsnet/src/main/assets/klethron-tsnet/licenses/` (both variants) and `tsnet/src/debug/…` (debug only):
 
-- Tailscale (BSD-3-Clause), pinned to `444baf1ef522e3aa635c3fcb8a036a1d75eda021`: licence, patent notice
+- Tailscale (BSD-3-Clause), pinned to `5b6c39b94d50beac39dd7302d6f75f14e281a01f`: licence, patent notice
   and `TAILSCALE-MODIFICATIONS`, which documents the local patch.
 - Go's runtime licence and patent notice, also covering Tailscale's Go-derived `tempfork` sources.
 - JSpecify 1.0.1 (Apache-2.0): a transitive Maven dependency, not bundled; its
   [licence](https://github.com/jspecify/jspecify/blob/v1.0.1/LICENSE) is included as `JSPECIFY-LICENSE`.
-- [`GO-MODULES.tsv`](tsnet/src/main/assets/klethron-tsnet/licenses/GO-MODULES.tsv): the 25 modules that
+- [`GO-MODULES.tsv`](tsnet/src/main/assets/klethron-tsnet/licenses/GO-MODULES.tsv): the 24 modules that
   `go version -m` reports for both ABIs and variants, with version, checksum and notice paths.
   [`GO-MODULES-DEBUG.tsv`](tsnet/src/debug/assets/klethron-tsnet/licenses/GO-MODULES-DEBUG.tsv) adds the
   five modules of the debug-only test control and DERP/STUN servers.
@@ -32,8 +32,8 @@ toolchain or module change requires a new per-file review. Reports are in
 
 ## Per-file review
 
-Reviewed 2026-11-10 for the release libraries: all 2,751 Go, assembly, C, header and embedded files that
-`go list -deps` selects for either ABI (1,385 from the standard library), searched for copyright, licence,
+Reviewed 2026-11-10 for the release libraries: all 2,734 Go, assembly, C, header and embedded files that
+`go list -deps` selects for either ABI (1,381 from the standard library), searched for copyright, licence,
 SPDX, public-domain and "derived/adapted/copied from" text and for `Code generated` headers.
 
 - **Per-file notices** beyond the module licences are in `FILE-NOTICES`: Sun (FreeBSD msun) and Cephes
@@ -86,7 +86,7 @@ for arch in arm64 amd64; do
 {{end}}' .
 done | sort -u > files.txt
 xargs grep -h -i -E 'copyright|spdx|public domain|licen[cs]e that|licen[cs]ed under|licenses/|based on work|special thanks|(derived|adapted|ported|copied|translated) from|translation of' \
-  < files.txt | sed -E 's/[0-9]{4}/YYYY/g' | sort | uniq -c | sort -n   # 150 lines; inspect the unusual ones
+  < files.txt | sed -E 's/[0-9]{4}/YYYY/g' | sort | uniq -c | sort -n   # 149 lines; inspect the unusual ones
 ```
 
 For the C runtime, rebuild one library with `-extldflags=-Wl,-z,max-page-size=16384,--trace` and

@@ -37,8 +37,8 @@ android {
 val omittedFeatures = listOf(
     // Out of scope: embedded SSH server, web UI, Taildrive, app connectors, self-update.
     "ssh", "webclient", "drive", "appconnectors", "clientupdate",
-    // The node only connects out: no PeerAPI server, advertised routes or exit node, nor exit node use.
-    "peerapiserver", "advertiseroutes", "advertiseexitnode", "useexitnode", "exitnodehealth",
+    // The node only connects out: no PeerAPI server, Serve/Funnel, advertised routes or exit node, nor exit node use.
+    "peerapiserver", "serve", "advertiseroutes", "advertiseexitnode", "useexitnode", "exitnodehealth",
     // No peer relay server, port listing or admin-driven remote configuration.
     "relayserver", "portlist", "remoteconfig",
     // No log upload/buffering, debug hooks (including SSLKEYLOGFILE), packet capture, flow logs,

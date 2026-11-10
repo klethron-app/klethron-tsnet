@@ -1,5 +1,5 @@
 Klethron tsnet modifies one tailscale.com source file in an isolated build copy.
-Upstream revision: 444baf1ef522e3aa635c3fcb8a036a1d75eda021
+Upstream revision: 5b6c39b94d50beac39dd7302d6f75f14e281a01f
 Original file SHA-256:
 control/controlclient/direct.go: a28e97e2a6822604182cdcfdd319ea9bb10c29b17e8b4592289c1cf2278160a9
 
