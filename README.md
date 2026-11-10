@@ -84,8 +84,8 @@ logout or key expiry. The app decides how long to keep the node alive and whethe
 ## Network changes
 
 Forward changes of the default network with [`setDefaultNetwork`][setDefaultNetwork] so the node
-can reconnect after switching Wi-Fi or mobile networks. Register this callback while using the library
-and unregister it when finished:
+can reconnect after switching Wi-Fi or mobile networks. Register this callback after starting a node,
+which loads the native library off the main thread, and unregister it when finished:
 
 ```java
 ConnectivityManager.NetworkCallback callback = new ConnectivityManager.NetworkCallback() {

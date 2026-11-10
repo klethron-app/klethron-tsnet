@@ -3,8 +3,8 @@
 Notices ship in the AAR under `assets/klethron-tsnet/licenses/`, from
 `tsnet/src/main/assets/klethron-tsnet/licenses/` (both variants) and `tsnet/src/debug/…` (debug only):
 
-- Tailscale (BSD-3-Clause), pinned to `5b6c39b94d50beac39dd7302d6f75f14e281a01f`: licence, patent notice
-  and `TAILSCALE-MODIFICATIONS`, which documents the local patch.
+- Tailscale (BSD-3-Clause) at the commit [UPSTREAM.md](UPSTREAM.md) names: licence, patent notice and
+  `TAILSCALE-MODIFICATIONS`, which documents the local patch.
 - Go's runtime licence and patent notice, also covering Tailscale's Go-derived `tempfork` sources.
 - JSpecify 1.0.1 (Apache-2.0): a transitive Maven dependency, not bundled; its
   [licence](https://github.com/jspecify/jspecify/blob/v1.0.1/LICENSE) is included as `JSPECIFY-LICENSE`.
@@ -96,15 +96,14 @@ check that no new archive member or object appears.
 
 For an intentional native dependency change:
 
-1. Build both variants and inspect `go version -m` on all four libraries. Use the Android build tags and
-   toolchains for `go list -deps -json`; a host import graph can differ.
+1. Run `./gradlew build`: the `verify*NativeNotices` reports list missing and stale modules. Use the
+   Android build tags and toolchains for `go list -deps -json`; a host import graph can differ.
 2. Run `go mod verify` in `tsnet/src/main/go`, locate each source with `go mod download -json module@version`,
    review its notices and nested directories, and copy notice bytes unedited. Update the inventory.
 3. Repeat the [per-file review](#per-file-review) and update `FILE-NOTICES`.
-4. Review the patches in `BuildGoLibrary.kt` against the new pin; update their source hashes and
+4. Review the patch in `BuildGoLibrary.kt` against the new pin; update its source hash and
    `TAILSCALE-MODIFICATIONS` together. Never just accept a new hash.
 5. Recheck Go notices when updating Go, the CRT notices when updating the NDK, and JSpecify's when
    updating JSpecify.
-6. Run `./gradlew build` and record the ABI library and AAR sizes.
 
 This is an engineering review of what the binaries contain, not legal advice.
