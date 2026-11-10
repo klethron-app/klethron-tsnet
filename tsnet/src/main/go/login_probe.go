@@ -207,32 +207,36 @@ func awaitReceived(timeoutMillis string) string {
 	}
 }
 
+// withControl calls probe with the started control server under the probe lock, or returns
+// "not started".
+func withControl(probe func(control *testcontrol.Server, argument string) string) func(string) string {
+	return func(argument string) string {
+		loginProbe.Lock()
+		defer loginProbe.Unlock()
+		if loginProbe.control == nil {
+			return "not started"
+		}
+		return probe(loginProbe.control, argument)
+	}
+}
+
 // setPeerOnline sets whether control reports the in-memory peer as online, which it does not by
 // default. It returns whether the peer is registered.
-func setPeerOnline(online string) string {
-	loginProbe.Lock()
-	defer loginProbe.Unlock()
-	if loginProbe.control != nil {
-		for _, node := range loginProbe.control.AllNodes() {
-			if node.Hostinfo.Hostname() == "klethron-peer" {
-				node.Online = new(online == "true")
-				loginProbe.control.UpdateNode(node)
-				return "true"
-			}
+func setPeerOnline(control *testcontrol.Server, online string) string {
+	for _, node := range control.AllNodes() {
+		if node.Hostinfo.Hostname() == "klethron-peer" {
+			node.Online = new(online == "true")
+			control.UpdateNode(node)
+			return "true"
 		}
 	}
 	return "false"
 }
 
-// addPeers registers three unreachable devices: an offline Linux device
-// named klethron-other, with addresses 100.101.0.1 and fd7a:115c:a1e0::101:1 and SSH host keys
-// sshHostKey and one containing a comma, a sharee node and a Mullvad exit node.
-func addPeers(string) string {
-	loginProbe.Lock()
-	defer loginProbe.Unlock()
-	if loginProbe.control == nil {
-		return ""
-	}
+// addPeers registers three unreachable devices: an offline Linux device named klethron-other, with
+// addresses 100.101.0.1 and fd7a:115c:a1e0::101:1 and SSH host keys sshHostKey and one containing a
+// comma, a sharee node and a Mullvad exit node.
+func addPeers(control *testcontrol.Server, _ string) string {
 	add := func(id int, name string, hostinfo *tailcfg.Hostinfo, addresses ...string) {
 		node := &tailcfg.Node{
 			ID: tailcfg.NodeID(1000 + id), StableID: tailcfg.StableNodeID(fmt.Sprintf("KLETHRON%d", id)),
@@ -245,7 +249,7 @@ func addPeers(string) string {
 			node.Addresses = append(node.Addresses, prefix)
 			node.AllowedIPs = append(node.AllowedIPs, prefix)
 		}
-		loginProbe.control.UpdateNode(node)
+		control.UpdateNode(node)
 	}
 	// IPv6 first, which the library reorders.
 	other := &tailcfg.Hostinfo{OS: "linux", SSH_HostKeys: []string{sshHostKey + "\n", "ssh-rsa AAAA,invalid"}}
@@ -260,20 +264,15 @@ const sshHostKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsa
 
 // completeLogin acts as the user's browser, approving a login URL, and returns "ok". Like real
 // control, the approval gives a re-login's new node key a fresh expiry.
-func completeLogin(loginURL string) string {
-	loginProbe.Lock()
-	defer loginProbe.Unlock()
-	if loginProbe.control == nil {
-		return "not started"
-	}
+func completeLogin(control *testcontrol.Server, loginURL string) string {
 	// testcontrol stages a re-login's new key as a copy of the expired node.
-	for _, node := range loginProbe.control.AllNodes() {
+	for _, node := range control.AllNodes() {
 		if !node.KeyExpiry.IsZero() && !loginProbe.expired.Contains(node.Key) {
 			node.KeyExpiry = time.Now().Add(24 * time.Hour)
-			loginProbe.control.UpdateNode(node)
+			control.UpdateNode(node)
 		}
 	}
-	if !loginProbe.control.CompleteAuth(loginURL) {
+	if !control.CompleteAuth(loginURL) {
 		return "not completed"
 	}
 	return "ok"
@@ -281,18 +280,13 @@ func completeLogin(loginURL string) string {
 
 // expireNodes expires the node keys of all registered nodes, as when their key expiry passes or
 // an administrator expires them. It returns the number of nodes.
-func expireNodes(string) string {
-	loginProbe.Lock()
-	defer loginProbe.Unlock()
-	if loginProbe.control == nil {
-		return "0"
-	}
-	nodes := loginProbe.control.AllNodes()
+func expireNodes(control *testcontrol.Server, _ string) string {
+	nodes := control.AllNodes()
 	loginProbe.expired.Make()
 	for _, node := range nodes {
 		node.KeyExpiry = time.Now().Add(-time.Minute)
 		loginProbe.expired.Add(node.Key)
-		loginProbe.control.UpdateNode(node)
+		control.UpdateNode(node)
 	}
 	return strconv.Itoa(len(nodes))
 }
@@ -307,41 +301,28 @@ func removeNodes(removed string) string {
 // rejectRegistrations makes control reject every registration request, including logouts, with an
 // error if reject is "true", or no longer. Stopping the server would not: nodes keep their hijacked
 // Noise connection. testcontrol reads the field without locking; no registration is in flight here.
-func rejectRegistrations(reject string) string {
-	loginProbe.Lock()
-	defer loginProbe.Unlock()
-	if loginProbe.control != nil {
-		loginProbe.control.RequireAuthKey = ""
-		if reject == "true" {
-			loginProbe.control.RequireAuthKey = "tskey-test-never-sent"
-		}
+func rejectRegistrations(control *testcontrol.Server, reject string) string {
+	control.RequireAuthKey = ""
+	if reject == "true" {
+		control.RequireAuthKey = "tskey-test-never-sent"
 	}
 	return ""
 }
 
 // requireMachineAuth makes control require an administrator to approve new devices. testcontrol
 // reads the field without locking; set it before nodes register.
-func requireMachineAuth(string) string {
-	loginProbe.Lock()
-	defer loginProbe.Unlock()
-	if loginProbe.control != nil {
-		loginProbe.control.RequireMachineAuth = true
-	}
+func requireMachineAuth(control *testcontrol.Server, _ string) string {
+	control.RequireMachineAuth = true
 	return ""
 }
 
 // approveMachines acts as a tailnet administrator, approving all registered devices. It returns
 // the number approved.
-func approveMachines(string) string {
-	loginProbe.Lock()
-	defer loginProbe.Unlock()
-	if loginProbe.control == nil {
-		return "0"
-	}
+func approveMachines(control *testcontrol.Server, _ string) string {
 	approved := 0
-	url := loginProbe.control.HTTPTestServer.URL
-	for _, node := range loginProbe.control.AllNodes() {
-		if loginProbe.control.CompleteDeviceApproval(url, url+"/admin", &node.Key) {
+	url := control.HTTPTestServer.URL
+	for _, node := range control.AllNodes() {
+		if control.CompleteDeviceApproval(url, url+"/admin", &node.Key) {
 			approved++
 		}
 	}
@@ -350,22 +331,18 @@ func approveMachines(string) string {
 
 // hostnames returns the sorted hostnames that registered devices last reported to control,
 // separated by newlines.
-func hostnames(string) string {
-	loginProbe.Lock()
-	defer loginProbe.Unlock()
+func hostnames(control *testcontrol.Server, _ string) string {
 	var names []string
-	if loginProbe.control != nil {
-		seen := make(map[tailcfg.StableNodeID]string)
-		for _, node := range loginProbe.control.AllNodes() {
-			name := node.Hostinfo.Hostname()
-			// Key rotation stages two keys for one device; AllNodes includes both.
-			// Keep distinct devices and conflicting hostnames visible to assertions.
-			if previous, ok := seen[node.StableID]; ok && previous == name {
-				continue
-			}
-			seen[node.StableID] = name
-			names = append(names, name)
+	seen := make(map[tailcfg.StableNodeID]string)
+	for _, node := range control.AllNodes() {
+		name := node.Hostinfo.Hostname()
+		// Key rotation stages two keys for one device; AllNodes includes both.
+		// Keep distinct devices and conflicting hostnames visible to assertions.
+		if previous, ok := seen[node.StableID]; ok && previous == name {
+			continue
 		}
+		seen[node.StableID] = name
+		names = append(names, name)
 	}
 	slices.Sort(names)
 	return strings.Join(names, "\n")
