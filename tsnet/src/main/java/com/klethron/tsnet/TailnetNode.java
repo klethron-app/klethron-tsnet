@@ -169,16 +169,10 @@ public final class TailnetNode implements AutoCloseable {
     @AnyThread
     public static void setDefaultNetwork(@Nullable LinkProperties properties) {
         String name = properties == null ? null : properties.getInterfaceName();
-        int gateway = 0;
-        if (properties != null) {
-            for (var route : properties.getRoutes()) {
-                if (route.isDefaultRoute() && route.hasGateway() && route.getGateway() instanceof Inet4Address address) {
-                    gateway = ByteBuffer.wrap(address.getAddress()).getInt();
-                    break;
-                }
-            }
-        }
         byte[] encoded = name == null ? new byte[0] : name.getBytes(StandardCharsets.UTF_8);
+        int gateway = properties == null ? 0 : properties.getRoutes().stream()
+                .filter(route -> route.isDefaultRoute() && route.hasGateway() && route.getGateway() instanceof Inet4Address)
+                .mapToInt(route -> ByteBuffer.wrap(route.getGateway().getAddress()).getInt()).findFirst().orElse(0);
         if (encoded.length > 15) throw new IllegalArgumentException("Interface names have at most 15 bytes");
         nativeSetDefaultNetwork(encoded, gateway);
     }
