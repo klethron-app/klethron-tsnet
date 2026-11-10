@@ -4,7 +4,7 @@ See [AGENTS.md](AGENTS.md) for conventions and [UPSTREAM.md](UPSTREAM.md) for pa
 
 ## Build and test
 
-Use JDK 25, Go and the Android SDK/NDK versions pinned in
+Use the JDK, Go and Android SDK/NDK versions pinned in
 [libs.versions.toml](gradle/libs.versions.toml) and [go.mod](tsnet/src/main/go/go.mod).
 Set `ANDROID_HOME` or `sdk.dir` in `local.properties`. Native builds support Linux x86_64 and macOS;
 only Linux has been verified.

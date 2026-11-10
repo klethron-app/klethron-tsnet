@@ -19,7 +19,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 2
           persist-credentials: false
@@ -37,7 +37,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 50
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Read pinned toolchains
@@ -52,11 +52,11 @@ jobs:
                   print(f'{key}={versions[key]}', file=output)
               print(f"platform=android-{versions['compileSdk']}.{versions['compileSdkMinor']}", file=output)
           PY
-      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
         with:
           distribution: temurin
           java-version: ${{ steps.versions.outputs.buildJdk }}
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: tsnet/src/main/go/go.mod
           cache-dependency-path: tsnet/src/main/go/go.sum
@@ -64,7 +64,7 @@ jobs:
         run: |
           gofmt -d tsnet/src/main/go
           test -z "$(gofmt -l tsnet/src/main/go)"
-      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+      - uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
         with:
           cmdline-tools-version: ${{ steps.versions.outputs.commandLineToolsBuild }}
           packages: platform-tools
@@ -103,7 +103,7 @@ jobs:
           profile: pixel_6
           avd-name: api34
           ram-size: 2048M
-          emulator-build: 15507667 # 36.6.11
+          emulator-build: 16740729 # 37.2.13
           script: .github/android-tests.sh 34 4096
       - name: Test Android 17 (API 37.2, 16 KiB pages)
         if: ${{ !cancelled() && steps.incremental.outcome == 'success' }}
@@ -115,18 +115,18 @@ jobs:
           profile: pixel_6
           avd-name: api37_2_16k
           ram-size: 2048M
-          emulator-build: 15507667 # 36.6.11
+          emulator-build: 16740729 # 37.2.13
           script: .github/android-tests.sh 37 16384
       - name: Save the release publication
         if: startsWith(github.ref, 'refs/tags/v')
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: maven-release
           path: build/maven/
           if-no-files-found: error
       - name: Save reports
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: reports
           path: |
@@ -144,10 +144,10 @@ jobs:
     timeout-minutes: 60
     environment: maven-central
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: maven-release
           path: maven
