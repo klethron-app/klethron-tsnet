@@ -4,17 +4,12 @@
 #include "_cgo_export.h"
 
 JNIEXPORT jlong JNICALL
-Java_com_klethron_tsnet_TailnetNode_nativeCreate(JNIEnv *env, jclass type) {
-    return klethron_node_create();
-}
-
-JNIEXPORT jint JNICALL
-Java_com_klethron_tsnet_TailnetNode_nativeStart(JNIEnv *env, jclass type, jlong handle, jbyteArray config) {
+Java_com_klethron_tsnet_TailnetNode_nativeStart(JNIEnv *env, jclass type, jbyteArray config) {
     // Java encodes standard UTF-8, including supplementary characters in paths.
     jsize length = (*env)->GetArrayLength(env, config);
     jbyte *bytes = (*env)->GetByteArrayElements(env, config, NULL);
     if (bytes == NULL) return -1; // Pending allocation exception; Java never sees the result.
-    jint result = klethron_node_start(handle, (char *) bytes, length);
+    jlong result = klethron_node_start((char *) bytes, length);
     (*env)->ReleaseByteArrayElements(env, config, bytes, JNI_ABORT);
     return result;
 }
@@ -58,7 +53,7 @@ Java_com_klethron_tsnet_TailnetNode_nativeDial(JNIEnv *env, jclass type, jlong h
     // Java limits hosts to 255 UTF-8 bytes; copy exact bytes rather than modified UTF-8.
     char bytes[256];
     jsize length = (*env)->GetArrayLength(env, host);
-    if (length >= (jsize) sizeof bytes) return -3; // Invalid; Java checks first.
+    if (length >= (jsize) sizeof bytes) return -2; // Invalid; Java checks first.
     (*env)->GetByteArrayRegion(env, host, 0, length, (jbyte *) bytes);
     return klethron_node_dial(handle, bytes, length, port, timeoutMillis);
 }

@@ -6,8 +6,8 @@ import "time"
 
 // probeConcurrentClose returns "ok" if a second close waits for a first one still shutting down.
 func probeConcurrentClose(string) string {
-	id := klethron_node_create()
-	n := lookupNode(id)
+	n := newNode(newServer())
+	id := addNode(n)
 	entered, release := make(chan struct{}), make(chan struct{})
 	n.stop = func() {
 		close(entered)

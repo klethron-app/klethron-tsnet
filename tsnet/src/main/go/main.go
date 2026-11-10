@@ -42,9 +42,7 @@ func lookupNode(id C.longlong) *node {
 	return nodes.byID[int64(id)]
 }
 
-//export klethron_node_create
-func klethron_node_create() C.longlong {
-	n := newNode(newServer())
+func addNode(n *node) C.longlong {
 	nodes.Lock()
 	defer nodes.Unlock()
 	nodes.last++
@@ -52,15 +50,16 @@ func klethron_node_create() C.longlong {
 	return C.longlong(nodes.last)
 }
 
-// klethron_node_start returns 0 or a negative failure result.
+// klethron_node_start starts a node and returns its positive ID, or a negative failure result.
 //
 //export klethron_node_start
-func klethron_node_start(id C.longlong, config *C.char, length C.int) C.int {
-	n := lookupNode(id)
-	if n == nil {
-		return resultClosed
+func klethron_node_start(config *C.char, length C.int) C.longlong {
+	n := newNode(newServer())
+	if result := n.start(C.GoStringN(config, length)); result != 0 {
+		n.close()
+		return C.longlong(result)
 	}
-	return C.int(n.start(C.GoStringN(config, length)))
+	return addNode(n)
 }
 
 // klethron_node_await_status returns the status record, or NULL once the node is closed.

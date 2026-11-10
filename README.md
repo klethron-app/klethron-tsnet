@@ -46,8 +46,8 @@ Run node operations on a worker thread. Keep its state in a dedicated directory 
 it contains private keys and must never be logged, backed up or shared.
 
 ```java
-try (TailnetNode node = new TailnetNode()) {
-    node.start(new File(context.getNoBackupFilesDir(), "tailscale"), "my-device");
+File directory = new File(context.getNoBackupFilesDir(), "tailscale");
+try (TailnetNode node = TailnetNode.start(directory, "my-device")) {
     NodeStatus status = null;
     do {
         status = node.awaitStatus(status, Duration.ofSeconds(30));
@@ -55,7 +55,8 @@ try (TailnetNode node = new TailnetNode()) {
             // Offer to open this URL in the user's browser. Never log it.
         }
         if (status.error() != null) {
-            // Show the error to the user and allow cancellation.
+            // Show the error to the user, who can cancel: closing the node from another thread
+            // makes the waiting call throw ClosedChannelException.
         }
     } while (status.state() != NodeStatus.State.RUNNING || status.loginUrl() != null);
 

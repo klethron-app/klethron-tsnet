@@ -59,7 +59,7 @@ public final class MinifiedDemoTest {
     }
 
     @Test
-    public void loadsNativeLibraryAndClosesNodesThroughMinifiedConsumer() {
+    public void loadsNativeLibraryThroughMinifiedConsumer() {
         Instrumentation instrumentation = InstrumentationRegistry.getInstrumentation();
         Intent intent = new Intent(Intent.ACTION_MAIN)
                 .setClassName(instrumentation.getTargetContext(), "com.klethron.tsnet.demo.MainActivity")
@@ -71,15 +71,14 @@ public final class MinifiedDemoTest {
                     .getIdentifier("smoke_test", "id", instrumentation.getTargetContext().getPackageName()));
             for (int i = 0; i < 2; i++) {
                 instrumentation.runOnMainSync(button::performClick);
-                // The node is created on a background thread; the button is re-enabled with the result.
+                // The library loads on a background thread; the button is re-enabled with the result.
                 @Nullable String[] result = new String[1];
                 for (long deadline = SystemClock.uptimeMillis() + 10000; result[0] == null; SystemClock.sleep(20)) {
                     assertTrue("No result from the demo", SystemClock.uptimeMillis() < deadline);
                     instrumentation.runOnMainSync(() -> result[0] = button.isEnabled() ? button.getText().toString() : null);
                 }
                 // TailnetNodeTest checks the exact version.
-                assertTrue(result[0], result[0].startsWith("Loaded v1.")
-                        && result[0].endsWith("\nNode created and closed. No network started."));
+                assertTrue(result[0], result[0].startsWith("Loaded v1.") && result[0].endsWith(". No network started."));
             }
         } finally {
             instrumentation.runOnMainSync(activity::finish);

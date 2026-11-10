@@ -14,6 +14,7 @@ import java.net.NoRouteToHostException;
 import java.net.SocketTimeoutException;
 import java.net.UnknownHostException;
 import java.nio.ByteBuffer;
+import java.nio.channels.ClosedChannelException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import org.jspecify.annotations.Nullable;
@@ -22,10 +23,12 @@ import org.jspecify.annotations.Nullable;
 /// keys stored in a caller-owned directory. It opens outbound TCP connections through a userspace
 /// network stack and does not route the Android device's traffic.
 ///
-/// Call [#start] once, follow [#awaitStatus] until the node is authorized and running, then [#dial].
-/// Closing the node ends its connections. Methods are thread-safe; `@WorkerThread` methods block.
-/// Report network changes through [#setDefaultNetwork]. The first use of this class in a process
-/// loads its native library.
+/// [Start][#start] a node, follow [#awaitStatus] until it is [NodeStatus.State#RUNNING] without a
+/// [NodeStatus#loginUrl()], then [#dial]. Report network changes through [#setDefaultNetwork].
+/// Methods are thread-safe; `@WorkerThread` methods block. Closing the node ends its connections
+/// and cancels blocked calls, which then throw [ClosedChannelException]. Zero or negative timeouts
+/// do not wait: [#awaitStatus] returns at once, [#dial] and [#logout] time out at once. The first
+/// use of this class in a process loads its native library.
 public final class TailnetNode implements AutoCloseable {
     static {
         System.loadLibrary("klethron_tsnet");
@@ -33,73 +36,71 @@ public final class TailnetNode implements AutoCloseable {
 
     private final long handle;
 
-    /// Creates an unstarted node. The first creation in a process reads Android's system CA store.
-    @WorkerThread
-    public TailnetNode() {
-        handle = nativeCreate();
+    private TailnetNode(long handle) {
+        this.handle = handle;
     }
 
-    /// Connects to Tailscale, restoring a saved login or requesting browser authorization.
-    /// Returns after local initialization; [#awaitStatus] reports progress and the login URL.
+    /// Starts a node that connects to Tailscale, restoring a saved login or requesting browser
+    /// authorization. Returns after local initialization; [#awaitStatus] reports progress and the
+    /// login URL.
     ///
     /// The directory stores this node's private keys. Give each node its own directory under
-    /// [android.content.Context#getNoBackupFilesDir()]; it is created if missing. Reusing it after
-    /// [#close] restores the same identity. Never back up or share its contents.
+    /// [android.content.Context#getNoBackupFilesDir()]; it is created if missing. Starting again with
+    /// it after [#close] restores the same identity. Never back up or share its contents.
     ///
     /// @param hostname the requested device name; Tailscale may adjust it
     /// @throws IllegalArgumentException if the directory is relative or the hostname is empty or contains NUL
-    /// @throws IllegalStateException if [#start] was already called, even unsuccessfully, or the node is closed
-    /// @throws IOException if initialization fails, including when the process environment sets
-    ///     `TS_AUTHKEY` or `TS_AUTH_KEY`; this library only supports browser login
+    /// @throws IOException if initialization fails
     @WorkerThread
     @RequiresPermission(Manifest.permission.INTERNET)
-    public void start(File stateDirectory, String hostname) throws IOException {
-        start(stateDirectory, hostname, "");
+    public static TailnetNode start(File stateDirectory, String hostname) throws IOException {
+        return start(stateDirectory, hostname, "");
     }
 
     /// As [#start(File, String)], with an alternative control server URL for tests.
-    void start(File stateDirectory, String hostname, String controlUrl) throws IOException {
+    static TailnetNode start(File stateDirectory, String hostname, String controlUrl) throws IOException {
         if (!stateDirectory.isAbsolute() || hostname.isEmpty()) {
             throw new IllegalArgumentException("State directory must be absolute and hostname non-empty");
         }
         String config = stateDirectory.getPath() + '\0' + hostname + '\0' + controlUrl;
-        check(nativeStart(handle, config.getBytes(StandardCharsets.UTF_8)));
+        long handle = nativeStart(config.getBytes(StandardCharsets.UTF_8));
+        check(handle);
+        return new TailnetNode(handle);
     }
 
     /// Waits for a status change, returning the latest snapshot when it changes or `timeout` elapses.
     /// Pass `null` to read immediately, or a previous snapshot from this node to wait. Intermediate
-    /// changes may be skipped. Zero or negative timeouts return immediately.
+    /// changes may be skipped.
     ///
     /// @throws IllegalArgumentException if `previous` belongs to another node
-    /// @throws IllegalStateException if the node is or becomes closed
+    /// @throws ClosedChannelException if the node is or becomes closed
     @WorkerThread
-    public NodeStatus awaitStatus(@Nullable NodeStatus previous, Duration timeout) {
+    public NodeStatus awaitStatus(@Nullable NodeStatus previous, Duration timeout) throws ClosedChannelException {
         if (previous != null && previous.owner != handle) {
             throw new IllegalArgumentException("Status belongs to another node");
         }
         String record = nativeAwaitStatus(handle, previous == null ? -1 : previous.version, millis(timeout));
         if (record == null) {
-            throw new IllegalStateException("Node is closed");
+            throw new ClosedChannelException();
         }
         return new NodeStatus(handle, record);
     }
 
     /// Opens a TCP connection to a tailnet address or
     /// [MagicDNS](https://tailscale.com/kb/1081/magicdns) name. `timeout` covers both waiting for
-    /// [NodeStatus.State#RUNNING] and connecting; zero or negative values do not wait.
-    /// Only peers and subnet routes in this node's network map are reachable. A name without a tailnet
-    /// DNS route can be looked up through the device's resolver, but the connection stays in the tailnet.
+    /// [NodeStatus.State#RUNNING] and connecting. Only peers and subnet routes in this node's network
+    /// map are reachable. A name without a tailnet DNS route can be looked up through the device's
+    /// resolver, but the connection stays in the tailnet.
     ///
-    /// The caller owns the returned Unix stream socket. Use [java.io.FileInputStream] and
-    /// [java.io.FileOutputStream] for blocking I/O, or [android.system.Os] for non-blocking I/O.
-    /// Unread data slows the sender in either direction. End of stream leaves the connection writable,
-    /// but a reset or failure also appears as end of stream. Closing the descriptor or shutting down
-    /// its output ends the whole connection once written data is delivered. Closing the node ends all
-    /// connections at once.
+    /// The caller owns the returned blocking Unix stream socket. Use [java.io.FileInputStream] and
+    /// [java.io.FileOutputStream] on its descriptor, or [android.system.Os]. End of stream leaves the
+    /// connection writable, but a reset or failure also appears as end of stream. Closing the
+    /// descriptor or shutting down its output ends the whole connection once written data is
+    /// delivered. Closing the node ends all connections at once.
     ///
     /// @param host a tailnet IP address or MagicDNS name, at most 255 UTF-8 bytes
     /// @throws IllegalArgumentException if the host is invalid or the port is not 1–65535
-    /// @throws IllegalStateException if this node has not started successfully or is or becomes closed
+    /// @throws ClosedChannelException if the node is or becomes closed
     /// @throws UnknownHostException if the tailnet's DNS cannot resolve `host`
     /// @throws NoRouteToHostException if the address is outside the tailnet; it never falls back to a local connection
     /// @throws SocketTimeoutException if the timeout elapses first
@@ -122,7 +123,7 @@ public final class TailnetNode implements AutoCloseable {
     /// Deleting its files instead leaves the device registered in the tailnet. After a successful
     /// logout, [#close] and delete the state directory to also forget the remaining device key.
     ///
-    /// @throws IllegalStateException if this node has not started successfully or is or becomes closed
+    /// @throws ClosedChannelException if the node is or becomes closed
     /// @throws SocketTimeoutException if Tailscale does not confirm within `timeout`
     /// @throws IOException if the logout fails
     @WorkerThread
@@ -134,7 +135,7 @@ public final class TailnetNode implements AutoCloseable {
     /// Returns before authorization; [#awaitStatus] supplies a [NodeStatus#loginUrl()]. A logged-in
     /// node keeps working while the user authorizes it. Initial [#start] requests login automatically.
     ///
-    /// @throws IllegalStateException if this node has not started successfully or is closed
+    /// @throws ClosedChannelException if the node is or becomes closed
     /// @throws IOException if the login cannot be started
     @WorkerThread
     public void login() throws IOException {
@@ -153,8 +154,6 @@ public final class TailnetNode implements AutoCloseable {
     /// [android.net.ConnectivityManager.NetworkCallback#onLost]. Keep the callback registered while
     /// nodes are in use. While another app's VPN is active, the default network is that VPN, which
     /// hides Wi-Fi and cellular changes.
-    ///
-    /// @throws IllegalArgumentException if the interface name exceeds Linux's 15-byte limit
     @AnyThread
     public static void setDefaultNetwork(@Nullable LinkProperties properties) {
         String name = properties == null ? null : properties.getInterfaceName();
@@ -162,36 +161,33 @@ public final class TailnetNode implements AutoCloseable {
         int gateway = properties == null ? 0 : properties.getRoutes().stream()
                 .filter(route -> route.isDefaultRoute() && route.hasGateway() && route.getGateway() instanceof Inet4Address)
                 .mapToInt(route -> ByteBuffer.wrap(route.getGateway().getAddress()).getInt()).findFirst().orElse(0);
-        if (encoded.length > 15) throw new IllegalArgumentException("Interface names have at most 15 bytes");
         nativeSetDefaultNetwork(encoded, gateway);
     }
 
-    /// Disconnects this node and closes its connections, keeping its saved identity for next time.
-    /// Waits for initialization and shutdown to finish; wakes pending status and connection calls
-    /// with [IllegalStateException]. Repeated or concurrent calls are safe.
+    /// Disconnects this node and closes its connections, keeping its saved identity for the next
+    /// [#start]. Waits for shutdown; pending calls throw [ClosedChannelException]. Repeated or
+    /// concurrent calls are safe.
     @WorkerThread
     @Override
     public void close() {
         nativeClose(handle);
     }
 
-    private static void check(int result) throws IOException {
-        switch (result) {
-            case -1 -> throw new IllegalStateException("Node is closed");
-            case -2 -> throw new IllegalStateException("Node is not started");
-            case -3 -> throw new IllegalArgumentException("Invalid argument");
-            case -4 -> throw new UnknownHostException("Tailnet DNS cannot resolve the host");
-            case -5 -> throw new NoRouteToHostException("Address is not reachable through the tailnet");
-            case -6 -> throw new SocketTimeoutException("Timed out");
-            case -7 -> throw new ConnectException("Tailnet connection failed");
-            case -8 -> throw new IOException("Logout failed");
-            case -9 -> throw new IOException("Login failed");
-            case -10 -> throw new IllegalStateException("Node was already started");
-            case -11 -> throw new IOException("TS_AUTHKEY or TS_AUTH_KEY is set in the process environment");
-            case -12 -> throw new IOException("Node failed to start");
-            default -> {
-                if (result < 0) throw new IOException("Native failure " + result);
-            }
+    /// Maps node.go's negative results to exceptions.
+    private static void check(long result) throws IOException {
+        if (result >= 0) return;
+        switch ((int) result) {
+            case -1 -> throw new ClosedChannelException();
+            case -2 -> throw new IllegalArgumentException("Invalid argument");
+            case -3 -> throw new UnknownHostException("Tailnet DNS cannot resolve the host");
+            case -4 -> throw new NoRouteToHostException("Address is not reachable through the tailnet");
+            case -5 -> throw new SocketTimeoutException("Timed out");
+            case -6 -> throw new ConnectException("Tailnet connection failed");
+            case -7 -> throw new IOException("Logout failed");
+            case -8 -> throw new IOException("Login failed");
+            case -9 -> throw new IOException("TS_AUTHKEY or TS_AUTH_KEY is set in the process environment");
+            case -10 -> throw new IOException("Node failed to start");
+            default -> throw new IOException("Native failure " + result);
         }
     }
 
@@ -201,9 +197,7 @@ public final class TailnetNode implements AutoCloseable {
         return timeout.compareTo(Duration.ofMillis(Long.MAX_VALUE)) >= 0 ? Long.MAX_VALUE : timeout.toMillis();
     }
 
-    private static native long nativeCreate();
-
-    private static native int nativeStart(long handle, byte[] config);
+    private static native long nativeStart(byte[] config);
 
     private static native @Nullable String nativeAwaitStatus(long handle, long afterVersion, long timeoutMillis);
 

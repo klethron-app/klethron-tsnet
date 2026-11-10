@@ -4,6 +4,7 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
+import java.nio.file.Path;
 import java.time.Duration;
 import org.junit.Test;
 
@@ -15,20 +16,15 @@ public final class TailnetNodeTest {
     }
 
     @Test
-    public void closesNativeNodesRepeatedly() {
-        for (int i = 0; i < 100; i++) {
-            try (TailnetNode node = new TailnetNode()) {
-                node.close();
-            }
-        }
-    }
-
-    @Test
-    public void statusBelongsToItsNode() {
-        try (TailnetNode first = new TailnetNode(); TailnetNode second = new TailnetNode()) {
+    public void statusBelongsToItsNode() throws Exception {
+        Path directory = LoginTest.temporaryDirectory("status-");
+        String control = "http://127.0.0.1:1"; // Unreachable: the nodes stay local.
+        try (TailnetNode first = TailnetNode.start(directory.resolve("first").toFile(), "first", control);
+                TailnetNode second = TailnetNode.start(directory.resolve("second").toFile(), "second", control)) {
             NodeStatus status = first.awaitStatus(null, Duration.ZERO);
-            assertEquals(NodeStatus.State.NO_STATE, first.awaitStatus(status, Duration.ZERO).state());
             assertThrows(IllegalArgumentException.class, () -> second.awaitStatus(status, Duration.ZERO));
+        } finally {
+            LoginTest.deleteDirectory(directory);
         }
     }
 

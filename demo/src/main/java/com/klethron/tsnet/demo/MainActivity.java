@@ -38,11 +38,9 @@ public final class MainActivity extends Activity {
         setContentView(layout);
     }
 
-    // Node creation reads the CA store on first use. Lint does not check the constructor's
-    // @WorkerThread, so this method carries it.
-    @WorkerThread
+    @WorkerThread // Loading the native library reads a large file.
     private String loadNative() {
-        try (TailnetNode ignored = new TailnetNode()) {
+        try {
             return getString(R.string.native_loaded, TailnetNode.tailscaleVersion());
         } catch (LinkageError | RuntimeException failure) {
             return getString(R.string.native_failed, failure.getClass().getSimpleName());

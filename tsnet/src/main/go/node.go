@@ -26,16 +26,14 @@ import (
 	"tailscale.com/types/key"
 )
 
-// node serializes upstream Start and Close, which must not run concurrently, publishes the
-// latest backend status to waiting callers and dials through the tailnet. Start does not wait
-// for the network, and calls end when the node closes, so Close waits at most for local work.
+// node publishes the latest backend status to waiting callers and dials through the tailnet.
+// Calls end when the node closes, so Close waits at most for local work.
 type node struct {
 	server *tsnet.Server
-	client *local.Client // Set once started successfully.
+	client *local.Client
 
-	lifecycle sync.RWMutex // Held for reading by calls on a started node.
-	started   bool
-	stop      func() // Stops status watching and default-network reports once started successfully.
+	lifecycle sync.RWMutex // Held for reading by calls, and for writing by close.
+	stop      func()       // Stops status watching and default-network reports once started.
 
 	ctx    context.Context // Cancelled when the node closes.
 	cancel context.CancelFunc
@@ -64,16 +62,9 @@ func newNode(server *tsnet.Server) *node {
 
 // start configures every connection-relevant field explicitly, so the host process environment
 // cannot redirect control. config is "directory\x00hostname\x00controlURL"; an empty control URL
-// selects Tailscale's. State persists in a file store in the caller's directory.
+// selects Tailscale's. State persists in a file store in the caller's directory. It runs before
+// the node is published, so no other call can race it.
 func (n *node) start(config string) int {
-	n.lifecycle.Lock()
-	defer n.lifecycle.Unlock()
-	if n.ctx.Err() != nil {
-		return resultClosed
-	}
-	if n.started {
-		return resultStarted
-	}
 	fields := strings.Split(config, "\x00")
 	if len(fields) != 3 || !utf8.ValidString(config) || !filepath.IsAbs(fields[0]) || fields[1] == "" {
 		return resultInvalid
@@ -83,7 +74,6 @@ func (n *node) start(config string) int {
 	if os.Getenv("TS_AUTHKEY") != "" || os.Getenv("TS_AUTH_KEY") != "" {
 		return resultAuthEnvironment
 	}
-	n.started = true // A failed upstream Start cannot be retried.
 	n.server.Dir, n.server.Hostname, n.server.ControlURL = fields[0], fields[1], fields[2]
 	if n.server.ControlURL == "" {
 		n.server.ControlURL = ipn.DefaultControlURL
@@ -305,7 +295,6 @@ func (n *node) wait(ctx context.Context, done func(nodeStatus, uint64) bool) (no
 // exceptions.
 const (
 	resultClosed = -1 - iota
-	resultNotStarted
 	resultInvalid
 	resultUnknownHost
 	resultNoRoute
@@ -313,32 +302,27 @@ const (
 	resultDialFailed
 	resultLogoutFailed
 	resultLoginFailed
-	resultStarted
 	resultAuthEnvironment
 	resultStartFailed
 )
 
-// whenStarted returns a context for a call on a started node, ending at the timeout or when the node
-// closes, and a function to call when done, or a failure result. It waits for a concurrent start,
-// and close waits for the call: LocalAPI's Start ignores contexts and could outlive Server.Close.
-func (n *node) whenStarted(timeout time.Duration) (context.Context, func(), int) {
+// whenOpen returns a context for a call, ending at the timeout or when the node closes, and a
+// function to call when done, or resultClosed. Close waits for the call: LocalAPI's Start ignores
+// contexts and could outlive Server.Close.
+func (n *node) whenOpen(timeout time.Duration) (context.Context, func(), int) {
 	n.lifecycle.RLock()
-	result := resultNotStarted
-	switch {
-	case n.ctx.Err() != nil:
-		result = resultClosed
-	case n.stop != nil:
-		ctx, cancel := context.WithTimeout(n.ctx, timeout)
-		return ctx, func() {
-			cancel()
-			n.lifecycle.RUnlock()
-		}, 0
+	if n.ctx.Err() != nil {
+		n.lifecycle.RUnlock()
+		return nil, nil, resultClosed
 	}
-	n.lifecycle.RUnlock()
-	return nil, nil, result
+	ctx, cancel := context.WithTimeout(n.ctx, timeout)
+	return ctx, func() {
+		cancel()
+		n.lifecycle.RUnlock()
+	}, 0
 }
 
-// failed maps a failure of a call with ctx from whenStarted to closed or timed out, if applicable.
+// failed maps a failure of a call with ctx from whenOpen to closed or timed out, if applicable.
 func (n *node) failed(ctx context.Context, result int) int {
 	if n.ctx.Err() != nil {
 		return resultClosed
@@ -351,13 +335,12 @@ func (n *node) failed(ctx context.Context, result int) int {
 
 // dial connects to host:port through the tailnet and returns one end of a Unix socket pair that
 // relays the connection, owned by the caller, or a dial result. It waits up to timeout for the
-// node to run. Unlike upstream Server.Dial, it never connects through the device's own network
-// and never starts an unstarted node with ambient configuration.
+// node to run. Unlike upstream Server.Dial, it never connects through the device's own network.
 func (n *node) dial(host string, port uint16, timeout time.Duration) int {
 	if host == "" || !utf8.ValidString(host) || strings.ContainsRune(host, 0) || port == 0 {
 		return resultInvalid
 	}
-	ctx, done, result := n.whenStarted(timeout)
+	ctx, done, result := n.whenOpen(timeout)
 	if result != 0 {
 		return result
 	}
@@ -392,7 +375,7 @@ func (n *node) dial(host string, port uint16, timeout time.Duration) int {
 // logout asks control to expire this node's key, then deletes the node's profile from its state,
 // leaving the node in NeedsLogin. It returns 0, also when the node was not logged in, or a failure.
 func (n *node) logout(timeout time.Duration) int {
-	ctx, done, result := n.whenStarted(timeout)
+	ctx, done, result := n.whenOpen(timeout)
 	if result != 0 {
 		return result
 	}
@@ -406,7 +389,7 @@ func (n *node) logout(timeout time.Duration) int {
 // login starts an interactive login, also after a logout or key expiry, and also when logged in, to
 // re-authenticate. The new login URL is published with the status. It returns 0 or a failure.
 func (n *node) login() int {
-	ctx, done, result := n.whenStarted(math.MaxInt64) // Neither call waits for the network.
+	ctx, done, result := n.whenOpen(math.MaxInt64) // Neither call waits for the network.
 	if result != 0 {
 		return result
 	}

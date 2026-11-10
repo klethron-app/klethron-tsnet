@@ -38,7 +38,7 @@ with Go 1.27.4. Recheck each entry on every update and drop fixes upstream has m
   addresses in the network map, then the routing table, then a plain `net.Dialer`. Workaround: resolve
   with `UserDialPlan`, require `UseNetstackForIP`, connect with `NetstackDialTCP`.
 - **`tsnet.Server.Dial` starts an unstarted server** with whatever configuration it has. Workaround:
-  `dial` requires a successful public `start`.
+  `TailnetNode.start` returns only started nodes.
 - **`tsnet.Server` reads configuration from the process environment** (`TS_CONTROL_URL`,
   `TS_AUTHKEY`/`TS_AUTH_KEY`, OAuth/ID-token variables) whenever a field is empty. Workaround: set every
   field explicitly; refuse to start if an auth-key variable is set; omit `oauthkey`/`useproxy`.
@@ -70,8 +70,8 @@ with Go 1.27.4. Recheck each entry on every update and drop fixes upstream has m
   that exact text (unexported `watchIPNBusFellBehindMessage`) before reporting `error()`.
 - **`Start` is not context-aware, and concurrent `Start`/`Close` is forbidden.** LocalAPI `Start` also
   ignores its context and, run after `Close`, creates a control client that retries forever.
-  Workaround: a per-node read-write lock; `close` cancels calls, then waits for them and for local
-  initialization.
+  Workaround: `TailnetNode.start` returns a node only once started, and a per-node read-write lock
+  lets `close` cancel calls, then wait for them.
 - **Netmap cache persists peer data.** With control's `CacheNetworkMaps` capability, upstream writes peer
   names, addresses and keys under `profile-data/`, even for ephemeral in-memory nodes. Workaround:
   `ts_omit_cachenetmap`.

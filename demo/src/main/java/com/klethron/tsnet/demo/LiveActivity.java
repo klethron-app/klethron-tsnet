@@ -28,6 +28,7 @@ import com.klethron.tsnet.NodeStatus;
 import java.io.File;
 import java.io.FileDescriptor;
 import java.io.IOException;
+import java.nio.channels.ClosedChannelException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Arrays;
@@ -107,9 +108,8 @@ public final class LiveActivity extends Activity {
         WORKER.execute(() -> {
             if (destroyed) return;
             try {
-                TailnetNode current = new TailnetNode();
+                TailnetNode current = TailnetNode.start(new File(getNoBackupFilesDir(), "tailnet"), "klethron-tsnet-demo");
                 node = current;
-                current.start(new File(getNoBackupFilesDir(), "tailnet"), "klethron-tsnet-demo");
                 ui.post(() -> {
                     if (destroyed) return;
                     getSystemService(ConnectivityManager.class).registerDefaultNetworkCallback(networkCallback, ui);
@@ -119,8 +119,6 @@ public final class LiveActivity extends Activity {
                 });
                 new Thread(() -> watch(current), "tsnet-demo-status").start();
             } catch (IOException | RuntimeException | LinkageError failure) {
-                if (node != null) node.close();
-                node = null;
                 complete(getString(R.string.operation_failed, failure.getClass().getSimpleName()));
             }
         });
@@ -139,7 +137,7 @@ public final class LiveActivity extends Activity {
                 });
                 previous = next;
             }
-        } catch (IllegalStateException closed) {
+        } catch (ClosedChannelException closed) {
             // onDestroy closes the node and wakes this waiter.
         }
     }

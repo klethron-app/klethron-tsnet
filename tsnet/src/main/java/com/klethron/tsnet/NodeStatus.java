@@ -12,14 +12,14 @@ import org.jspecify.annotations.Nullable;
 public final class NodeStatus {
     /// Connection and authorization progress.
     public enum State {
-        /// Not started, or starting up locally.
+        /// Starting up locally.
         NO_STATE,
         /// Browser authorization is needed. After logout or revocation, call [TailnetNode#login]
         /// to request a new [NodeStatus#loginUrl()].
         NEEDS_LOGIN,
         /// Logged in, waiting for a tailnet administrator to approve the device.
         NEEDS_MACHINE_AUTH,
-        /// Logged in, but not connecting.
+        /// Logged in, but not connecting, as after a failed [TailnetNode#logout].
         STOPPED,
         /// Logged in and connecting.
         STARTING,
