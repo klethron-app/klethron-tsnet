@@ -30,7 +30,7 @@ name and require the same keys, with an explicit prompt to accept changed ones.
 **Wanted:** only if Klethron's staged-install test shows the need: a way to use `TailnetNode` when
 `System.loadLibrary("klethron_tsnet")` cannot find a library the caller has already loaded. For example,
 the static initializer could catch `UnsatisfiedLinkError`, try a native call such as
-`nativeTailscaleVersion()`, and rethrow the original error only if that call fails too.
+`tailscaleVersion()`, and rethrow the original error only if that call fails too.
 
 **Why:** Klethron delivers this library in a Play feature module that is installed while the app runs.
 Play's documentation tells apps to load such libraries with `SplitInstallHelper.loadLibrary` after
