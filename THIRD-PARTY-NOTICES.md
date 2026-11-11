@@ -74,14 +74,8 @@ search them, then update `FILE-NOTICES`, including its review line:
 cd tsnet/build/tmp/buildGoArm64/go   # left by the last release build
 tags=…   # ts_omit_<name> for each omittedFeatures entry in tsnet/build.gradle.kts, comma-separated
 for arch in arm64 amd64; do
-  GOOS=android GOARCH=$arch CGO_ENABLED=1 GOTOOLCHAIN=local GOWORK=off go list -mod=readonly -deps \
-    -tags="$tags" -f '{{$d := .Dir}}{{range .GoFiles}}{{$d}}/{{.}}
-{{end}}{{range .CgoFiles}}{{$d}}/{{.}}
-{{end}}{{range .SFiles}}{{$d}}/{{.}}
-{{end}}{{range .CFiles}}{{$d}}/{{.}}
-{{end}}{{range .HFiles}}{{$d}}/{{.}}
-{{end}}{{range .EmbedFiles}}{{$d}}/{{.}}
-{{end}}' .
+  GOOS=android GOARCH=$arch CGO_ENABLED=1 GOTOOLCHAIN=local GOWORK=off go list -mod=readonly -deps -tags="$tags" -json . |
+    jq -r '.Dir as $d | (.GoFiles + .CgoFiles + .SFiles + .CFiles + .HFiles + .EmbedFiles)[]? | "\($d)/\(.)"'
 done | sort -u > files.txt
 xargs grep -h -i -E 'copyright|spdx|public domain|licen[cs]e that|licen[cs]ed under|licenses/|based on work|special thanks|(derived|adapted|ported|copied|translated) from|translation of' \
   < files.txt | sed -E 's/[0-9]{4}/YYYY/g' | sort | uniq -c | sort -n   # inspect the unusual ones
