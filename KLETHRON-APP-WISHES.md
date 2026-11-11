@@ -2,25 +2,29 @@
 
 Klethron, an SSH terminal for Android, plans to ship this library in an on-demand Play feature module
 (`TAILSCALE-PLAN.md` in the Klethron repository). That plan was reviewed against 0.6.0. These changes
-would let Klethron integrate without workarounds. They are ordered by importance: the first two block
-saving hosts, the third affects every open session, and the last two are packaging details. Delete each
-entry once it ships.
+would let Klethron integrate without workarounds. They are ordered by importance: the second blocks saving
+hosts, the third affects every open session, and the last two are packaging details. The first is declined
+and says what Klethron can do instead. Delete each entry once it ships.
 
-## 1. A stable ID for each peer
+## 1. A stable ID for each peer: declined
 
-**Wanted:** `NodeStatus.Peer.id()`, the peer's `tailcfg.StableNodeID`. `refreshPeers` already reads it
-as `ipnstate.PeerStatus.ID`; it only needs another field in the peer line.
+**Instead:** pin host keys as `known_hosts` does. When the user picks a peer, save its name and its
+`sshHostKeys`, or the keys seen on first connect for peers without Tailscale SSH. Later, dial the saved
+name and require the same keys, with an explicit prompt to accept changed ones.
 
-**Why:** Klethron saves a chosen peer as a host and connects to it later, possibly months later. Neither
-identifier the API offers today is stable. A MagicDNS name changes when the device is renamed, and
-another device can then take it; an administrator can change a device's Tailscale addresses. A saved host
-must never silently reach a different machine.
+**Why:**
 
-This matters more because the library invites callers to accept `sshHostKeys` without asking the user,
-as `tailscale ssh` does. If a saved name moves to another device, that device's host keys come with it,
-and the connection would succeed with no warning at all. With a stable ID, Klethron finds the saved peer
-in the current network map, dials its current address and accepts only that peer's host keys. A peer
-that has vanished fails visibly instead.
+- The silent case exists only if a caller accepts whatever keys the current network map lists for a saved
+  name. With pinned keys, a name that moves to another device fails with a key mismatch, as when DNS is
+  pointed at a new server.
+- Which device holds a name is the tailnet owner's decision, made through control and the admin console,
+  which this library already trusts for addresses and host keys. `tailscale ssh` also trusts whichever
+  device holds the name now.
+- The other changes already fail visibly or do not matter: a renamed device's old name no longer resolves,
+  and dialing by name follows address changes.
+- Saving by ID has its own cost: a reinstalled or re-added server gets a new ID, so saved hosts would break
+  even when the user wants the name to keep working.
+- What remains, following a device through a rename, is not worth more API.
 
 ## 2. This node's account and tailnet
 
