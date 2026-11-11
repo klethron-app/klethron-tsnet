@@ -30,6 +30,7 @@ public final class MainActivity extends Activity {
         });
         LinearLayout layout = new LinearLayout(this);
         layout.setOrientation(LinearLayout.VERTICAL);
+        layout.setFitsSystemWindows(true); // Edge-to-edge would put the first button under the status bar.
         layout.addView(button);
         Button live = new Button(this);
         live.setText(R.string.live_test);
