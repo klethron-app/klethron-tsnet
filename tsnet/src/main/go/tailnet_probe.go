@@ -47,9 +47,8 @@ func checkProbeEnvironment() string {
 // The DERP-only knob is process-global, so tailnet probes never overlap.
 var tailnetProbeMu sync.Mutex
 
-// probeTailnet connects two in-process nodes through a loopback test control server and DERP/STUN
-// server, then exchanges TCP data over the tailnet. No real tailnet, credentials or external
-// network are involved. It returns fixed ASCII diagnostics only.
+// probeTailnet exchanges TCP data over a loopback tailnet's direct path, or only through DERP if
+// relayOnly.
 func probeTailnet(dir string, relayOnly bool) string {
 	if problem := checkProbeEnvironment(); problem != "" {
 		return problem
