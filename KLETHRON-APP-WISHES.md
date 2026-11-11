@@ -2,9 +2,8 @@
 
 Klethron, an SSH terminal for Android, plans to ship this library in an on-demand Play feature module
 (`TAILSCALE-PLAN.md` in the Klethron repository). That plan was reviewed against 0.6.0. These changes
-would let Klethron integrate without workarounds. They are ordered by importance: the second affects
-every open session, and the last two are packaging details. The first is declined and says what Klethron
-can do instead. Delete each entry once it ships.
+would let Klethron integrate without workarounds. The first is declined and says what Klethron can do
+instead; the other two are packaging details. Delete each entry once it ships.
 
 ## 1. A stable ID for each peer: declined
 
@@ -26,26 +25,7 @@ name and require the same keys, with an explicit prompt to accept changed ones.
   even when the user wants the name to keep working.
 - What remains, following a device through a rename, is not worth more API.
 
-## 2. End open connections when tailnet access ends
-
-**Wanted:** when a node leaves `RUNNING` for `NEEDS_LOGIN` (logout, key expiry or removal), end every
-connection it dialed, as `close()` already does, so callers read end of stream. Keep connections open
-through transient states such as `STARTING` during network changes.
-
-**Why:** today they stay open but silent. `DialTest.listsPeersAndTheirChanges` writes after `logout` and
-gets neither an echo nor end of stream, because `relay` ties each connection to the node's lifetime
-(`n.ctx`), not to its login. An SSH session over such a connection freezes until keep-alives give up,
-which can take minutes, or never if keep-alives are off. A user who taps "Log out" expects their sessions
-to end, and nothing should stay connected after access is revoked.
-
-Each caller could track its descriptors and close them on the status change. But every caller would
-repeat that code and race status delivery, while the library knows exactly when access ended. Expiry and
-removal are untested here and probably behave like logout.
-
-**Sketch:** derive each relay's context from a per-login context, which `publish` cancels on the
-transition to `NeedsLogin`.
-
-## 3. Do not export JSpecify at runtime
+## 2. Do not export JSpecify at runtime
 
 **Wanted:** declare `org.jspecify:jspecify` as `compileOnly` instead of `api`, like `androidx.annotation`
 and `error_prone_annotations`.
@@ -58,7 +38,7 @@ annotations by name in class files. Before switching, check with the minified de
 that Kotlin still sees nullability and that `javac -Werror` stays quiet without the jar. Then note in the
 README that consumers who want nullness checking add JSpecify `compileOnly` themselves.
 
-## 4. Load the native library after an on-demand install (only if needed)
+## 3. Load the native library after an on-demand install (only if needed)
 
 **Wanted:** only if Klethron's staged-install test shows the need: a way to use `TailnetNode` when
 `System.loadLibrary("klethron_tsnet")` cannot find a library the caller has already loaded. For example,

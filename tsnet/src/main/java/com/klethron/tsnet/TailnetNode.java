@@ -176,8 +176,9 @@ public final class TailnetNode implements AutoCloseable {
     /// [java.io.FileOutputStream] on its descriptor, or [android.system.Os]. End of stream leaves the
     /// connection writable, but a reset or failure also appears as end of stream. Closing the
     /// descriptor or shutting down its output ends the whole connection once written data is
-    /// delivered, or resets it if received data is left unread. Closing the node ends all
-    /// connections at once.
+    /// delivered, or resets it if received data is left unread. All connections end at once when the
+    /// node closes or loses tailnet access: when it leaves [NodeStatus.State#RUNNING] for a state
+    /// other than [NodeStatus.State#STARTING], as on logout, key expiry or device removal.
     ///
     /// @param host a tailnet IP address or MagicDNS name, at most 255 UTF-8 bytes
     /// @throws IllegalArgumentException if the host is invalid or the port is not 1–65535
@@ -197,8 +198,9 @@ public final class TailnetNode implements AutoCloseable {
         return ParcelFileDescriptor.adoptFd(result);
     }
 
-    /// Ends this node's tailnet access and deletes its saved login. The node stays open, reports
-    /// [NodeStatus.State#NEEDS_LOGIN] and can [#login] again. Does nothing if already logged out.
+    /// Ends this node's tailnet access and connections, and deletes its saved login. The node stays
+    /// open, reports [NodeStatus.State#NEEDS_LOGIN] and can [#login] again. Does nothing if already
+    /// logged out.
     ///
     /// If logout fails, the node stops connecting but keeps its saved login: retry the logout.
     /// Deleting its files instead leaves the device registered in the tailnet. After a successful

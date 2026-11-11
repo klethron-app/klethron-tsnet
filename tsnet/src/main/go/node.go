@@ -38,6 +38,8 @@ type node struct {
 	cancel context.CancelFunc
 
 	mu        sync.Mutex
+	access    context.Context // Ends when the node leaves Running for any state but Starting; renewed on Running.
+	endAccess context.CancelFunc
 	selfKey   key.NodePublic // Of the latest network map.
 	keyExpiry time.Time      // Of the latest network map; zero without one or if the key never expires.
 	status    nodeStatus
@@ -62,7 +64,8 @@ type statusRead struct {
 
 func newNode(server *tsnet.Server) *node {
 	ctx, cancel := context.WithCancel(context.Background())
-	return &node{server: server, ctx: ctx, cancel: cancel, changed: make(chan struct{})}
+	access, endAccess := context.WithCancel(ctx)
+	return &node{server: server, ctx: ctx, cancel: cancel, access: access, endAccess: endAccess, changed: make(chan struct{})}
 }
 
 // start configures every connection-relevant field explicitly, so the host process environment
@@ -208,6 +211,14 @@ func (n *node) publish(notify ipn.Notify, read *statusRead) {
 			status.loginURL = ""
 		case ipn.Running:
 			status.err = ""
+			if n.access.Err() != nil {
+				n.access, n.endAccess = context.WithCancel(n.ctx)
+			}
+		}
+		// Connections end with tailnet access. Starting is transient, and upstream stays Running
+		// through network changes.
+		if status.state != ipn.Running && status.state != ipn.Starting {
+			n.endAccess()
 		}
 	}
 	if notify.ErrMessage != nil && *notify.ErrMessage != watchFellBehind {
@@ -363,6 +374,9 @@ func (n *node) dial(host string, port uint16, timeout time.Duration) int {
 	if status.state != ipn.Running {
 		return n.failed(ctx, resultTimeout)
 	}
+	n.mu.Lock()
+	access := n.access // Ends if the node stops running from now on, also while dialing.
+	n.mu.Unlock()
 	// Resolves MagicDNS names through the tailnet's DNS configuration.
 	dialer := n.server.Sys().Dialer.Get()
 	target, _, err := dialer.UserDialPlan(ctx, "tcp", net.JoinHostPort(host, strconv.Itoa(int(port))))
@@ -378,7 +392,7 @@ func (n *node) dial(host string, port uint16, timeout time.Duration) int {
 	if err != nil {
 		return n.failed(ctx, resultDialFailed)
 	}
-	fd, err := relay(n.ctx, conn)
+	fd, err := relay(access, conn)
 	if err != nil {
 		_ = conn.Close()
 		return n.failed(ctx, resultDialFailed)

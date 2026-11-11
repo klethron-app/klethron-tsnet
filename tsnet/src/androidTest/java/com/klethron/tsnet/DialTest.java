@@ -114,10 +114,17 @@ public final class DialTest {
             // The peers and names clear after the state changes.
             status = LoginTest.await(node, s -> s.state() == NodeStatus.State.NEEDS_LOGIN && s.peers().isEmpty());
             assertEquals(Arrays.asList(null, null, null), Arrays.asList(status.dnsName(), status.tailnet(), status.loginName()));
-            // The peer is gone from this node's tailnet: nothing is echoed, and new dials wait for a login.
-            write(connection, new byte[] {2});
-            assertFalse(poll(connection.getFileDescriptor(), OsConstants.POLLIN, 2000));
+            // Logging out ended the connection, and new dials wait for a login.
+            assertEquals(-1, new FileInputStream(connection.getFileDescriptor()).read());
             assertThrows(SocketTimeoutException.class, () -> node.dial(peer, 7070, Duration.ofMillis(500)));
+        }
+    }
+
+    @Test(timeout = 60000)
+    public void endsConnectionsWhenTheKeyExpires() throws Exception {
+        try (TailnetNode node = startNode(); ParcelFileDescriptor connection = node.dial(peer, 7070, WAIT)) {
+            assertEquals("2", Probe.call("expire"));
+            assertEquals(-1, new FileInputStream(connection.getFileDescriptor()).read());
         }
     }
 
