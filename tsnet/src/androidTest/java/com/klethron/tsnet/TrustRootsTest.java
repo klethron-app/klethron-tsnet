@@ -20,10 +20,18 @@ public final class TrustRootsTest {
         assertEquals(expected, new TreeSet<>(List.of(Probe.call("roots").split("\n"))));
     }
 
-    /** SHA-256 hex fingerprints of Android's current system roots, without user-disabled roots. */
-    static Set<String> systemRootFingerprints() throws Exception {
-        // AndroidCAStore lists the current system store without user-disabled roots, plus user CAs.
-        KeyStore store = KeyStore.getInstance("AndroidCAStore");
+    /// Contacts Tailscale's real control plane without credentials, so this needs a working internet
+    /// connection. The node stops at an unauthorized login request; the URL never leaves native code.
+    @Test(timeout = 60000)
+    public void reachesRealControlPlaneUntilLoginWithoutWritingFiles() throws Exception {
+        String root = LoginTest.callWithoutFiles("control");
+        assertTrue("The verified control chain must end at an Android system root, not " + root,
+                systemRootFingerprints().contains(root));
+    }
+
+    /// SHA-256 hex fingerprints of Android's current system roots, without user-disabled roots.
+    private static Set<String> systemRootFingerprints() throws Exception {
+        KeyStore store = KeyStore.getInstance("AndroidCAStore"); // Also lists user CAs.
         store.load(null);
         Set<String> fingerprints = new TreeSet<>();
         for (String alias : Collections.list(store.aliases())) {

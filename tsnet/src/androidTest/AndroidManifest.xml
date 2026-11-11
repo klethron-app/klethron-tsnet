@@ -1,5 +1,3 @@
-<!-- The library's permissions apply. ControlPlaneTest contacts Tailscale's real control plane
-     without credentials; other node probes contact only their own loopback test servers. -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <application>
         <!-- CrashTest crashes this separate process, not the instrumentation. -->
