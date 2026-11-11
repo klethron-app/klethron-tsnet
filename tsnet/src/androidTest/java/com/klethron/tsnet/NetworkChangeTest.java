@@ -23,8 +23,8 @@ import org.junit.Test;
 /**
  * Runs a loopback two-node tailnet while a node started through the public API follows the
  * network, then disables Wi-Fi so the network really changes. Both tailnet nodes
- * must rebind and keep exchanging data. Requires a device without a VPN whose default network is
- * Wi-Fi with cellular behind it.
+ * must rebind and keep exchanging data. Requires Wi-Fi with cellular behind it; another app's VPN,
+ * split or full tunnel, may be active.
  */
 public final class NetworkChangeTest {
     @Test(timeout = 180000)
@@ -34,8 +34,7 @@ public final class NetworkChangeTest {
 
         Path directory = LoginTest.temporaryDirectory("netchange-");
         Path nodeDirectory = LoginTest.temporaryDirectory("netchange-node-");
-        // Learns the interface names; only the library reports them to the nodes. Without a VPN, the
-        // default network is the best non-VPN network that the library follows.
+        // Learns the interface names of the network the library follows; only it reports them to the nodes.
         LinkedBlockingQueue<String> names = new LinkedBlockingQueue<>();
         ConnectivityManager.NetworkCallback callback = new ConnectivityManager.NetworkCallback() {
             @Override
@@ -44,7 +43,8 @@ public final class NetworkChangeTest {
                 names.add(name == null ? "" : name);
             }
         };
-        connectivity.registerDefaultNetworkCallback(callback, new Handler(Looper.getMainLooper()));
+        connectivity.registerBestMatchingNetworkCallback(TailnetNode.PHYSICAL_NETWORK, callback,
+                new Handler(Looper.getMainLooper()));
         try {
             String wifi = nextName(names);
             // Checks that, with no node running, Android netmon has no default route.

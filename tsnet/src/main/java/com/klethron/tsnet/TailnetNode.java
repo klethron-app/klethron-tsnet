@@ -61,7 +61,7 @@ public final class TailnetNode implements AutoCloseable {
     };
     /// Another app's VPN, often a split tunnel that the node's traffic bypasses, would be the default
     /// network and hide changes of the network underneath.
-    private static final NetworkRequest PHYSICAL_NETWORK = new NetworkRequest.Builder()
+    static final NetworkRequest PHYSICAL_NETWORK = new NetworkRequest.Builder()
             .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
             .addCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN).build();
     private static int running; // Guarded by NETWORK, as is connectivity.

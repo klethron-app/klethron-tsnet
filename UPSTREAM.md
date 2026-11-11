@@ -99,8 +99,10 @@ with Go 1.27.4. Recheck each entry on every update and drop fixes upstream has m
   (Pixel 11 Pro XL with the Tailscale app). Apps cannot read a VPN's underlying networks, so nodes
   follow the best non-VPN network, which split tunnels such as Tailscale's leave their traffic on. On
   that Pixel with the Tailscale app, a direct path returned about 2 s after each of two Wi-Fi losses
-  and at once on reconnecting, and a held connection survived. With a full-tunnel VPN, traffic uses
-  the VPN while nodes follow the network below it; untested.
+  and at once on reconnecting, and a held connection survived. With a full-tunnel VPN, such as an exit
+  node, traffic uses the VPN while nodes follow the network below it. NetworkChangeTest passed 10 of
+  10 runs on a Pixel 8 Pro each with the Tailscale VPN using an exit node, as a split tunnel and without
+  a VPN, but its loopback tailnet stays on the device: live traffic through a full tunnel is untested.
 - Live-tailnet coverage is still needed for network changes without another VPN, 16 KiB devices,
   restrictive NATs, subnet routes, IPv6 peers, throughput, prolonged outages, scheduled key expiry,
   revocation while stopped and Play split delivery.
