@@ -79,15 +79,18 @@ public final class CrashTest {
             } finally {
                 data.recycle();
             }
+            // The record can appear before the zygote reports how the process ended.
             for (int i = 0; i < 100; i++) {
                 List<ApplicationExitInfo> exits = activities.getHistoricalProcessExitReasons(null, pid, 1);
-                if (!exits.isEmpty()) return exits.get(0);
+                if (!exits.isEmpty() && exits.get(0).getReason() != ApplicationExitInfo.REASON_UNKNOWN) {
+                    return exits.get(0);
+                }
                 Thread.sleep(100);
             }
         } finally {
             context.unbindService(connection);
         }
-        throw new AssertionError("The crash process did not exit");
+        throw new AssertionError("The crash process recorded no exit reason");
     }
 
     /** The crashed process's lines with Go's logcat tag. */
