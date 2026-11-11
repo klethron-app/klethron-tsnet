@@ -22,7 +22,7 @@ import (
 // pending registration cannot be authorized. It returns the SHA-256 hex of the verified chain's
 // root certificate, or a fixed diagnostic.
 func probeControl(dir string) string {
-	if problem := checkProbeEnvironment(dir); problem != "" {
+	if problem := checkProbeEnvironment(); problem != "" {
 		return problem
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)

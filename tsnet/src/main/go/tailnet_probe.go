@@ -15,11 +15,8 @@ import (
 	"net/http/httptest"
 	"net/netip"
 	"os"
-	"path/filepath"
-	"strings"
 	"sync"
 	"time"
-	"unicode/utf8"
 
 	"tailscale.com/derp/derpserver"
 	"tailscale.com/envknob"
@@ -33,11 +30,8 @@ import (
 	"tailscale.com/types/logger"
 )
 
-// checkProbeEnvironment returns a fixed diagnostic, or "" if a probe may start nodes in dir.
-func checkProbeEnvironment(dir string) string {
-	if !utf8.ValidString(dir) || strings.ContainsRune(dir, 0) || !filepath.IsAbs(dir) {
-		return "invalid directory"
-	}
+// checkProbeEnvironment returns a fixed diagnostic, or "" if a probe may start nodes.
+func checkProbeEnvironment() string {
 	if buildfeatures.HasLogTail {
 		return "logtail must be disabled"
 	}
@@ -57,7 +51,7 @@ var tailnetProbeMu sync.Mutex
 // server, then exchanges TCP data over the tailnet. No real tailnet, credentials or external
 // network are involved. It returns fixed ASCII diagnostics only.
 func probeTailnet(dir string, relayOnly bool) string {
-	if problem := checkProbeEnvironment(dir); problem != "" {
+	if problem := checkProbeEnvironment(); problem != "" {
 		return problem
 	}
 	tailnetProbeMu.Lock()

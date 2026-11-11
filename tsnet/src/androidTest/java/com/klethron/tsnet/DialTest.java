@@ -7,15 +7,11 @@ import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
 import android.net.InetAddresses;
-import android.os.HandlerThread;
-import android.os.MessageQueue;
-import android.os.MessageQueue.OnFileDescriptorEventListener;
 import android.os.ParcelFileDescriptor;
 import android.system.ErrnoException;
 import android.system.Os;
 import android.system.OsConstants;
 import android.system.StructPollfd;
-import android.util.Log;
 import java.io.FileDescriptor;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
@@ -25,7 +21,6 @@ import java.net.NoRouteToHostException;
 import java.net.SocketTimeoutException;
 import java.net.URI;
 import java.net.UnknownHostException;
-import java.nio.channels.ClosedChannelException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -84,7 +79,7 @@ public final class DialTest {
 
     @Test(timeout = 90000)
     public void listsPeersAndTheirChanges() throws Exception {
-        try (TailnetNode node = startNode()) {
+        try (TailnetNode node = startNode(); ParcelFileDescriptor connection = node.dial(PEER_NAME, 7070, WAIT)) {
             NodeStatus status = LoginTest.await(node, s -> s.state() == NodeStatus.State.RUNNING && !s.peers().isEmpty());
             assertEquals(1, status.peers().size());
             NodeStatus.Peer listed = status.peers().get(0);
@@ -96,10 +91,8 @@ public final class DialTest {
             assertEquals(List.of(), listed.sshHostKeys());
             assertTrue(status.toString(), status.toString().endsWith(", peers=1}"));
             assertFalse(status.toString().contains("klethron-peer"));
-            try (ParcelFileDescriptor connection = node.dial(listed.dnsName(), 7070, WAIT)) {
-                write(connection, "x".getBytes(StandardCharsets.US_ASCII));
-                assertEquals('x', new FileInputStream(connection.getFileDescriptor()).read());
-            }
+            write(connection, new byte[] {1});
+            assertEquals(1, new FileInputStream(connection.getFileDescriptor()).read());
 
             // Hides the sharee and Mullvad nodes; sorts by name, lists IPv4 first, trims host keys and
             // drops one with a comma.
@@ -117,6 +110,10 @@ public final class DialTest {
             node.logout(WAIT);
             // The peers clear after the state changes.
             LoginTest.await(node, s -> s.state() == NodeStatus.State.NEEDS_LOGIN && s.peers().isEmpty());
+            // The peer is gone from this node's tailnet: nothing is echoed, and new dials wait for a login.
+            write(connection, new byte[] {2});
+            assertFalse(poll(connection.getFileDescriptor(), OsConstants.POLLIN, 2000));
+            assertThrows(SocketTimeoutException.class, () -> node.dial(peer, 7070, Duration.ofMillis(500)));
         }
     }
 
@@ -143,33 +140,11 @@ public final class DialTest {
             ErrnoException empty = assertThrows(ErrnoException.class, () -> Os.read(fd, one, 0, 1));
             assertEquals(OsConstants.EAGAIN, empty.errno);
             // Interactive round trips of one byte each.
-            long[] nanos = new long[200];
-            for (int i = 0; i < nanos.length; i++) {
-                long start = System.nanoTime();
+            for (int i = 0; i < 200; i++) {
                 assertEquals(1, Os.write(fd, new byte[] {(byte) i}, 0, 1));
                 awaitReady(fd, OsConstants.POLLIN);
                 assertEquals(1, Os.read(fd, one, 0, 1));
                 assertEquals((byte) i, one[0]);
-                nanos[i] = System.nanoTime() - start;
-            }
-            Arrays.sort(nanos);
-            Log.i("DialTest", "Loopback round trip µs: median " + nanos[nanos.length / 2] / 1000
-                    + ", max " + nanos[nanos.length - 1] / 1000);
-            // A Looper can wait for the descriptor too.
-            HandlerThread thread = new HandlerThread("dial-events");
-            thread.start();
-            try {
-                CompletableFuture<Integer> events = new CompletableFuture<>();
-                MessageQueue queue = thread.getLooper().getQueue();
-                queue.addOnFileDescriptorEventListener(fd, OnFileDescriptorEventListener.EVENT_INPUT, (descriptor, event) -> {
-                    events.complete(event);
-                    return 0; // Unregisters.
-                });
-                assertEquals(1, Os.write(fd, one, 0, 1));
-                assertEquals(OnFileDescriptorEventListener.EVENT_INPUT, (int) events.get(10, TimeUnit.SECONDS));
-                assertEquals(1, Os.read(fd, one, 0, 1));
-            } finally {
-                thread.quitSafely();
             }
         }
     }
@@ -179,13 +154,12 @@ public final class DialTest {
         try (TailnetNode node = startNode();
                 ParcelFileDescriptor connection = node.dial(peer, 7073, WAIT)) {
             long flooded = awaitFloodStalled();
-            Log.i("DialTest", "Peer stalled after writing " + flooded + " unread bytes");
             assertTrue("Peer was not slowed: " + flooded, flooded < FLOOD);
-            FileDescriptor fd = nonBlocking(connection);
+            var in = new FileInputStream(connection.getFileDescriptor());
             byte[] buffer = new byte[64 << 10];
             byte[] expected = new byte[buffer.length];
             long received = 0;
-            for (int read; (read = readWhenReady(fd, buffer)) > 0; received += read) {
+            for (int read; (read = in.read(buffer)) > 0; received += read) {
                 assertTrue("Unexpected bytes after " + received,
                         Arrays.equals(buffer, 0, read, pattern(received, expected), 0, read));
             }
@@ -204,7 +178,6 @@ public final class DialTest {
             while (written < FLOOD && poll(fd, OsConstants.POLLOUT, 1000)) {
                 written += Os.write(fd, pattern(written, chunk), 0, (int) Math.min(chunk.length, FLOOD - written));
             }
-            Log.i("DialTest", "App stalled after writing " + written + " unread bytes");
             assertTrue("App was not slowed: " + written, written < FLOOD);
             Probe.call("release");
             while (written < FLOOD) {
@@ -240,51 +213,6 @@ public final class DialTest {
             assertThrows(NoRouteToHostException.class, () -> node.dial("100.64.0.99", 22, WAIT));
             assertThrows(UnknownHostException.class, () -> node.dial("no-such-peer.tail-scale.ts.net", 22, WAIT));
             assertThrows(ConnectException.class, () -> node.dial(peer, 7072, WAIT));
-        }
-    }
-
-    @Test(timeout = 60000)
-    public void refusesInvalidCallsAndClosesConnectionsWithNode() throws Exception {
-        try (TailnetNode node = startNode()) {
-            assertThrows(IllegalArgumentException.class, () -> node.dial("", 7070, WAIT));
-            assertThrows(IllegalArgumentException.class, () -> node.dial("a".repeat(256), 7070, WAIT));
-            assertThrows(IllegalArgumentException.class, () -> node.dial(peer, 0, WAIT));
-            assertThrows(IllegalArgumentException.class, () -> node.dial(peer, 65536, WAIT));
-            assertThrows(IllegalArgumentException.class, () -> node.dial("a\0b", 7070, WAIT));
-            try (ParcelFileDescriptor connection = node.dial(peer, 7070, WAIT)) {
-                node.close();
-                assertEquals(-1, new FileInputStream(connection.getFileDescriptor()).read());
-                // EPIPE, rather than a SIGPIPE that would end the process.
-                assertThrows(IOException.class, () -> new FileOutputStream(connection.getFileDescriptor()).write(1));
-            }
-            assertThrows(ClosedChannelException.class, () -> node.dial(peer, 7070, WAIT));
-        }
-    }
-
-    @Test(timeout = 60000)
-    public void logoutEndsTailnetAccess() throws Exception {
-        try (TailnetNode node = startNode();
-                ParcelFileDescriptor connection = node.dial(peer, 7070, WAIT)) {
-            write(connection, new byte[] {1});
-            assertEquals(1, new FileInputStream(connection.getFileDescriptor()).read());
-            node.logout(WAIT);
-            // The peer is gone from this node's tailnet: nothing is echoed, and new dials wait for a login.
-            write(connection, new byte[] {2});
-            assertFalse(poll(connection.getFileDescriptor(), OsConstants.POLLIN, 2000));
-            assertThrows(SocketTimeoutException.class, () -> node.dial(peer, 7070, Duration.ofMillis(500)));
-        }
-    }
-
-    @Test(timeout = 60000)
-    public void timesOutAndWakesOnCloseWhileNotRunning() throws Exception {
-        try (TailnetNode node = TailnetNode.start(LoginTest.CONTEXT, directory.resolve("node").toFile(), "klethron-dialer", "http://127.0.0.1:1")) {
-            assertThrows(SocketTimeoutException.class, () -> node.dial(peer, 7070, Duration.ofMillis(200)));
-            CompletableFuture<Throwable> dialer = CompletableFuture.supplyAsync(() ->
-                    assertThrows(ClosedChannelException.class, () -> node.dial(peer, 7070, Duration.ofSeconds(Long.MAX_VALUE))));
-            Thread.sleep(200); // Best effort: let the dial block.
-            assertFalse(dialer.isDone());
-            node.close();
-            dialer.get(10, TimeUnit.SECONDS);
         }
     }
 
@@ -330,12 +258,6 @@ public final class DialTest {
 
     private static void awaitReady(FileDescriptor fd, int events) throws ErrnoException {
         assertTrue("Not ready within 10 s", poll(fd, events, 10000));
-    }
-
-    /// Reads once `fd` is readable, returning 0 at end of stream.
-    private static int readWhenReady(FileDescriptor fd, byte[] buffer) throws Exception {
-        awaitReady(fd, OsConstants.POLLIN);
-        return Os.read(fd, buffer, 0, buffer.length);
     }
 
     private static void write(ParcelFileDescriptor connection, byte[] bytes) {

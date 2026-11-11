@@ -19,7 +19,7 @@ var networkProbe struct {
 }
 
 func startNetworkProbe(dir string) string {
-	if problem := checkProbeEnvironment(dir); problem != "" {
+	if problem := checkProbeEnvironment(); problem != "" {
 		return problem
 	}
 	tailnetProbeMu.Lock()

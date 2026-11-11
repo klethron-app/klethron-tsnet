@@ -1,5 +1,7 @@
 package com.klethron.tsnet;
 
+import static java.util.concurrent.TimeUnit.NANOSECONDS;
+
 import android.Manifest;
 import android.content.Context;
 import android.content.pm.PackageManager;
@@ -27,7 +29,6 @@ import java.time.Duration;
 import java.util.HashSet;
 import java.util.Objects;
 import java.util.Set;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.jspecify.annotations.Nullable;
 
@@ -158,7 +159,7 @@ public final class TailnetNode implements AutoCloseable {
         if (previous != null && previous.owner != handle) {
             throw new IllegalArgumentException("Status belongs to another node");
         }
-        String record = nativeAwaitStatus(handle, previous == null ? -1 : previous.version, nanos(timeout));
+        String record = nativeAwaitStatus(handle, previous == null ? -1 : previous.version, NANOSECONDS.convert(timeout));
         if (record == null) {
             throw new ClosedChannelException();
         }
@@ -191,7 +192,7 @@ public final class TailnetNode implements AutoCloseable {
         if (name.length == 0 || name.length > 255 || host.indexOf(0) >= 0 || port < 1 || port > 65535) {
             throw new IllegalArgumentException("Host must have 1–255 bytes without NUL and port must be 1–65535");
         }
-        int result = nativeDial(handle, name, port, nanos(timeout));
+        int result = nativeDial(handle, name, port, NANOSECONDS.convert(timeout));
         check(result);
         return ParcelFileDescriptor.adoptFd(result);
     }
@@ -208,7 +209,7 @@ public final class TailnetNode implements AutoCloseable {
     /// @throws IOException if the logout fails
     @WorkerThread
     public void logout(Duration timeout) throws IOException {
-        check(nativeLogout(handle, nanos(timeout)));
+        check(nativeLogout(handle, NANOSECONDS.convert(timeout)));
     }
 
     /// Requests browser authorization after logout or key expiry, or to renew an existing login.
@@ -254,11 +255,6 @@ public final class TailnetNode implements AutoCloseable {
             case -10 -> throw new IOException("Node failed to start");
             default -> throw new IOException("Native failure " + result);
         }
-    }
-
-    /// Clamps to 0–`Long.MAX_VALUE` nanoseconds (about 292 years); [TimeUnit#convert] saturates.
-    private static long nanos(Duration timeout) {
-        return Math.max(0, TimeUnit.NANOSECONDS.convert(timeout));
     }
 
     private static native long nativeStart(byte[] config);

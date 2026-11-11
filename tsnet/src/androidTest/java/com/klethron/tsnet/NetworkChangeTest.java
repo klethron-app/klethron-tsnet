@@ -21,9 +21,9 @@ import org.junit.Test;
 
 /**
  * Runs a loopback two-node tailnet while a node started through the public API follows the
- * network, then disables Wi-Fi so the network really changes. Both tailnet nodes
- * must rebind and keep exchanging data. Requires Wi-Fi with cellular behind it; another app's VPN,
- * split or full tunnel, may be active.
+ * network, then disables Wi-Fi so the network really changes. Both tailnet nodes must rebind and
+ * keep exchanging data. Requires Wi-Fi with cellular behind it; another app's VPN, split or full
+ * tunnel, may be active.
  */
 public final class NetworkChangeTest {
     @Test(timeout = 180000)
@@ -32,7 +32,6 @@ public final class NetworkChangeTest {
         assertTrue("The default network must be Wi-Fi", awaitWifiDefault(connectivity));
 
         Path directory = LoginTest.temporaryDirectory("netchange-");
-        Path nodeDirectory = LoginTest.temporaryDirectory("netchange-node-");
         // Learns the interface names of the network the library follows; only it reports them to the nodes.
         LinkedBlockingQueue<String> names = new LinkedBlockingQueue<>();
         ConnectivityManager.NetworkCallback callback = new ConnectivityManager.NetworkCallback() {
@@ -48,7 +47,7 @@ public final class NetworkChangeTest {
             String wifi = nextName(names);
             // Checks that, with no node running, Android netmon has no default route.
             assertEquals("ok", Probe.call("netchangeStart", directory));
-            try (TailnetNode node = TailnetNode.start(LoginTest.CONTEXT, nodeDirectory.toFile(), "klethron-netchange",
+            try (TailnetNode node = TailnetNode.start(LoginTest.CONTEXT, directory.resolve("node").toFile(), "klethron-netchange",
                     "http://127.0.0.1:1")) { // Unreachable: the node only follows the default network.
                 assertEquals("ok", Probe.call("netchangeAwait", wifi));
                 shell("svc wifi disable");
@@ -65,7 +64,6 @@ public final class NetworkChangeTest {
             shell("svc wifi enable");
             connectivity.unregisterNetworkCallback(callback);
             LoginTest.deleteDirectory(directory);
-            LoginTest.deleteDirectory(nodeDirectory);
             // Leave the device as found; Wi-Fi reconnects asynchronously.
             boolean unused = awaitWifiDefault(connectivity); // Best effort: must not mask a test failure.
         }

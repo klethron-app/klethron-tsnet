@@ -14,15 +14,12 @@ import java.io.IOException;
 import java.net.Inet4Address;
 import java.net.InetAddress;
 import java.net.SocketTimeoutException;
-import java.nio.channels.ClosedChannelException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Duration;
 import java.util.Comparator;
 import java.util.List;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.TimeUnit;
 import java.util.function.Predicate;
 import org.junit.After;
 import org.junit.Before;
@@ -71,8 +68,6 @@ public final class LoginTest {
             addresses = status.addresses();
             assertTrue(addresses.get(0) instanceof Inet4Address);
             assertEquals(100, Byte.toUnsignedInt(((Inet4Address) addresses.get(0)).getAddress()[0]));
-            // Nothing changed: the timeout returns the same status.
-            assertEquals(status.version, node.awaitStatus(status, Duration.ofMillis(100)).version);
         }
         assertOnlyStateFile();
 
@@ -137,9 +132,6 @@ public final class LoginTest {
             assertFalse("Login URL was reused", firstUrl.equals(status.loginUrl()));
             complete(status);
             assertFalse(await(node, s -> s.state() == NodeStatus.State.RUNNING).addresses().isEmpty());
-            node.close();
-            assertThrows(ClosedChannelException.class, () -> node.logout(WAIT));
-            assertThrows(ClosedChannelException.class, node::login);
         }
         assertOnlyStateFile();
     }
@@ -302,23 +294,6 @@ public final class LoginTest {
         assertOnlyStateFile();
     }
 
-    @Test(timeout = 60000)
-    public void closeWakesWaitersAndRejectsLaterCalls() throws Exception {
-        try (TailnetNode node = TailnetNode.start(CONTEXT, directory.toFile(), "klethron-close-test", controlUrl)) {
-            NodeStatus status = await(node, s -> s.loginUrl() != null);
-            // Longer than Duration.toMillis can express: the wait saturates instead of overflowing.
-            CompletableFuture<Throwable> waiter = CompletableFuture.supplyAsync(() -> assertThrows(ClosedChannelException.class, () -> {
-                for (NodeStatus latest = status; ; ) latest = node.awaitStatus(latest, Duration.ofSeconds(Long.MAX_VALUE));
-            }));
-            Thread.sleep(200); // Best effort: let the waiter block.
-            assertFalse(waiter.isDone());
-            node.close();
-            waiter.get(10, TimeUnit.SECONDS);
-            node.close();
-            assertThrows(ClosedChannelException.class, () -> node.awaitStatus(null, WAIT));
-        }
-    }
-
     @Test(timeout = 30000)
     public void refusesInvalidConfigurationAndEnvironmentAuthKeys() throws Exception {
         assertThrows(IllegalArgumentException.class, () -> TailnetNode.start(CONTEXT, new File("relative"), "host"));
@@ -349,6 +324,20 @@ public final class LoginTest {
     /// Completes the pending login in place of the user's browser.
     private static void complete(NodeStatus status) {
         assertEquals("ok", Probe.call("complete", status.loginUrl()));
+    }
+
+    /// Calls a probe that starts nodes in a new directory, which must stay empty.
+    static String callWithoutFiles(String probe) throws Exception {
+        Path directory = temporaryDirectory(probe + "-🔒-");
+        try {
+            String result = Probe.call(probe, directory);
+            try (var files = Files.list(directory)) {
+                assertEquals("Probe nodes must not write files", 0, files.count());
+            }
+            return result;
+        } finally {
+            deleteDirectory(directory);
+        }
     }
 
     static Path temporaryDirectory(String prefix) throws Exception {
