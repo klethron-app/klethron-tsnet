@@ -192,15 +192,15 @@ func peerLine(peer *ipnstate.PeerStatus) string {
 		addressList(peer.TailscaleIPs...), strings.Join(keys, ",")}, "\t")
 }
 
-// publish applies notify and, unless nil, the peer lines.
+// publish applies notify and, unless nil, the peer lines. Both status goroutines publish, so it reads
+// the backend under the lock: otherwise an earlier read could overwrite a later one.
 func (n *node) publish(notify ipn.Notify, peers *string) {
-	addresses := addressList(n.server.TailscaleIPs())
-	// Set before upstream reports NeedsLogin for it; health notifications may arrive later.
-	_, removed := n.server.Sys().HealthTracker.Get().CurrentState().Warnings[tsconst.HealthWarnableNodeRemoved]
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	status := n.status
-	status.addresses = addresses
+	status.addresses = addressList(n.server.TailscaleIPs())
+	// Set before upstream reports NeedsLogin for it; health notifications may arrive later.
+	_, removed := n.server.Sys().HealthTracker.Get().CurrentState().Warnings[tsconst.HealthWarnableNodeRemoved]
 	if peers != nil {
 		status.peers = *peers
 	}
