@@ -18,7 +18,6 @@ android {
         }
     }
     buildToolsVersion = libs.versions.buildTools.get()
-    ndkVersion = libs.versions.ndk.get()
     defaultConfig {
         minSdk = libs.versions.minSdk.get().toInt()
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"

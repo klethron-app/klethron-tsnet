@@ -13,7 +13,6 @@ android {
         }
     }
     buildToolsVersion = libs.versions.buildTools.get()
-    ndkVersion = libs.versions.ndk.get()
     packaging.jniLibs.keepDebugSymbols += "**/libklethron_tsnet.so"
     defaultConfig {
         applicationId = "com.klethron.tsnet.demo"
