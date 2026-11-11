@@ -12,13 +12,10 @@ import (
 	"sync"
 )
 
+// usePlatformRoots must run before any TLS verification in this library: Go loads system roots once.
 // Android 14 moved the updatable system CA store into the Conscrypt APEX. Go's crypto/x509 reads only
 // the system image copy, missing Mainline root additions and removals, and ignores roots the user
 // disabled in Settings. The directive above lets the platform store replace Go's on-disk discovery.
-// Like Android's default for apps targeting API 24+, user-added CAs are not trusted.
-var rootDirectories = []string{"/apex/com.android.conscrypt/cacerts", "/system/etc/security/cacerts"}
-
-// usePlatformRoots must run before any TLS verification in this library: Go loads system roots once.
 var usePlatformRoots = sync.OnceFunc(func() {
 	pool := x509.NewCertPool()
 	for _, root := range loadPlatformRoots() {
@@ -29,14 +26,15 @@ var usePlatformRoots = sync.OnceFunc(func() {
 })
 
 // loadPlatformRoots mirrors Android's TrustedCertificateStore: use the first existing system
-// directory, without certificates the current user disabled.
+// directory, without certificates the current user disabled. Like Android's default for apps
+// targeting API 24+, user-added CAs are not trusted.
 func loadPlatformRoots() []*x509.Certificate {
 	removed := make(map[string]bool)
 	// Android users have UID ranges of 100000.
 	for _, cert := range readCertificates(fmt.Sprintf("/data/misc/user/%d/cacerts-removed", os.Getuid()/100000)) {
 		removed[string(cert.Raw)] = true
 	}
-	for _, directory := range rootDirectories {
+	for _, directory := range []string{"/apex/com.android.conscrypt/cacerts", "/system/etc/security/cacerts"} {
 		if _, err := os.Stat(directory); err == nil {
 			return slices.DeleteFunc(readCertificates(directory), func(cert *x509.Certificate) bool { return removed[string(cert.Raw)] })
 		}
