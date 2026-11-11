@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"io"
@@ -80,10 +81,7 @@ func (n *node) start(config string) int {
 	if os.Getenv("TS_AUTHKEY") != "" || os.Getenv("TS_AUTH_KEY") != "" {
 		return resultAuthEnvironment
 	}
-	n.server.Dir, n.server.Hostname, n.server.ControlURL = directory, hostname, controlURL
-	if n.server.ControlURL == "" {
-		n.server.ControlURL = ipn.DefaultControlURL
-	}
+	n.server.Dir, n.server.Hostname, n.server.ControlURL = directory, hostname, cmp.Or(controlURL, ipn.DefaultControlURL)
 	var err error
 	if n.client, err = n.server.LocalClient(); err != nil { // Starts the server.
 		return resultStartFailed
@@ -484,7 +482,7 @@ func relay(ctx context.Context, conn net.Conn) (int, error) {
 	return fds[1], nil
 }
 
-// Java enum names, in NodeStatus.State. InUseOtherUser is Windows-only.
+// Java enum names, in NodeStatus.State, other than NO_STATE. InUseOtherUser is Windows-only.
 var javaStates = map[ipn.State]string{
 	ipn.NeedsLogin:       "NEEDS_LOGIN",
 	ipn.NeedsMachineAuth: "NEEDS_MACHINE_AUTH",
@@ -497,12 +495,8 @@ var javaStates = map[ipn.State]string{
 // with comma-separated address literals, followed by the peer lines. All printable ASCII apart from
 // the separators.
 func (s nodeStatus) record(version uint64) string {
-	state, ok := javaStates[s.state]
-	if !ok {
-		state = "NO_STATE"
-	}
-	return fmt.Sprintf("%d\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s%s", version, state, s.revocation, s.loginURL, s.addresses,
-		s.err, s.dnsName, s.tailnet, s.loginName, s.peers)
+	return fmt.Sprintf("%d\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s%s", version, cmp.Or(javaStates[s.state], "NO_STATE"),
+		s.revocation, s.loginURL, s.addresses, s.err, s.dnsName, s.tailnet, s.loginName, s.peers)
 }
 
 // addressList returns the valid addresses, IPv4 first, comma-separated.
