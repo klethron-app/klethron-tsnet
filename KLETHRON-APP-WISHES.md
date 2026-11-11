@@ -2,9 +2,10 @@
 
 Klethron, an SSH terminal for Android, plans to ship this library in an on-demand Play feature module
 (`TAILSCALE-PLAN.md` in the Klethron repository). That plan was reviewed against 0.6.0. These changes
-would let Klethron integrate without workarounds. They are ordered by importance: the second blocks saving
-hosts, the third affects every open session, and the last two are packaging details. The first is declined
-and says what Klethron can do instead. Delete each entry once it ships.
+would let Klethron integrate without workarounds. They are ordered by importance: the second explains
+saved hosts after an account change, the third affects every open session, and the last two are
+packaging details. The first is declined and says what Klethron can do instead. Delete each entry once it
+ships.
 
 ## 1. A stable ID for each peer: declined
 
@@ -28,18 +29,22 @@ name and require the same keys, with an explicit prompt to accept changed ones.
 
 ## 2. This node's account and tailnet
 
-**Wanted:** this node's own stable ID and MagicDNS name, the tailnet name and the signed-in user's login
-name in `NodeStatus`. The `ipnstate.Status` that `refreshPeers` reads already carries them (`Self.ID`,
-`Self.DNSName`, `CurrentTailnet.Name`, `User[Self.UserID].LoginName`). A self change (`notify.SelfChange`)
-would also need to trigger a refresh. The login name is personal, so `toString()` should omit it, as it
-omits login URLs.
+**Wanted:** this node's MagicDNS name, the tailnet name and the signed-in user's login name in
+`NodeStatus`. The `ipnstate.Status` that `refreshPeers` reads already carries them (`Self.DNSName`,
+`CurrentTailnet.Name`, `User[Self.UserID].LoginName`). A self change (`notify.SelfChange`) would also need
+to trigger a refresh. The login name is personal, so `toString()` should omit it, as it omits login URLs.
+Stable node or tailnet IDs are not needed: saved hosts are names, so the name's suffix decides whether
+they still resolve, and an ID would only follow renames (see 1).
 
 **Why:**
 
-- Saved routes belong to an account. After a logout or `NODE_REMOVED`, the user can sign in with a
-  different account or tailnet, whose peers may reuse the same names. Klethron must then fail the old
-  hosts with an explanation ("this host belongs to tailnet X; you are signed in to Y") rather than
-  retarget them or fail without saying why.
+- Saved hosts belong to an account and tailnet. Klethron can purge or mark them when it logs out or
+  removes the node's state itself, but it cannot tell which account a later sign-in chose: after key
+  expiry, `NODE_REMOVED` or a logout, the browser page lets the user pick any account. Names saved in
+  another tailnet then stop resolving without explanation. With this node's MagicDNS suffix and login
+  name, Klethron can say why ("this host belongs to tailnet X; you are signed in to Y") or offer to remove
+  them. The login name also reveals a different person signing in to the same tailnet, as on a shared
+  phone. Guessing the tailnet from peer names fails when there are no peers.
 - Setup should show who is signed in and the device's actual name, since `start` says Tailscale may
   adjust the requested hostname. The user needs both to find the device in the admin console to approve,
   rename or remove it.
