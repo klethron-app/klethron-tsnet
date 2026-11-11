@@ -23,7 +23,7 @@ func newServer() *tsnet.Server {
 }
 
 // Java holds node IDs, never Go pointers. IDs are not reused, so a call racing or following
-// close finds no node, which node calls report as closed, instead of a different one.
+// close finds no node, not a different one; node calls report a missing node as closed.
 var nodes = struct {
 	sync.Mutex
 	byID map[int64]*node

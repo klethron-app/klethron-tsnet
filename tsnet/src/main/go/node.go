@@ -451,7 +451,7 @@ func relay(ctx context.Context, conn net.Conn) (int, error) {
 		return -1, err
 	}
 	file := os.NewFile(uintptr(fds[0]), "relay")
-	local, err := net.FileConn(file) // A duplicate descriptor.
+	app, err := net.FileConn(file) // A duplicate descriptor.
 	_ = file.Close()
 	if err != nil {
 		_ = syscall.Close(fds[1])
@@ -459,7 +459,7 @@ func relay(ctx context.Context, conn net.Conn) (int, error) {
 	}
 	end := sync.OnceFunc(func() {
 		_ = conn.Close() // Also unblocks the other copy.
-		_ = local.Close()
+		_ = app.Close()
 	})
 	// Closing conn alone cannot interrupt a copy blocked writing to the app's socket.
 	unwatch := context.AfterFunc(ctx, end)
@@ -468,12 +468,12 @@ func relay(ctx context.Context, conn net.Conn) (int, error) {
 		end()
 	}
 	go func() {
-		if _, err := io.Copy(local, conn); err != nil || local.(*net.UnixConn).CloseWrite() != nil {
+		if _, err := io.Copy(app, conn); err != nil || app.(*net.UnixConn).CloseWrite() != nil {
 			finish()
 		}
 	}()
 	go func() {
-		_, _ = io.Copy(conn, local)
+		_, _ = io.Copy(conn, app)
 		finish()
 	}()
 	return fds[1], nil
