@@ -5,18 +5,15 @@ package main
 import (
 	"cmp"
 	"context"
-	"sync"
+	"sync/atomic"
 	"time"
 
 	"tailscale.com/tsnet"
 )
 
-// The instrumentation test changes the device's default network between these debug-only calls,
-// reporting it through the public Java API. Results are fixed ASCII diagnostics.
-var networkProbe struct {
-	sync.Mutex
-	tailnet *loopbackTailnet
-}
+// The instrumentation test changes the device's default network between these calls, reporting it
+// through the public Java API. The started tailnet holds tailnetProbeMu until stopNetworkProbe.
+var networkTailnet atomic.Pointer[loopbackTailnet]
 
 func startNetworkProbe(dir string) string {
 	if problem := checkProbeEnvironment(); problem != "" {
@@ -40,18 +37,14 @@ func startNetworkProbe(dir string) string {
 		tailnetProbeMu.Unlock()
 		return problem
 	}
-	networkProbe.Lock()
-	defer networkProbe.Unlock()
-	networkProbe.tailnet = tailnet
+	networkTailnet.Store(tailnet)
 	return "ok"
 }
 
 // awaitNetworkChange waits for both nodes to finish rebinding to the named default interface, then
 // exchanges tailnet data and requires a re-established direct path.
 func awaitNetworkChange(name string) string {
-	networkProbe.Lock()
-	tailnet := networkProbe.tailnet // The test calls start, await and stop from one thread.
-	networkProbe.Unlock()
+	tailnet := networkTailnet.Load()
 	if tailnet == nil {
 		return "not started"
 	}
@@ -75,11 +68,8 @@ func awaitNetworkChange(name string) string {
 }
 
 func stopNetworkProbe(string) string {
-	networkProbe.Lock()
-	defer networkProbe.Unlock()
-	if networkProbe.tailnet != nil {
-		networkProbe.tailnet.close()
-		networkProbe.tailnet = nil
+	if tailnet := networkTailnet.Swap(nil); tailnet != nil {
+		tailnet.close()
 		tailnetProbeMu.Unlock()
 	}
 	return ""
