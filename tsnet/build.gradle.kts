@@ -46,19 +46,16 @@ val javadoc = tasks.register<Javadoc>("releaseJavadoc") {
 }
 
 androidComponents.onVariants { variant ->
-    val buildType = variant.buildType!!
-    val debug = buildType == "debug"
-    for (abi in listOf("arm64-v8a", "x86_64")) {
-        val buildGo = tasks.register<BuildGoLibrary>(
-            "buildGo" + (if (abi == "arm64-v8a") "Arm64" else "X86_64") + (if (debug) "Debug" else "")
-        ) {
-            sources.set(layout.projectDirectory.dir("src/main/go"))
-            sdkDirectory.set(androidComponents.sdkComponents.sdkDirectory)
-            ndkVersion.set(libs.versions.ndk)
-            goVersion.set(libs.versions.go)
-            api.set(libs.versions.minSdk.get().toInt())
-            this.abi.set(abi)
-            buildTags.set(omittedFeatures + if (debug) listOf("klethron_test") else emptyList())
+    val debug = variant.name == "debug"
+    for ((abi, name) in mapOf("arm64-v8a" to "Arm64", "x86_64" to "X86_64")) {
+        val buildGo = tasks.register<BuildGoLibrary>("buildGo$name" + if (debug) "Debug" else "") {
+            sources = layout.projectDirectory.dir("src/main/go")
+            sdkDirectory = androidComponents.sdkComponents.sdkDirectory
+            ndkVersion = libs.versions.ndk
+            goVersion = libs.versions.go
+            api = libs.versions.minSdk.get().toInt()
+            this.abi = abi
+            buildTags = omittedFeatures + if (debug) listOf("klethron_test") else emptyList()
         }
         variant.sources.jniLibs?.addGeneratedSourceDirectory(buildGo, BuildGoLibrary::outputDirectory)
     }
@@ -66,19 +63,19 @@ androidComponents.onVariants { variant ->
     // Audit the binaries actually packaged in each variant, not the wider go.mod graph.
     val aar = variant.artifacts.get(SingleArtifact.AAR)
     tasks.register<VerifyNativeNotices>("verify${variant.name.replaceFirstChar { it.uppercase() }}NativeNotices") {
-        this.aar.set(aar)
-        notices.set(layout.projectDirectory.dir("src/main/assets/klethron-tsnet/licenses"))
-        if (debug) debugNotices.set(layout.projectDirectory.dir("src/debug/assets/klethron-tsnet/licenses"))
-        goSum.set(layout.projectDirectory.file("src/main/go/go.sum"))
-        goVersion.set(libs.versions.go)
-        ndkVersion.set(libs.versions.ndk)
-        releaseTags.set(omittedFeatures)
-        report.set(layout.buildDirectory.file("reports/native/notices-$buildType.tsv"))
+        this.aar = aar
+        notices = layout.projectDirectory.dir("src/main/assets/klethron-tsnet/licenses")
+        if (debug) debugNotices = layout.projectDirectory.dir("src/debug/assets/klethron-tsnet/licenses")
+        goSum = layout.projectDirectory.file("src/main/go/go.sum")
+        goVersion = libs.versions.go
+        ndkVersion = libs.versions.ndk
+        releaseTags = omittedFeatures
+        report = layout.buildDirectory.file("reports/native/notices-${variant.name}.tsv")
     }
     if (!debug) {
         tasks.register<VerifyNativeAar>("verifyNativeAar") {
-            this.aar.set(aar)
-            report.set(layout.buildDirectory.file("reports/native/sizes.tsv"))
+            this.aar = aar
+            report = layout.buildDirectory.file("reports/native/sizes.tsv")
         }
         javadoc.configure { classpath = variant.compileClasspath + files(androidComponents.sdkComponents.bootClasspath) }
     }
@@ -136,7 +133,7 @@ publishing {
     repositories {
         maven {
             name = "localBuild"
-            url = rootProject.layout.buildDirectory.dir("maven").get().asFile.toURI()
+            url = uri(rootProject.layout.buildDirectory.dir("maven"))
         }
     }
 }
