@@ -26,8 +26,9 @@ replacement. The inventory's Tailscale checksum identifies the **unmodified upst
 `./gradlew build` runs `verifyReleaseNativeNotices` and `verifyDebugNativeNotices`. They inspect each AAR's
 libraries and fail on missing or stale modules, version or checksum drift, any other replacement, a
 different Go version, or a packaged notice that differs from its checked-in source. They also fail unless
-`FILE-NOTICES` names the current Go and NDK versions and the SHA-256 of `GO-MODULES.tsv`, so any
-toolchain or module change requires a new per-file review. Reports are in
+`FILE-NOTICES` names the current Go and NDK versions and a SHA-256 of `GO-MODULES.tsv` with the release
+build tags, so any toolchain, module or omitted-feature change requires a new per-file review; the failure
+names the line to record after it. Reports are in
 `tsnet/build/reports/native/notices-{release,debug}.tsv`. Nothing is generated or downloaded.
 
 ## Per-file review

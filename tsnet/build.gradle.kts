@@ -51,7 +51,7 @@ val omittedFeatures = listOf(
     "acme",
     // TLS trusts only Android's system CA store, not Tailscale's baked-in Let's Encrypt roots.
     "bakedroots",
-)
+).map { "ts_omit_$it" }
 
 // AGP's Dokka-based Javadoc drops the code spans and links of Markdown doc comments; the JDK renders them.
 val javadoc = tasks.register<Javadoc>("releaseJavadoc") {
@@ -76,7 +76,7 @@ androidComponents.onVariants { variant ->
             goVersion.set(libs.versions.go)
             api.set(libs.versions.minSdk.get().toInt())
             this.abi.set(abi)
-            buildTags.set(omittedFeatures.map { "ts_omit_$it" } + if (debug) listOf("klethron_test") else emptyList())
+            buildTags.set(omittedFeatures + if (debug) listOf("klethron_test") else emptyList())
         }
         variant.sources.jniLibs?.addGeneratedSourceDirectory(buildGo, BuildGoLibrary::outputDirectory)
     }
@@ -89,6 +89,7 @@ androidComponents.onVariants { variant ->
         if (debug) debugNotices.set(layout.projectDirectory.dir("src/debug/assets/klethron-tsnet/licenses"))
         goVersion.set(libs.versions.go)
         ndkVersion.set(libs.versions.ndk)
+        releaseTags.set(omittedFeatures)
         report.set(layout.buildDirectory.file("reports/native/notices-$buildType.tsv"))
     }
     if (!debug) {

@@ -8,6 +8,7 @@ import org.gradle.api.DefaultTask
 import org.gradle.api.GradleException
 import org.gradle.api.file.DirectoryProperty
 import org.gradle.api.file.RegularFileProperty
+import org.gradle.api.provider.ListProperty
 import org.gradle.api.provider.Property
 import org.gradle.api.tasks.Input
 import org.gradle.api.tasks.InputDirectory
@@ -38,6 +39,7 @@ abstract class VerifyNativeNotices @Inject constructor(private val exec: ExecOpe
 
     @get:Input abstract val goVersion: Property<String>
     @get:Input abstract val ndkVersion: Property<String>
+    @get:Input abstract val releaseTags: ListProperty<String> // They select the files FILE-NOTICES reviews.
     @get:OutputFile abstract val report: RegularFileProperty
 
     @TaskAction
@@ -51,11 +53,13 @@ abstract class VerifyNativeNotices @Inject constructor(private val exec: ExecOpe
             "UNICODE-LICENSE")) {
             requireFile(directory.resolve(path), "Missing notice $path")
         }
-        // Per-file notices come from a manual source review; any toolchain or module change invalidates it.
-        val inventoryHash = HexFormat.of().formatHex(
-            MessageDigest.getInstance("SHA-256").digest(directory.resolve("GO-MODULES.tsv").readBytes()))
-        val reviewed = "Reviewed for Go ${goVersion.get()}, NDK ${ndkVersion.get()} and GO-MODULES.tsv SHA-256\n$inventoryHash."
-        requireNotice(reviewed in directory.resolve("FILE-NOTICES").readText(), "FILE-NOTICES is not reviewed for this build")
+        // Per-file notices come from a manual source review; any toolchain, module or build tag change invalidates it.
+        val reviewedHash = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(
+            directory.resolve("GO-MODULES.tsv").readBytes() + releaseTags.get().sorted().joinToString(",").toByteArray()))
+        val reviewed = "Reviewed for Go ${goVersion.get()}, NDK ${ndkVersion.get()}, and GO-MODULES.tsv with the release\n" +
+            "build tags (SHA-256 $reviewedHash)."
+        requireNotice(reviewed in directory.resolve("FILE-NOTICES").readText(),
+            "FILE-NOTICES is not reviewed for this build; after a review, record \"$reviewed\"")
         fun inventory(directory: File, name: String): List<List<String>> {
             val lines = directory.resolve(name).readLines()
             requireNotice(lines.firstOrNull() == "module\tversion\tsum\tnotices", "Malformed inventory header in $name")
