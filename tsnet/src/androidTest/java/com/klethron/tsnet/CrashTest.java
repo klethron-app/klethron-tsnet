@@ -16,6 +16,7 @@ import androidx.test.platform.app.InstrumentationRegistry;
 import java.io.FileInputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import org.junit.Test;
@@ -69,7 +70,7 @@ public final class CrashTest {
             // Match this process's exit: the system restarts the bound service after a crash, and
             // that process's later exit, or an earlier test's crash, must not be mistaken for it.
             ActivityManager activities = context.getSystemService(ActivityManager.class);
-            int pid = activities.getRunningAppProcesses().stream()
+            int pid = Objects.requireNonNull(activities.getRunningAppProcesses()).stream()
                     .filter(process -> process.processName.equals(context.getPackageName() + ":crash"))
                     .findFirst().orElseThrow().pid;
             Parcel data = Parcel.obtain();

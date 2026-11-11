@@ -3,6 +3,8 @@ plugins {
 }
 
 android {
+    lint.warningsAsErrors = true
+    lint.informational += listOf("AndroidGradlePluginVersion", "GradleDependency")
     enableKotlin = false
     namespace = "com.klethron.tsnet.demo"
     compileSdk {

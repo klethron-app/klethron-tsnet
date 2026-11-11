@@ -157,7 +157,7 @@ public final class LiveActivity extends Activity {
             String target = host + ":" + port;
             if (!target.equals(heldTarget)) closeHeld();
             boolean dialed = held == null;
-            if (dialed) {
+            if (held == null) {
                 held = current.dial(host, port, TIMEOUT);
                 heldTarget = target;
             }

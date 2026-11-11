@@ -20,6 +20,7 @@ import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Duration;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Objects;
 import java.util.function.Predicate;
 import org.junit.After;
 import org.junit.Before;
@@ -46,7 +47,7 @@ public final class LoginTest {
     @After
     public void stopControl() throws Exception {
         Probe.call("stopControl");
-        deleteDirectory(directory.getParent());
+        deleteDirectory(Objects.requireNonNull(directory.getParent()));
     }
 
     @Test(timeout = 90000)
@@ -59,7 +60,7 @@ public final class LoginTest {
             assertNull(status.error());
             assertTrue(status.addresses().isEmpty());
             // Never print login URLs, even in test failures.
-            assertTrue("Unexpected login URL", status.loginUrl().startsWith(controlUrl + "/auth/"));
+            assertTrue("Unexpected login URL", loginUrl(status).startsWith(controlUrl + "/auth/"));
             assertFalse(status.toString().contains("/auth/"));
             complete(status);
 
@@ -87,7 +88,7 @@ public final class LoginTest {
         String firstUrl;
         try (TailnetNode node = TailnetNode.start(CONTEXT, directory.toFile(), "klethron-logout-test", controlUrl)) {
             NodeStatus status = await(node, s -> s.loginUrl() != null);
-            firstUrl = status.loginUrl();
+            firstUrl = loginUrl(status);
             node.logout(WAIT); // Not logged in: no effect, so the pending login completes.
             complete(status);
             assertFalse(await(node, s -> s.state() == NodeStatus.State.RUNNING).addresses().isEmpty());
@@ -108,7 +109,7 @@ public final class LoginTest {
             assertEquals(NodeStatus.State.NEEDS_LOGIN, status.state());
             assertFalse("Login URL was reused", firstUrl.equals(status.loginUrl()));
             // Logout reset the prefs, including control URL and hostname; login restores both.
-            assertTrue("Unexpected login URL", status.loginUrl().startsWith(controlUrl + "/auth/"));
+            assertTrue("Unexpected login URL", loginUrl(status).startsWith(controlUrl + "/auth/"));
             complete(status);
             assertFalse(await(node, s -> s.state() == NodeStatus.State.RUNNING).addresses().isEmpty());
             // The re-login's registration uses tsnet's hostname again.
@@ -195,7 +196,7 @@ public final class LoginTest {
             status = await(node, s -> s.loginUrl() != null);
             assertEquals(NodeStatus.State.NEEDS_LOGIN, status.state());
             assertEquals(NodeStatus.Revocation.KEY_EXPIRED, status.revocation());
-            assertTrue("Unexpected login URL", status.loginUrl().startsWith(controlUrl + "/auth/"));
+            assertTrue("Unexpected login URL", loginUrl(status).startsWith(controlUrl + "/auth/"));
             // Control stages the replacement key alongside the old key for the same device.
             assertEquals("klethron-expiry-test", Probe.call("hostnames"));
             complete(status);
@@ -210,7 +211,7 @@ public final class LoginTest {
                 assertEquals("Re-authentication interrupted the node", NodeStatus.State.RUNNING, s.state());
                 return s.loginUrl() != null;
             });
-            assertTrue("Unexpected login URL", status.loginUrl().startsWith(controlUrl + "/auth/"));
+            assertTrue("Unexpected login URL", loginUrl(status).startsWith(controlUrl + "/auth/"));
             assertEquals("klethron-expiry-test", Probe.call("hostnames"));
             complete(status);
             // The URL is cleared once the new key is saved, so closing then keeps the login.
@@ -296,18 +297,20 @@ public final class LoginTest {
 
     @Test(timeout = 30000)
     public void refusesInvalidConfigurationAndEnvironmentAuthKeys() throws Exception {
-        assertThrows(IllegalArgumentException.class, () -> TailnetNode.start(CONTEXT, new File("relative"), "host"));
-        assertThrows(IllegalArgumentException.class, () -> TailnetNode.start(CONTEXT, directory.toFile(), ""));
-        assertThrows(IllegalArgumentException.class, () -> TailnetNode.start(CONTEXT, directory.toFile(), "a\0b", controlUrl));
+        File relative = new File("relative");
+        File state = directory.toFile();
+        assertThrows(IllegalArgumentException.class, () -> TailnetNode.start(CONTEXT, relative, "host"));
+        assertThrows(IllegalArgumentException.class, () -> TailnetNode.start(CONTEXT, state, ""));
+        assertThrows(IllegalArgumentException.class, () -> TailnetNode.start(CONTEXT, state, "a\0b", controlUrl));
         Probe.call("setAuthKeyEnvironment", true);
         try {
-            IOException e = assertThrows(IOException.class, () -> TailnetNode.start(CONTEXT, directory.toFile(), "host", controlUrl));
-            assertTrue(e.getMessage().contains("TS_AUTHKEY"));
+            IOException e = assertThrows(IOException.class, () -> TailnetNode.start(CONTEXT, state, "host", controlUrl));
+            assertTrue(Objects.requireNonNull(e.getMessage()).contains("TS_AUTHKEY"));
         } finally {
             Probe.call("setAuthKeyEnvironment", false);
         }
-        Path file = Files.createFile(directory.getParent().resolve("not-a-directory"));
-        assertThrows(IOException.class, () -> TailnetNode.start(CONTEXT, file.toFile(), "host", controlUrl));
+        File file = Files.createFile(directory.resolveSibling("not-a-directory")).toFile();
+        assertThrows(IOException.class, () -> TailnetNode.start(CONTEXT, file, "host", controlUrl));
     }
 
     @CanIgnoreReturnValue
@@ -323,7 +326,11 @@ public final class LoginTest {
 
     /// Completes the pending login in place of the user's browser.
     private static void complete(NodeStatus status) {
-        assertEquals("ok", Probe.call("complete", status.loginUrl()));
+        assertEquals("ok", Probe.call("complete", loginUrl(status)));
+    }
+
+    private static String loginUrl(NodeStatus status) {
+        return Objects.requireNonNull(status.loginUrl());
     }
 
     /// Calls a probe that starts nodes in a new directory, which must stay empty.

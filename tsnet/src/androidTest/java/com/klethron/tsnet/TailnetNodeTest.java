@@ -37,6 +37,7 @@ public final class TailnetNodeTest {
     }
 
     @Test(timeout = 30000)
+    @SuppressWarnings("AssertThrowsMultipleStatements") // The loop waits until close.
     public void refusesInvalidCallsAndCloseEndsBlockedOnes() throws Exception {
         Path directory = LoginTest.temporaryDirectory("close-");
         try (TailnetNode node = TailnetNode.start(LoginTest.CONTEXT, directory.toFile(), "close", "http://127.0.0.1:1")) {

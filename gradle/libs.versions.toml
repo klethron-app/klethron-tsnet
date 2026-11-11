@@ -13,15 +13,20 @@ testRunner = "1.7.0"
 junit = "4.13.2"
 jspecify = "1.0.1"
 errorprone = "2.52.0"
+errorpronePlugin = "5.2.0"
+nullaway = "0.14.3"
 androidxAnnotation = "1.11.0"
 
 [libraries]
 android-test-runner = { module = "androidx.test:runner", version.ref = "testRunner" }
 junit = { module = "junit:junit", version.ref = "junit" }
 jspecify = { module = "org.jspecify:jspecify", version.ref = "jspecify" }
+errorprone-core = { module = "com.google.errorprone:error_prone_core", version.ref = "errorprone" }
+nullaway = { module = "com.uber.nullaway:nullaway", version.ref = "nullaway" }
 errorprone-annotations = { module = "com.google.errorprone:error_prone_annotations", version.ref = "errorprone" }
 androidx-annotation = { module = "androidx.annotation:annotation", version.ref = "androidxAnnotation" }
 
 [plugins]
 android-library = { id = "com.android.library", version.ref = "agp" }
 android-application = { id = "com.android.application", version.ref = "agp" }
+errorprone = { id = "net.ltgt.errorprone", version.ref = "errorpronePlugin" }
