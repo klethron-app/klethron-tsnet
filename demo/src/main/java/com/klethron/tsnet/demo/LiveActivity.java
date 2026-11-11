@@ -37,7 +37,7 @@ import org.jspecify.annotations.Nullable;
 
 /** Explicit, interactive real-tailnet test. No URLs, credentials or peer data go to logs. */
 public final class LiveActivity extends Activity {
-    // Serializes node calls across instances, including a destroyed instance's close.
+    // Serializes node calls across instances, including a finished instance's close.
     private static final ExecutorService WORKER = Executors.newSingleThreadExecutor();
     private static final Duration TIMEOUT = Duration.ofSeconds(10);
     private final Handler ui = new Handler(Looper.getMainLooper());
@@ -120,7 +120,7 @@ public final class LiveActivity extends Activity {
                 previous = next;
             }
         } catch (ClosedChannelException closed) {
-            // onDestroy closes the node and wakes this waiter.
+            // closeNode closes it and wakes this waiter.
         }
     }
 
@@ -260,13 +260,27 @@ public final class LiveActivity extends Activity {
 
     @MainThread
     @Override
+    public void onPause() {
+        super.onPause();
+        // Destruction can follow a new instance's start, which would find the state directory in use.
+        if (isFinishing()) closeNode();
+    }
+
+    @MainThread
+    @Override
     public void onDestroy() {
+        closeNode();
+        super.onDestroy();
+    }
+
+    @MainThread
+    private void closeNode() {
+        if (destroyed) return;
         destroyed = true;
         WORKER.execute(() -> {
             closeHeld();
             if (node != null) node.close();
             node = null;
         });
-        super.onDestroy();
     }
 }
