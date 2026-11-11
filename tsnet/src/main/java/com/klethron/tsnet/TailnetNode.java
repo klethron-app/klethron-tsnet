@@ -39,10 +39,10 @@ import org.jspecify.annotations.Nullable;
 /// [Start][#start] a node, follow [#awaitStatus] until it is [NodeStatus.State#RUNNING] without a
 /// [NodeStatus#loginUrl()], then [#dial]. Running nodes follow the device's best Wi-Fi, cellular or
 /// other non-VPN internet network to reconnect after it changes, also while another app's VPN is
-/// active. Methods are thread-safe; `@WorkerThread` methods block. Closing the
-/// node ends its connections and cancels blocked calls, which then throw [ClosedChannelException].
-/// Zero or negative timeouts do not wait: [#awaitStatus] returns at once, [#dial] and [#logout]
-/// time out at once. The first use of this class in a process loads its native library.
+/// active. Methods are thread-safe; `@WorkerThread` methods block. Closing the node ends its
+/// connections and cancels blocked calls, which then throw [ClosedChannelException]. Zero or
+/// negative timeouts do not wait: [#awaitStatus] returns at once, [#dial] and [#logout] time out at
+/// once. The first use of this class in a process loads its native library.
 public final class TailnetNode implements AutoCloseable {
     static {
         System.loadLibrary("klethron_tsnet");
@@ -114,8 +114,7 @@ public final class TailnetNode implements AutoCloseable {
                 // move to cellular, so follow the default network instead.
                 Context application = Objects.requireNonNullElse(context.getApplicationContext(), context);
                 connectivity = application.getSystemService(ConnectivityManager.class);
-                String permission = Manifest.permission.CHANGE_NETWORK_STATE;
-                if (application.checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED) {
+                if (application.checkSelfPermission(Manifest.permission.CHANGE_NETWORK_STATE) == PackageManager.PERMISSION_GRANTED) {
                     connectivity.registerBestMatchingNetworkCallback(PHYSICAL_NETWORK, NETWORK,
                             new Handler(Looper.getMainLooper()));
                 } else {

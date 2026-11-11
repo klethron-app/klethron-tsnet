@@ -67,9 +67,7 @@ public final class NodeStatus {
     private final @Nullable String loginName;
     private final List<Peer> peers;
 
-    /// Parses a native "version\nSTATE\nREVOCATION\nloginURL\naddresses\nerror\ndnsName\ntailnet\nloginName"
-    /// record, followed by "\ndnsName\tos\tonline\taddresses\tsshHostKeys" peer lines; empty fields are
-    /// absent. Lists are comma-separated.
+    /// Parses a record as node.go's `nodeStatus.record` writes it; empty fields are absent.
     NodeStatus(long owner, String record) {
         String[] fields = record.split("\n", -1);
         this.owner = owner;
