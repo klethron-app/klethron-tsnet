@@ -2,6 +2,14 @@
 #include <stdlib.h>
 #include "_cgo_export.h"
 
+// Returns s as a Java string, or NULL if s is, and frees it. s is ASCII, so modified UTF-8 suffices.
+static jstring javaString(JNIEnv *env, char *s) {
+    if (s == NULL) return NULL;
+    jstring result = (*env)->NewStringUTF(env, s);
+    free(s);
+    return result;
+}
+
 JNIEXPORT jlong JNICALL
 Java_com_klethron_tsnet_TailnetNode_nativeStart(JNIEnv *env, jclass type, jbyteArray config) {
     // Java encodes standard UTF-8, including supplementary characters in paths.
@@ -15,12 +23,7 @@ Java_com_klethron_tsnet_TailnetNode_nativeStart(JNIEnv *env, jclass type, jbyteA
 
 JNIEXPORT jstring JNICALL
 Java_com_klethron_tsnet_TailnetNode_nativeAwaitStatus(JNIEnv *env, jclass type, jlong handle, jlong after, jlong timeout) {
-    char *record = klethron_node_await_status(handle, after, timeout);
-    if (record == NULL) return NULL; // Closed.
-    // Records are ASCII, so JNI modified UTF-8 is sufficient.
-    jstring result = (*env)->NewStringUTF(env, record);
-    free(record);
-    return result;
+    return javaString(env, klethron_node_await_status(handle, after, timeout)); // NULL once closed.
 }
 
 JNIEXPORT void JNICALL
@@ -30,11 +33,7 @@ Java_com_klethron_tsnet_TailnetNode_nativeClose(JNIEnv *env, jclass type, jlong 
 
 JNIEXPORT jstring JNICALL
 Java_com_klethron_tsnet_TailnetNode_tailscaleVersion(JNIEnv *env, jclass type) {
-    // Module versions are ASCII, so JNI modified UTF-8 is sufficient here.
-    char *version = klethron_tailscale_version();
-    jstring result = (*env)->NewStringUTF(env, version);
-    free(version);
-    return result;
+    return javaString(env, klethron_tailscale_version());
 }
 
 JNIEXPORT void JNICALL
