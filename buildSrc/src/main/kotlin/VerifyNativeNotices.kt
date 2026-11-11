@@ -82,7 +82,7 @@ abstract class VerifyNativeNotices @Inject constructor(private val exec: ExecOpe
         val debugDirectory = debugNotices.orNull?.asFile
         val directories = listOfNotNull(directory, debugDirectory)
         val modules = inventory(directory, "GO-MODULES.tsv") +
-            (debugDirectory?.let { inventory(it, "GO-MODULES-DEBUG.tsv") } ?: emptyList())
+            debugDirectory?.let { inventory(it, "GO-MODULES-DEBUG.tsv") }.orEmpty()
         requireNotice(modules.map { it[0] }.distinct().size == modules.size, "Go module inventories must have unique module paths")
         val expected = modules.map { it.take(3) }.toSet()
         // The binary records no checksum for the patched copy, so check the inventory's against go.sum.
@@ -112,17 +112,12 @@ abstract class VerifyNativeNotices @Inject constructor(private val exec: ExecOpe
                     standardOutput = output
                 }
                 val fields = output.toString(Charsets.UTF_8).lines().drop(1).map { it.trim().split(Regex("\\s+")) }
-                // The build verifies upstream checksums before applying our documented tsnet patches.
-                // Local replacements have no binary module checksum; accept only this exact one.
+                // BuildGoLibrary verifies the upstream checksum before patching; allow only its patched copy.
                 val replacements = fields.indices.filter { fields[it].first() == "=>" }.map { fields[it - 1].take(2) + fields[it] }
                 requireNotice(replacements == listOf(listOf("dep", "tailscale.com", "=>", "./tailscale", "(devel)")),
-                    "Unexpected Go module replacement; only the documented tsnet patches are allowed")
-                val actual = fields.filter { it.first() == "dep" }.map {
-                    val dependency = it.drop(1)
-                    if (dependency.first() == "tailscale.com" && dependency.size == 2) {
-                        dependency + upstreamTailscale[2]
-                    } else dependency
-                }.toSet()
+                    "Unexpected Go module replacement; only BuildGoLibrary's patched tailscale.com is allowed")
+                val actual = fields.filter { it.first() == "dep" }.map { it.drop(1) }
+                    .map { if (it == upstreamTailscale.take(2)) upstreamTailscale else it }.toSet()
                 requireNotice(actual == expected,
                     "Go module inventory differs in ${entry.name}: missing=${actual - expected}, stale=${expected - actual}")
                 results.append("${entry.name}\t${actual.size}\n")
