@@ -6,6 +6,7 @@ repositories {
     mavenCentral()
 }
 
-// Gradle's embedded Kotlin cannot target Java 27 yet. buildSrc has no Java sources.
-java.targetCompatibility = JavaVersion.VERSION_26
-kotlin.compilerOptions.jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_26
+// This sets the oldest build JDK: 25 is the oldest LTS whose Javadoc renders Markdown doc comments.
+// (Gradle's embedded Kotlin cannot target the pinned JDK 27 either.) buildSrc has no Java sources.
+java.targetCompatibility = JavaVersion.VERSION_25
+kotlin.compilerOptions.jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_25
