@@ -124,7 +124,6 @@ publishing {
                     url = "https://github.com/klethron-app/klethron-tsnet"
                     connection = "scm:git:https://github.com/klethron-app/klethron-tsnet.git"
                     developerConnection = "scm:git:ssh://git@github.com/klethron-app/klethron-tsnet.git"
-                    // The tag pins the source, and with it the Tailscale commit, Go and NDK of a release.
                     if (!version.toString().endsWith("-SNAPSHOT")) tag = "v$version"
                 }
             }
