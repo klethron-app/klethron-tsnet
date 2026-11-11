@@ -3,7 +3,7 @@
 Klethron, an SSH terminal for Android, plans to ship this library in an on-demand Play feature module
 (`TAILSCALE-PLAN.md` in the Klethron repository). That plan was reviewed against 0.6.0. These changes
 would let Klethron integrate without workarounds. The first is declined and says what Klethron can do
-instead; the other two are packaging details. Delete each entry once it ships.
+instead; the second is a packaging detail. Delete each entry once it ships.
 
 ## 1. A stable ID for each peer: declined
 
@@ -25,20 +25,7 @@ name and require the same keys, with an explicit prompt to accept changed ones.
   even when the user wants the name to keep working.
 - What remains, following a device through a rename, is not worth more API.
 
-## 2. Do not export JSpecify at runtime
-
-**Wanted:** declare `org.jspecify:jspecify` as `compileOnly` instead of `api`, like `androidx.annotation`
-and `error_prone_annotations`.
-
-**Why:** `api` puts JSpecify on every consumer's runtime classpath, and into its APK unless R8 removes it.
-Klethron allows a single general-purpose third-party jar at runtime (BouncyCastle) and declares JSpecify
-`compileOnly` in its own modules, so it has to exclude it from this dependency. The reasoning in
-`tsnet/build.gradle.kts` for the other annotation artifacts probably applies: tools match these
-annotations by name in class files. Before switching, check with the minified demo and a Kotlin consumer
-that Kotlin still sees nullability and that `javac -Werror` stays quiet without the jar. Then note in the
-README that consumers who want nullness checking add JSpecify `compileOnly` themselves.
-
-## 3. Load the native library after an on-demand install (only if needed)
+## 2. Load the native library after an on-demand install (only if needed)
 
 **Wanted:** only if Klethron's staged-install test shows the need: a way to use `TailnetNode` when
 `System.loadLibrary("klethron_tsnet")` cannot find a library the caller has already loaded. For example,

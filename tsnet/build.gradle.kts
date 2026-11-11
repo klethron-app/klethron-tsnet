@@ -110,7 +110,8 @@ val javadocJar = tasks.register<Jar>("releaseJavadocJar") {
 }
 
 dependencies {
-    api(libs.jspecify)
+    // Consumers compile against our nullness annotations; their APKs need no annotation classes.
+    compileOnlyApi(libs.jspecify)
     // Lint, Error Prone and Kotlin's return-value checker match these by name in our class files, so
     // consumers need neither artifact (androidx.annotation would also export the Kotlin stdlib).
     compileOnly(libs.androidx.annotation)

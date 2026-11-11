@@ -14,7 +14,7 @@ Notices ship in the AAR under `assets/klethron-tsnet/licenses/`, from
   files and linked C runtime objects that the module licences do not cover, and
   `UNICODE-LICENSE` for generated Unicode tables (see [Per-file review](#per-file-review)).
 
-No Java dependency is bundled: JSpecify's annotations reach consumers as a Maven dependency.
+No Java dependency is bundled; consumers compile against JSpecify's annotations without packaging them.
 
 Notices were copied verbatim from the checksum-verified module cache: each module's root licence and
 patent notice, plus the nested `internal/snapref` and `zstd/internal/xxhash` licences of the compression
