@@ -227,9 +227,7 @@ public final class TailnetNode implements AutoCloseable {
 
     /// Returns the bundled Tailscale version, including its source revision.
     @AnyThread
-    public static String tailscaleVersion() {
-        return nativeTailscaleVersion();
-    }
+    public static native String tailscaleVersion();
 
     /// Disconnects this node and closes its connections, keeping its saved identity for the next
     /// [#start]. Waits for shutdown; pending calls throw [ClosedChannelException]. Repeated or
@@ -270,8 +268,6 @@ public final class TailnetNode implements AutoCloseable {
     private static native int nativeLogin(long handle);
 
     private static native void nativeClose(long handle);
-
-    private static native String nativeTailscaleVersion();
 
     private static native void nativeSetDefaultNetwork(byte[] name, int gateway);
 }
