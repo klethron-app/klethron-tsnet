@@ -24,8 +24,9 @@ size in the commit message. Debug builds include local control-server and peer f
 exclude them. The demo tests exercise an R8-minified consumer.
 
 The AAR is `tsnet/build/outputs/aar/tsnet-release.aar`; native sizes are in
-`tsnet/build/reports/native/sizes.tsv`, and `verifyNativeAar` checks their 16 KiB alignment. When changing native dependencies, compare both ABI library
-sizes and the compressed AAR, and update the [licence inventory](THIRD-PARTY-NOTICES.md).
+`tsnet/build/reports/native/sizes.tsv`, and `verifyNativeAar` checks their 16 KiB alignment. When
+changing native dependencies, compare both ABI library sizes and the compressed AAR, and update the
+[licence inventory](THIRD-PARTY-NOTICES.md).
 
 For a live check, install `:demo:installRelease` and open **Live tailnet test**. Authorize the node in
 your own tailnet, return to the app and wait for **RUNNING / Login saved**. Test TCP echo against a peer

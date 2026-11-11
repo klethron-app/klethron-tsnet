@@ -70,8 +70,7 @@ Starting with the same directory then resumes that identity.
 [`NodeStatus.peers`][peers] lists the other devices this node can see, with their MagicDNS name, operating
 system, online state, addresses and [Tailscale SSH](https://tailscale.com/kb/1193/tailscale-ssh) host
 keys, so users can pick a device instead of typing its name, and SSH clients can verify it without
-trust-on-first-use. Each change,
-including a device going online or offline, is a status change.
+trust-on-first-use. Each change, including a device going online or offline, is a status change.
 
 [`dial`][dial] accepts a tailnet IP address or MagicDNS name and returns a socket descriptor owned by the
 caller. It reaches peers and subnet routes only. [`close`][close] ends its connections but preserves
@@ -83,8 +82,9 @@ logout or key expiry. The app decides how long to keep the node alive and whethe
 Running nodes follow the device's best non-VPN network, so they reconnect after switching Wi-Fi or
 mobile networks, also while another VPN app, such as Tailscale's, is active. Without
 `CHANGE_NETWORK_STATE`, Android would not let them follow Wi-Fi to cellular; if you remove that
-permission, they follow the default network, which stays the VPN while one is active. Native TLS uses Android's system CA store, excluding
-disabled roots; user-added CAs and the app's network security configuration do not apply.
+permission, they follow the default network, which stays the VPN while one is active. Native TLS uses
+Android's system CA store, excluding disabled roots; user-added CAs and the app's network security
+configuration do not apply.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) to build, test or use a checkout. Original code is
 [Apache-2.0 licensed](LICENSE); bundled dependencies retain their
