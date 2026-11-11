@@ -9,7 +9,6 @@ import (
 	"crypto/rand"
 	"crypto/tls"
 	"io"
-	"log"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -91,9 +90,8 @@ func startLoopbackTailnet(ctx context.Context, dir string) (*loopbackTailnet, st
 		return t, "loopback derp failed"
 	}
 	t.closers = append(t.closers, stopDERP)
-	control := &testcontrol.Server{DERPMap: derpMap, Logf: logger.Discard}
+	control := &testcontrol.Server{DERPMap: derpMap}
 	control.HTTPTestServer = httptest.NewUnstartedServer(control)
-	control.HTTPTestServer.Config.ErrorLog = log.New(io.Discard, "", 0)
 	control.HTTPTestServer.Start()
 	t.closers = append(t.closers, control.HTTPTestServer.Close)
 
@@ -227,7 +225,6 @@ func startLoopbackDERP() (*tailcfg.DERPMap, func(), error) {
 	go serveSTUN(stunConn)
 	relay := derpserver.New(key.NewNode(), logger.Discard)
 	server := httptest.NewUnstartedServer(derpserver.Handler(relay))
-	server.Config.ErrorLog = log.New(io.Discard, "", 0)
 	// DERP upgrades HTTP/1.1 connections.
 	server.Config.TLSNextProto = map[string]func(*http.Server, *tls.Conn, http.Handler){}
 	server.StartTLS()

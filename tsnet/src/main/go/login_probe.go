@@ -6,7 +6,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log"
 	"maps"
 	"net"
 	"net/http"
@@ -23,7 +22,6 @@ import (
 	"tailscale.com/tailcfg"
 	"tailscale.com/tstest/integration/testcontrol"
 	"tailscale.com/types/key"
-	"tailscale.com/types/logger"
 	"tailscale.com/util/set"
 )
 
@@ -53,7 +51,7 @@ func startControl(interactive string) string {
 	if err != nil {
 		return ""
 	}
-	control := &testcontrol.Server{DERPMap: derpMap, Logf: logger.Discard, RequireAuth: interactive == "true"}
+	control := &testcontrol.Server{DERPMap: derpMap, RequireAuth: interactive == "true"}
 	if !control.RequireAuth {
 		control.DNSConfig = &tailcfg.DNSConfig{Proxied: true}
 		control.MagicDNSDomain = "tail-scale.ts.net" // As in upstream's tsnet tests.
@@ -66,7 +64,6 @@ func startControl(interactive string) string {
 		return 0, "", ""
 	})
 	control.HTTPTestServer = httptest.NewUnstartedServer(control)
-	control.HTTPTestServer.Config.ErrorLog = log.New(io.Discard, "", 0)
 	control.HTTPTestServer.Start()
 	loginProbe.control = control
 	loginProbe.stop = func() {
