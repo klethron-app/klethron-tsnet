@@ -14,11 +14,8 @@ import (
 	"tailscale.com/types/logger"
 )
 
-func init() {
-	// Some upstream paths use Go's standard logger directly, for example when the host reports
-	// a network change. This library never logs; discard them rather than writing to stderr.
-	log.SetOutput(io.Discard)
-}
+// Upstream also logs through Go's standard logger, as on network changes. Logs can contain login URLs.
+func init() { log.SetOutput(io.Discard) }
 
 func newServer() *tsnet.Server {
 	usePlatformRoots()

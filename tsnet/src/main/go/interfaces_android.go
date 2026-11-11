@@ -16,15 +16,11 @@ import (
 	"tailscale.com/net/netmon"
 )
 
-func init() {
-	// Android app UIDs cannot use Go's RTM_GETLINK interface discovery.
-	// Register once, before tsnet can create any monitors or goroutines.
-	netmon.RegisterInterfaceGetter(androidInterfaces)
-}
+// SELinux denies app UIDs the RTM_GETLINK of Go's interface discovery. Register before tsnet runs.
+func init() { netmon.RegisterInterfaceGetter(androidInterfaces) }
 
-// androidInterfaces uses bionic's public getifaddrs implementation, which can
-// enumerate IPv4/IPv6 addresses without RTM_GETLINK. Snapshot addresses as well
-// as metadata: falling back to net.Interface.Addrs would re-enter Go's netlink path.
+// androidInterfaces lists interfaces and their addresses with bionic's getifaddrs, which needs no
+// RTM_GETLINK. Returning the addresses avoids net.Interface.Addrs, which takes Go's netlink path.
 func androidInterfaces() ([]netmon.Interface, error) {
 	var head *C.struct_ifaddrs
 	if result, err := C.getifaddrs(&head); result != 0 {
@@ -68,8 +64,7 @@ func androidInterfaces() ([]netmon.Interface, error) {
 			}
 			if err == nil {
 				iface.MTU = int(req.Uint32())
-				// Query flags explicitly: bionic can return success even if its
-				// own flag lookup failed, leaving ifa_flags unset.
+				// bionic can leave ifa_flags unset yet return success.
 				err = unix.IoctlIfreq(fd, unix.SIOCGIFFLAGS, req)
 				flags = req.Uint16()
 			}
@@ -104,8 +99,7 @@ func androidInterfaces() ([]netmon.Interface, error) {
 	return result, nil
 }
 
-// Copy the network-order bytes before freeifaddrs releases their storage.
-// net.IPNet carries no IPv6 zone; the enclosing interface supplies its index.
+// interfaceIP copies addr's IP before freeifaddrs frees it. IPv6 zones come from the interface index.
 func interfaceIP(addr *C.struct_sockaddr) net.IP {
 	switch addr.sa_family {
 	case C.AF_INET:
