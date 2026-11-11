@@ -85,13 +85,13 @@ jobs:
           mv "$ANDROID_HOME/cmdline-tools/latest" "$ANDROID_HOME/cmdline-tools/preinstalled"
           ln -s "$COMMAND_LINE_TOOLS" "$ANDROID_HOME/cmdline-tools/latest"
       - name: Build and verify local publication
-        run: ./gradlew --no-daemon build :tsnet:publishReleasePublicationToLocalBuildRepository
+        run: ./gradlew build :tsnet:publishReleasePublicationToLocalBuildRepository
       - name: Verify incremental build and configuration cache
         id: incremental
         run: |
           set -o pipefail
           log=$RUNNER_TEMP/gradle-repeat.log
-          ./gradlew --no-daemon --console=plain build :tsnet:publishReleasePublicationToLocalBuildRepository | tee "$log"
+          ./gradlew --console=plain build :tsnet:publishReleasePublicationToLocalBuildRepository | tee "$log"
           grep -Fx 'Reusing configuration cache.' "$log"
           test "$(grep -Ec '^> Task :tsnet:buildGo(Arm64|X86_64)(Debug)? UP-TO-DATE$' "$log")" -eq 4
       - name: Enable emulator acceleration

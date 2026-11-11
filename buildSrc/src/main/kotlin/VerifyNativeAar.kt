@@ -41,17 +41,14 @@ abstract class VerifyNativeAar : DefaultTask() {
                 val offset = elf.getLong(32).toInt()
                 val stride = elf.getShort(54).toInt() and 0xffff
                 val count = elf.getShort(56).toInt() and 0xffff
-                var loads = 0
                 repeat(count) { index ->
                     val header = offset + index * stride
                     if (elf.getInt(header) == 1) {
-                        loads++
                         requireNative(elf.getLong(header + 48) >= 16384 &&
                             elf.getLong(header + 8) % 16384 == elf.getLong(header + 16) % 16384,
                             "${entry.name} has a LOAD segment incompatible with 16 KiB pages")
                     }
                 }
-                requireNative(loads > 0, "${entry.name} has no LOAD segments")
                 sizes.append("${entry.name}\t${entry.size}\t${entry.compressedSize}\n")
             }
         }

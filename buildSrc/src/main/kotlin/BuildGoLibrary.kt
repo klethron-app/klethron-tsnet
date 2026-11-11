@@ -20,7 +20,6 @@ import org.gradle.api.tasks.TaskAction
 import org.gradle.process.ExecOperations
 import org.gradle.work.DisableCachingByDefault
 
-// Incremental locally; do not share cached binaries before hermetic toolchain provisioning exists.
 @DisableCachingByDefault(because = "Uses locally installed, version-checked Go and NDK toolchains")
 abstract class BuildGoLibrary @Inject constructor(
     private val exec: ExecOperations,
@@ -92,20 +91,17 @@ abstract class BuildGoLibrary @Inject constructor(
                 filePermissions { unix("0644") }
             }
         }
-        fun patch(path: String, expectedHash: String, before: String, after: String) {
-            val original = upstream.resolve(path).readBytes()
-            val checksum = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(original))
-            val text = original.toString(Charsets.UTF_8)
-            if (checksum != expectedHash || text.split(before).size != 2) {
-                throw GradleException("Pinned $path changed; review TAILSCALE-MODIFICATIONS before building")
-            }
-            workspace.resolve("tailscale/$path").writeText(text.replace(before, after))
-        }
-        // A failed logout must not forget the node key: the map poll continues and would save the
-        // empty key over the login, leaving the node registered but unable to log out again.
+        // tailscale/tailscale#22248: a failed logout must not forget the node key.
+        val direct = "control/controlclient/direct.go"
+        val original = upstream.resolve(direct).readBytes()
+        val text = original.toString(Charsets.UTF_8)
         val forgetKey = "\tc.mu.Lock()\n\tc.persist = new(persist.Persist).View()\n\tc.mu.Unlock()\n"
-        patch("control/controlclient/direct.go", "a28e97e2a6822604182cdcfdd319ea9bb10c29b17e8b4592289c1cf2278160a9",
-            forgetKey, "\tif err == nil {\n" + forgetKey.replace("\t", "\t\t") + "\t}\n")
+        if (HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(original)) !=
+            "a28e97e2a6822604182cdcfdd319ea9bb10c29b17e8b4592289c1cf2278160a9" || text.split(forgetKey).size != 2) {
+            throw GradleException("Pinned $direct changed; review TAILSCALE-MODIFICATIONS before building")
+        }
+        workspace.resolve("tailscale/$direct").writeText(
+            text.replace(forgetKey, "\tif err == nil {\n" + forgetKey.replace("\t", "\t\t") + "\t}\n"))
         workspace.resolve("go.mod").appendText("\nreplace tailscale.com => ./tailscale\n")
         val flags = arrayOf("-mod=readonly", "-trimpath", "-buildvcs=false", "-tags=" + buildTags.get().joinToString(","))
         val target = mapOf("GOOS" to "android", "GOARCH" to arch, "CGO_ENABLED" to "1", "CC" to compiler.absolutePath)

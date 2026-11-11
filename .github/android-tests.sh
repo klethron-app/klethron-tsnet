@@ -25,7 +25,7 @@ save_reports() {
     done
 }
 trap save_reports EXIT
-./gradlew --no-daemon --continue :tsnet:connectedDebugAndroidTest :demo:connectedReleaseAndroidTest
+./gradlew --continue :tsnet:connectedDebugAndroidTest :demo:connectedReleaseAndroidTest
 python3 - <<'PY'
 from pathlib import Path
 import xml.etree.ElementTree as ET
