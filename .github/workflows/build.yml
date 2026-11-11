@@ -47,16 +47,9 @@ jobs:
           persist-credentials: false
       - name: Read pinned toolchains
         id: versions
-        run: |
-          python3 - <<'PY'
-          import os, tomllib
-          with open('gradle/libs.versions.toml', 'rb') as source:
-              versions = tomllib.load(source)['versions']
-          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
-              for key in ('buildJdk', 'buildTools', 'commandLineToolsBuild', 'ndk'):
-                  print(f'{key}={versions[key]}', file=output)
-              print(f"platform=android-{versions['compileSdk']}.{versions['compileSdkMinor']}", file=output)
-          PY
+        run: >-
+          sed -nE 's/^(buildJdk|buildTools|commandLineToolsBuild|ndk|compileSdk|compileSdkMinor) = "(.+)"$/\1=\2/p'
+          gradle/libs.versions.toml >> "$GITHUB_OUTPUT"
       - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
         with:
           distribution: temurin
@@ -74,7 +67,7 @@ jobs:
           log-accepted-android-sdk-licenses: false
       - name: Install Android toolchains
         env:
-          PLATFORM: ${{ steps.versions.outputs.platform }}
+          PLATFORM: android-${{ steps.versions.outputs.compileSdk }}.${{ steps.versions.outputs.compileSdkMinor }}
           BUILD_TOOLS: ${{ steps.versions.outputs.buildTools }}
           NDK: ${{ steps.versions.outputs.ndk }}
           COMMAND_LINE_TOOLS: ${{ steps.versions.outputs.commandLineToolsBuild }}
