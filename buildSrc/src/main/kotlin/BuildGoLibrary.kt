@@ -76,8 +76,6 @@ abstract class BuildGoLibrary @Inject constructor(
         if (!compiler.isFile) {
             throw GradleException("Install the NDK with sdkmanager 'ndk;${ndkVersion.get()}', then rerun ./gradlew build")
         }
-        val output = outputDirectory.get().asFile.resolve(abi.get())
-        output.mkdirs()
         // Patch an isolated copy of the pinned source, without changing the module cache.
         // See the distributed TAILSCALE-MODIFICATIONS notice for the upstream diff.
         val module = JsonSlurper().parseText(go(source, "mod", "download", "-json", "tailscale.com")) as Map<*, *>
@@ -121,6 +119,6 @@ abstract class BuildGoLibrary @Inject constructor(
             tool = go(workspace, "tool", "-n", "staticcheck").trim())
         go(workspace, "build", *flags, "-buildmode=c-shared",
             "-ldflags=-s -buildid=", // The NDK aligns to 16 KiB; VerifyNativeAar checks it.
-            "-o", output.resolve("libklethron_tsnet.so").absolutePath, ".", env = target)
+            "-o", outputDirectory.file("${abi.get()}/libklethron_tsnet.so").get().asFile.absolutePath, ".", env = target)
     }
 }
