@@ -9,7 +9,6 @@ import (
 	"maps"
 	"net"
 	"net/http"
-	"net/http/httptest"
 	"net/netip"
 	"os"
 	"slices"
@@ -47,11 +46,7 @@ func startControl(interactive string) string {
 	if loginProbe.control != nil {
 		return ""
 	}
-	derpMap, stopDERP, err := startLoopbackDERP()
-	if err != nil {
-		return ""
-	}
-	control := &testcontrol.Server{DERPMap: derpMap, RequireAuth: interactive == "true"}
+	control := &testcontrol.Server{RequireAuth: interactive == "true"}
 	if !control.RequireAuth {
 		control.DNSConfig = &tailcfg.DNSConfig{Proxied: true}
 		control.MagicDNSDomain = "tail-scale.ts.net" // As in upstream's tsnet tests.
@@ -63,14 +58,11 @@ func startControl(interactive string) string {
 		}
 		return 0, "", ""
 	})
-	control.HTTPTestServer = httptest.NewUnstartedServer(control)
-	control.HTTPTestServer.Start()
-	loginProbe.control = control
-	loginProbe.stop = func() {
-		control.HTTPTestServer.CloseClientConnections()
-		control.HTTPTestServer.Close()
-		stopDERP()
+	stop, err := startLoopbackControl(control)
+	if err != nil {
+		return ""
 	}
+	loginProbe.control, loginProbe.stop = control, stop
 	return control.HTTPTestServer.URL
 }
 

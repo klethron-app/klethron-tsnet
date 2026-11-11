@@ -85,15 +85,12 @@ type loopbackTailnet struct {
 // startLoopbackTailnet returns a fixed diagnostic on failure. Close the result in either case.
 func startLoopbackTailnet(ctx context.Context, dir string) (*loopbackTailnet, string) {
 	t := new(loopbackTailnet)
-	derpMap, stopDERP, err := startLoopbackDERP()
+	control := new(testcontrol.Server)
+	stopControl, err := startLoopbackControl(control)
 	if err != nil {
-		return t, "loopback derp failed"
+		return t, "loopback control failed"
 	}
-	t.closers = append(t.closers, stopDERP)
-	control := &testcontrol.Server{DERPMap: derpMap}
-	control.HTTPTestServer = httptest.NewUnstartedServer(control)
-	control.HTTPTestServer.Start()
-	t.closers = append(t.closers, control.HTTPTestServer.Close)
+	t.closers = append(t.closers, stopControl)
 
 	var problem string
 	if t.listener, t.listenerIP, problem = t.startNode(ctx, dir, control.HTTPTestServer.URL, "klethron-listener"); problem != "" {
@@ -215,25 +212,20 @@ func (t *loopbackTailnet) exchange(ctx context.Context) string {
 	return ""
 }
 
-// startLoopbackDERP serves one DERP region and STUN on 127.0.0.1 with a self-signed certificate.
-// InsecureForTests makes clients skip verification of that certificate: this is not a TLS proof.
-func startLoopbackDERP() (*tailcfg.DERPMap, func(), error) {
+// startLoopbackControl serves control on 127.0.0.1 with one DERP region and STUN, using a
+// self-signed certificate. InsecureForTests makes clients skip verification of that certificate:
+// this is not a TLS proof.
+func startLoopbackControl(control *testcontrol.Server) (stop func(), err error) {
 	stunConn, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	go serveSTUN(stunConn)
 	relay := derpserver.New(key.NewNode(), logger.Discard)
-	server := httptest.NewUnstartedServer(derpserver.Handler(relay))
+	derp := httptest.NewUnstartedServer(derpserver.Handler(relay))
 	// DERP upgrades HTTP/1.1 connections.
-	server.Config.TLSNextProto = map[string]func(*http.Server, *tls.Conn, http.Handler){}
-	server.StartTLS()
-	stop := func() {
-		_ = stunConn.Close()
-		server.CloseClientConnections()
-		server.Close()
-		_ = relay.Close()
-	}
+	derp.Config.TLSNextProto = map[string]func(*http.Server, *tls.Conn, http.Handler){}
+	derp.StartTLS()
 	node := &tailcfg.DERPNode{
 		Name:             "1",
 		RegionID:         1,
@@ -241,13 +233,23 @@ func startLoopbackDERP() (*tailcfg.DERPMap, func(), error) {
 		IPv4:             "127.0.0.1",
 		IPv6:             "none",
 		STUNPort:         stunConn.LocalAddr().(*net.UDPAddr).Port,
-		DERPPort:         server.Listener.Addr().(*net.TCPAddr).Port,
+		DERPPort:         derp.Listener.Addr().(*net.TCPAddr).Port,
 		InsecureForTests: true,
 		STUNTestIP:       "127.0.0.1",
 	}
-	return &tailcfg.DERPMap{Regions: map[tailcfg.DERPRegionID]*tailcfg.DERPRegion{
+	control.DERPMap = &tailcfg.DERPMap{Regions: map[tailcfg.DERPRegionID]*tailcfg.DERPRegion{
 		1: {RegionID: 1, RegionCode: "loopback", RegionName: "Loopback", Nodes: []*tailcfg.DERPNode{node}},
-	}}, stop, nil
+	}}
+	control.HTTPTestServer = httptest.NewUnstartedServer(control)
+	control.HTTPTestServer.Start()
+	return func() {
+		control.HTTPTestServer.CloseClientConnections()
+		control.HTTPTestServer.Close()
+		derp.CloseClientConnections()
+		derp.Close()
+		_ = stunConn.Close()
+		_ = relay.Close()
+	}, nil
 }
 
 func serveSTUN(conn *net.UDPConn) {
