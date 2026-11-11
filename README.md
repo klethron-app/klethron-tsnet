@@ -11,11 +11,10 @@ process. Each node has its own identity; it needs neither the Tailscale app nor 
 Requires **Android 14 (API 34)** or later. The AAR includes native libraries for **arm64-v8a** and
 **x86_64**, with 16 KiB page support. Consumers need no Go compiler or NDK.
 
-**Under development.** Login, persistent identity, TCP dialing, logout and revocation have been tested
-locally and on a real tailnet; Wi-Fi/cellular switches locally, and on a real tailnet only with the
-Tailscale app's VPN active. Peer listing has been tested locally. Broader network and device coverage is still needed; see
-[known limitations](UPSTREAM.md#limits). See the
-[Javadoc](https://javadoc.io/doc/com.klethron/tsnet/latest/) for the full API.
+**Under development.** Tested locally and on a real tailnet: login, persistent identity, TCP dialing,
+logout, revocation and Wi-Fi/cellular switches (live only with the Tailscale app's VPN active). Peer
+listing is tested locally. See [known limitations](UPSTREAM.md#limits) and the
+[Javadoc](https://javadoc.io/doc/com.klethron/tsnet/latest/).
 
 ## Install
 
@@ -63,10 +62,10 @@ try (TailnetNode node = TailnetNode.start(context, directory, "my-device")) {
 }
 ```
 
-[`awaitStatus`][awaitStatus] waits for changes without polling. A login URL lets whoever opens it claim
-the node; pass it only to the user's browser. Wait for the URL to clear before closing, so the login is saved.
-Starting with the same directory then resumes that identity. The status also names this device, its
-tailnet and the signed-in user, which each login may change.
+[`awaitStatus`][awaitStatus] waits for changes without polling. Whoever opens a login URL can claim the
+node. Wait for the URL to clear before closing, so the login is saved; starting with the same directory
+then resumes that identity. The status also names this device, its tailnet and the signed-in user,
+which each login may change.
 
 [`NodeStatus.peers`][peers] lists the other devices this node can see, with their MagicDNS name, operating
 system, online state, addresses and [Tailscale SSH](https://tailscale.com/kb/1193/tailscale-ssh) host
