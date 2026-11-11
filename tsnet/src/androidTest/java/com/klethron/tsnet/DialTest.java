@@ -104,7 +104,7 @@ public final class DialTest {
                     InetAddresses.parseNumericAddress("100.101.0.1"), InetAddresses.parseNumericAddress("fd7a:115c:a1e0::101:1")),
                     List.of("ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl"));
             assertEquals(List.of(other, listed), LoginTest.await(node, s -> s.peers().size() > 1).peers());
-            assertEquals("true", Probe.call("setPeerOnline", true));
+            assertEquals("true", Probe.call("setPeerOnline"));
             NodeStatus.Peer online = new NodeStatus.Peer(PEER_NAME, "android", true, listed.addresses(), List.of());
             assertEquals(List.of(other, online), LoginTest.await(node, s -> !s.peers().contains(listed)).peers());
             // The other peer has no endpoints: connecting, not waiting to run, times out.
@@ -138,7 +138,7 @@ public final class DialTest {
             write(connection, "after".getBytes(StandardCharsets.US_ASCII));
             connection.close();
             // Closing the descriptor ends the peer's connection after delivering what was written.
-            assertEquals("5", Probe.call("awaitReceived", 10000));
+            assertEquals("5", Probe.call("awaitReceived"));
         }
     }
 
@@ -196,7 +196,7 @@ public final class DialTest {
                 written += Os.write(fd, pattern(written, chunk), 0, (int) Math.min(chunk.length, FLOOD - written));
             }
             connection.close();
-            assertEquals(FLOOD, Long.parseLong(Probe.call("awaitReceived", 30000)));
+            assertEquals(FLOOD, Long.parseLong(Probe.call("awaitReceived")));
         }
     }
 

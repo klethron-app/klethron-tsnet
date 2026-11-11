@@ -172,16 +172,15 @@ func releaseStalled(string) string {
 }
 
 // awaitReceived returns the count reported by the next greeting or stalled connection that the
-// dialer closed, or -2 if none closed within the timeout in milliseconds.
-func awaitReceived(timeoutMillis string) string {
+// dialer closed, or -2 if none closed within 30 seconds.
+func awaitReceived(string) string {
 	loginProbe.Lock()
 	reports := loginProbe.received
 	loginProbe.Unlock()
-	millis, _ := strconv.Atoi(timeoutMillis)
 	select {
 	case received := <-reports:
 		return strconv.FormatInt(received, 10)
-	case <-time.After(time.Duration(millis) * time.Millisecond):
+	case <-time.After(30 * time.Second):
 		return "-2"
 	}
 }
@@ -199,15 +198,15 @@ func withControl(probe func(control *testcontrol.Server, argument string) string
 	}
 }
 
-// setPeerOnline sends the other nodes a patch of the in-memory peer's online state, as control does
+// setPeerOnline sends the other nodes a patch marking the in-memory peer online, as control does
 // for presence changes, without storing it. It returns whether the peer is registered.
-func setPeerOnline(control *testcontrol.Server, online string) string {
+func setPeerOnline(control *testcontrol.Server, _ string) string {
 	nodes := control.AllNodes()
 	i := slices.IndexFunc(nodes, func(node *tailcfg.Node) bool { return node.Hostinfo.Hostname() == "klethron-peer" })
 	if i < 0 {
 		return "false"
 	}
-	patch := &tailcfg.MapResponse{PeersChangedPatch: []*tailcfg.PeerChange{{NodeID: nodes[i].ID, Online: new(online == "true")}}}
+	patch := &tailcfg.MapResponse{PeersChangedPatch: []*tailcfg.PeerChange{{NodeID: nodes[i].ID, Online: new(true)}}}
 	for _, node := range slices.Delete(nodes, i, i+1) {
 		control.AddRawMapResponse(node.Key, patch)
 	}
