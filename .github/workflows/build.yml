@@ -21,11 +21,10 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 2
           persist-credentials: false
       - name: Check whitespace and shell scripts
         run: |
-          git diff --check HEAD^ HEAD
+          git diff --check "$(git hash-object -t tree /dev/null)" HEAD
           shellcheck .github/*.sh
       - name: Validate Gradle wrapper
         uses: gradle/actions/wrapper-validation@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
