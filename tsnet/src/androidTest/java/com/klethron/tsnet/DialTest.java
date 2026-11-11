@@ -211,6 +211,8 @@ public final class DialTest {
             int controlPort = URI.create(controlUrl).getPort();
             assertThrows(NoRouteToHostException.class, () -> node.dial("127.0.0.1", controlPort, WAIT));
             assertThrows(NoRouteToHostException.class, () -> node.dial("100.64.0.99", 22, WAIT));
+            // Resolved by the device, as names outside the tailnet's DNS are.
+            assertThrows(NoRouteToHostException.class, () -> node.dial("localhost", controlPort, WAIT));
             assertThrows(UnknownHostException.class, () -> node.dial("no-such-peer.tail-scale.ts.net", 22, WAIT));
             assertThrows(ConnectException.class, () -> node.dial(peer, 7072, WAIT));
         }
