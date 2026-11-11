@@ -2,9 +2,7 @@ package com.klethron.tsnet;
 
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
 
-import android.Manifest;
 import android.content.Context;
-import android.content.pm.PackageManager;
 import android.net.ConnectivityManager;
 import android.net.LinkProperties;
 import android.net.Network;
@@ -109,17 +107,11 @@ public final class TailnetNode implements AutoCloseable {
         String directory = stateDirectory.getCanonicalPath();
         synchronized (NETWORK) {
             if (directories.isEmpty()) {
-                // Registering reports the current network at once. Without CHANGE_NETWORK_STATE, Android
-                // limits best-matching callbacks to foreground networks, and after Wi-Fi loss they never
-                // move to cellular, so follow the default network instead.
-                Context application = Objects.requireNonNullElse(context.getApplicationContext(), context);
-                connectivity = application.getSystemService(ConnectivityManager.class);
-                if (application.checkSelfPermission(Manifest.permission.CHANGE_NETWORK_STATE) == PackageManager.PERMISSION_GRANTED) {
-                    connectivity.registerBestMatchingNetworkCallback(PHYSICAL_NETWORK, NETWORK,
-                            new Handler(Looper.getMainLooper()));
-                } else {
-                    connectivity.registerDefaultNetworkCallback(NETWORK);
-                }
+                // Registering reports the current network at once.
+                connectivity = Objects.requireNonNullElse(context.getApplicationContext(), context)
+                        .getSystemService(ConnectivityManager.class);
+                connectivity.registerBestMatchingNetworkCallback(PHYSICAL_NETWORK, NETWORK,
+                        new Handler(Looper.getMainLooper()));
             }
             // Both nodes would save their own login state over the other's.
             if (!directories.add(directory)) {

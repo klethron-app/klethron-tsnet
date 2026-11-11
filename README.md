@@ -81,9 +81,8 @@ authorization again. The app decides how long to keep the node alive and whether
 ## Network
 
 Running nodes follow the device's best non-VPN network, so they reconnect after switching Wi-Fi or
-mobile networks, also while another VPN app, such as Tailscale's, is active. Without
-`CHANGE_NETWORK_STATE`, Android would not let them follow Wi-Fi to cellular; if you remove that
-permission, they follow the default network, which stays the VPN while one is active. Native TLS uses
+mobile networks, also while another VPN app, such as Tailscale's, is active. Do not remove
+`CHANGE_NETWORK_STATE`: without it, Android would not let them follow Wi-Fi to cellular. Native TLS uses
 Android's system CA store, excluding disabled roots; user-added CAs and the app's network security
 configuration do not apply.
 
