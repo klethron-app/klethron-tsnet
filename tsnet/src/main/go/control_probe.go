@@ -33,7 +33,11 @@ func probeControl(dir string) string {
 	// Resolution uses bionic via cgo.
 	usePlatformRoots()
 	dialer := &tls.Dialer{NetDialer: new(net.Dialer), Config: &tls.Config{ServerName: controlURL.Host}}
-	conn, err := dialer.DialContext(ctx, "tcp", net.JoinHostPort(controlURL.Host, "443"))
+	address := net.JoinHostPort(controlURL.Host, "443")
+	conn, err := dialer.DialContext(ctx, "tcp", address)
+	for ; err != nil && ctx.Err() == nil; conn, err = dialer.DialContext(ctx, "tcp", address) {
+		time.Sleep(time.Second) // A freshly booted emulator can lack DNS or a route at first.
+	}
 	if err != nil {
 		return "platform tls dial failed"
 	}
