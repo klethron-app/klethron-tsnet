@@ -87,6 +87,7 @@ androidComponents.onVariants { variant ->
         this.aar.set(aar)
         notices.set(layout.projectDirectory.dir("src/main/assets/klethron-tsnet/licenses"))
         if (debug) debugNotices.set(layout.projectDirectory.dir("src/debug/assets/klethron-tsnet/licenses"))
+        goSum.set(layout.projectDirectory.file("src/main/go/go.sum"))
         goVersion.set(libs.versions.go)
         ndkVersion.set(libs.versions.ndk)
         releaseTags.set(omittedFeatures)

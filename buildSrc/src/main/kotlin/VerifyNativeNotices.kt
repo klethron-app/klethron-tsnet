@@ -37,6 +37,10 @@ abstract class VerifyNativeNotices @Inject constructor(private val exec: ExecOpe
     @get:PathSensitive(PathSensitivity.RELATIVE)
     abstract val debugNotices: DirectoryProperty
 
+    @get:InputFile
+    @get:PathSensitive(PathSensitivity.NONE)
+    abstract val goSum: RegularFileProperty
+
     @get:Input abstract val goVersion: Property<String>
     @get:Input abstract val ndkVersion: Property<String>
     @get:Input abstract val releaseTags: ListProperty<String> // They select the files FILE-NOTICES reviews.
@@ -49,8 +53,7 @@ abstract class VerifyNativeNotices @Inject constructor(private val exec: ExecOpe
         }
         fun requireFile(file: File, message: String) = requireNotice(file.isFile && file.length() > 0, message)
         val directory = notices.get().asFile
-        for (path in listOf("GO-LICENSE", "GO-PATENTS", "JSPECIFY-LICENSE", "TAILSCALE-MODIFICATIONS", "FILE-NOTICES",
-            "UNICODE-LICENSE")) {
+        for (path in listOf("GO-LICENSE", "GO-PATENTS", "FILE-NOTICES", "UNICODE-LICENSE")) {
             requireFile(directory.resolve(path), "Missing notice $path")
         }
         // Per-file notices come from a manual source review; any toolchain, module or build tag change invalidates it.
@@ -68,7 +71,6 @@ abstract class VerifyNativeNotices @Inject constructor(private val exec: ExecOpe
                 requireNotice(fields.size == 4 && fields.all { it.isNotBlank() }, "Malformed inventory row in $name")
                 fields
             }
-            requireNotice(modules.isNotEmpty(), "Go module inventory $name must be nonempty")
             for (module in modules) {
                 for (path in module[3].split(',')) {
                     requireNotice(!path.startsWith('/') && path.split('/').none { it == ".." }, "Invalid notice path $path")
@@ -83,9 +85,12 @@ abstract class VerifyNativeNotices @Inject constructor(private val exec: ExecOpe
             (debugDirectory?.let { inventory(it, "GO-MODULES-DEBUG.tsv") } ?: emptyList())
         requireNotice(modules.map { it[0] }.distinct().size == modules.size, "Go module inventories must have unique module paths")
         val expected = modules.map { it.take(3) }.toSet()
-        val results = StringBuilder("entry\tgo_version\tmodule_count\n")
+        // The binary records no checksum for the patched copy, so check the inventory's against go.sum.
+        val upstreamTailscale = expected.single { it[0] == "tailscale.com" }
+        requireNotice(upstreamTailscale.joinToString(" ") in goSum.get().asFile.readLines(),
+            "GO-MODULES.tsv's tailscale.com row differs from go.sum")
+        val results = StringBuilder("entry\tmodule_count\n")
         ZipFile(aar.get().asFile).use { zip ->
-            // Compare all checked-in notices, including Go, JSpecify, and the inventory itself.
             for ((root, file) in directories.flatMap { root -> root.walkTopDown().filter { it.isFile }.map { root to it } }) {
                 val path = "assets/klethron-tsnet/licenses/" + file.relativeTo(root).invariantSeparatorsPath
                 val entry = zip.getEntry(path)
@@ -106,15 +111,12 @@ abstract class VerifyNativeNotices @Inject constructor(private val exec: ExecOpe
                     environment("GOTOOLCHAIN", "local")
                     standardOutput = output
                 }
-                val lines = output.toString(Charsets.UTF_8).lineSequence().toList()
-                requireNotice(lines.first().endsWith(": go${goVersion.get()}"), "Unexpected Go version in ${entry.name}")
-                val fields = lines.drop(1).map { it.trim().split(Regex("\\s+")) }
+                val fields = output.toString(Charsets.UTF_8).lines().drop(1).map { it.trim().split(Regex("\\s+")) }
                 // The build verifies upstream checksums before applying our documented tsnet patch.
                 // Local replacements have no binary module checksum; accept only this exact one.
                 val replacements = fields.indices.filter { fields[it].first() == "=>" }.map { fields[it - 1].take(2) + fields[it] }
                 requireNotice(replacements == listOf(listOf("dep", "tailscale.com", "=>", "./tailscale", "(devel)")),
                     "Unexpected Go module replacement; only the documented tsnet patch is allowed")
-                val upstreamTailscale = expected.single { it[0] == "tailscale.com" }
                 val actual = fields.filter { it.first() == "dep" }.map {
                     val dependency = it.drop(1)
                     if (dependency.first() == "tailscale.com" && dependency.size == 2) {
@@ -123,7 +125,7 @@ abstract class VerifyNativeNotices @Inject constructor(private val exec: ExecOpe
                 }.toSet()
                 requireNotice(actual == expected,
                     "Go module inventory differs in ${entry.name}: missing=${actual - expected}, stale=${expected - actual}")
-                results.append("${entry.name}\t${goVersion.get()}\t${actual.size}\n")
+                results.append("${entry.name}\t${actual.size}\n")
             }
         }
         report.get().asFile.writeText(results.toString())

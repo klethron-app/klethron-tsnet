@@ -6,30 +6,27 @@ Notices ship in the AAR under `assets/klethron-tsnet/licenses/`, from
 - Tailscale (BSD-3-Clause) at the commit [UPSTREAM.md](UPSTREAM.md) names: licence, patent notice and
   `TAILSCALE-MODIFICATIONS`, which documents the local patch.
 - Go's runtime licence and patent notice, also covering Tailscale's Go-derived `tempfork` sources.
-- JSpecify 1.0.1 (Apache-2.0): a transitive Maven dependency, not bundled; its
-  [licence](https://github.com/jspecify/jspecify/blob/v1.0.1/LICENSE) is included as `JSPECIFY-LICENSE`.
-- [`GO-MODULES.tsv`](tsnet/src/main/assets/klethron-tsnet/licenses/GO-MODULES.tsv): the 24 modules that
+- [`GO-MODULES.tsv`](tsnet/src/main/assets/klethron-tsnet/licenses/GO-MODULES.tsv): the modules that
   `go version -m` reports for both ABIs and variants, with version, checksum and notice paths.
   [`GO-MODULES-DEBUG.tsv`](tsnet/src/debug/assets/klethron-tsnet/licenses/GO-MODULES-DEBUG.tsv) adds the
-  five modules of the debug-only test control and DERP/STUN servers.
+  modules of the debug-only test control and DERP/STUN servers.
 - [`FILE-NOTICES`](tsnet/src/main/assets/klethron-tsnet/licenses/FILE-NOTICES): notices of individual
   files and linked C runtime objects that the module licences do not cover, and
   `UNICODE-LICENSE` for generated Unicode tables (see [Per-file review](#per-file-review)).
+
+No Java dependency is bundled: JSpecify's annotations reach consumers as a Maven dependency.
 
 Notices were copied verbatim from the checksum-verified module cache: each module's root licence and
 patent notice, plus the nested `internal/snapref` and `zstd/internal/xxhash` licences of the compression
 module, which are in the Android import graph.
 
-The patch is applied to an isolated copy through a temporary `tailscale.com => ./tailscale`
-replacement. The inventory's Tailscale checksum identifies the **unmodified upstream module**.
+The inventory's Tailscale checksum identifies the unmodified upstream module, which the build patches
+in an isolated copy (`TAILSCALE-MODIFICATIONS`).
 
-`./gradlew build` runs `verifyReleaseNativeNotices` and `verifyDebugNativeNotices`. They inspect each AAR's
-libraries and fail on missing or stale modules, version or checksum drift, any other replacement, a
-different Go version, or a packaged notice that differs from its checked-in source. They also fail unless
-`FILE-NOTICES` names the current Go and NDK versions and a SHA-256 of `GO-MODULES.tsv` with the release
-build tags, so any toolchain, module or omitted-feature change requires a new per-file review; the failure
-names the line to record after it. Reports are in
-`tsnet/build/reports/native/notices-{release,debug}.tsv`. Nothing is generated or downloaded.
+`./gradlew build` runs `verify{Release,Debug}NativeNotices`. They compare each AAR library's
+`go version -m` modules with the inventories and each packaged notice with its source, and require
+the `FILE-NOTICES` review line for the current Go, NDK, inventory and release tags; the failure names
+the line to record after a review. Reports are in `tsnet/build/reports/native/notices-{release,debug}.tsv`.
 
 ## Per-file review
 
@@ -68,7 +65,7 @@ SPDX, public-domain and "derived/adapted/copied from" text and for `Code generat
   `libc/arch-common/bionic` sources, BSD-2-Clause apart from Apache-2.0 `pthread_atfork.h`. The NDK does
   not record its bionic revision, so those headers were taken from bionic `main`, whose definitions match
   the objects' symbols.
-- **Debug-only code** is not distributed. Its five extra modules ship root notices only.
+- **Debug-only code** is not distributed. Its extra modules ship root notices only.
 
 To repeat the review after a native dependency change, list the files from the patched build copy and
 search them, then update `FILE-NOTICES`, including its review line:
@@ -87,7 +84,7 @@ for arch in arm64 amd64; do
 {{end}}' .
 done | sort -u > files.txt
 xargs grep -h -i -E 'copyright|spdx|public domain|licen[cs]e that|licen[cs]ed under|licenses/|based on work|special thanks|(derived|adapted|ported|copied|translated) from|translation of' \
-  < files.txt | sed -E 's/[0-9]{4}/YYYY/g' | sort | uniq -c | sort -n   # 149 lines; inspect the unusual ones
+  < files.txt | sed -E 's/[0-9]{4}/YYYY/g' | sort | uniq -c | sort -n   # inspect the unusual ones
 ```
 
 For the C runtime, rebuild one library with `-extldflags=-Wl,--trace` and
@@ -97,14 +94,11 @@ check that no new archive member or object appears.
 
 For an intentional native dependency change:
 
-1. Run `./gradlew build`: the `verify*NativeNotices` reports list missing and stale modules. Use the
+1. Run `./gradlew build`: a `verify*NativeNotices` failure lists missing and stale modules. Use the
    Android build tags and toolchains for `go list -deps -json`; a host import graph can differ.
 2. Run `go mod verify` in `tsnet/src/main/go`, locate each source with `go mod download -json module@version`,
    review its notices and nested directories, and copy notice bytes unedited. Update the inventory.
 3. Repeat the [per-file review](#per-file-review) and update `FILE-NOTICES`.
-4. Review the patch in `BuildGoLibrary.kt` against the new pin; update its source hash and
-   `TAILSCALE-MODIFICATIONS` together. Never just accept a new hash.
-5. Recheck Go notices when updating Go, the CRT notices when updating the NDK, and JSpecify's when
-   updating JSpecify.
+4. Recheck Go notices when updating Go, and the CRT notices when updating the NDK.
 
 This is an engineering review of what the binaries contain, not legal advice.

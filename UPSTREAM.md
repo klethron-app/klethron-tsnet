@@ -30,7 +30,7 @@ with Go 1.27.4. Entries are ordered by impact on this library; drop those upstre
   ([#19149](https://github.com/tailscale/tailscale/issues/19149); draft fix
   [PR #19150](https://github.com/tailscale/tailscale/pull/19150)). `controlclient.Auto` saves `Persist`
   only with a network map, so closing right after `LoginFinished` can lose the login. `node.publish`
-  clears the login URL only once a `SelfChange` brings a different node key.
+  clears the login URL only once the self node's key changes.
 - **The state directory is not locked.** Two servers on one directory save their state over each
   other's. `TailnetNode.start` refuses a directory that an open node in the process uses; separate
   processes are not guarded.
@@ -73,8 +73,7 @@ with Go 1.27.4. Entries are ordered by impact on this library; drop those upstre
 - **Another app's VPN.** Apps cannot see a VPN's underlying networks, so nodes follow the best non-VPN
   network. Split tunnels, such as the Tailscale app's, leave node traffic on that network (tested
   live). With a full tunnel, such as an exit node, traffic uses the VPN while nodes follow the network
-  below it; this is untested with live traffic. If an app removes `CHANGE_NETWORK_STATE`, nodes follow
-  the default network, which a VPN hides.
+  below it; this is untested with live traffic.
 - Live-tailnet coverage is still needed for network changes without another VPN, 16 KiB devices,
   restrictive NATs, subnet routes, IPv6 peers, throughput, prolonged outages, scheduled key expiry,
   revocation while stopped and Play split delivery.
@@ -85,8 +84,10 @@ with Go 1.27.4. Entries are ordered by impact on this library; drop those upstre
 ## Updating upstream
 
 1. Pin a full `tailscale/tailscale` main SHA in `go.mod`/`go.sum`, `TailnetNodeTest`'s version
-   assertion, this file and `TAILSCALE-MODIFICATIONS`; update the patch hash and recheck every entry.
-2. Re-audit environment reads, filesystem writes, `os/exec` reachability and state file permissions,
-   and check that existing state still loads.
+   assertion, this file and `TAILSCALE-MODIFICATIONS`; review the patch and update its hash (never just
+   accept a new one), and recheck every entry.
+2. Re-audit environment reads, filesystem writes, `os/exec` reachability, state file permissions and
+   `tailcfg.PeerChange` fields (`watchStatus` refreshes peers only for online changes), and check that
+   existing state still loads.
 3. Update the notice inventories (THIRD-PARTY-NOTICES.md), rebuild both ABIs and run the device tests.
 4. When the omitted feature set changes, revalidate it on a real tailnet.
