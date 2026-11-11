@@ -11,10 +11,6 @@ import android.content.Intent;
 import android.content.ServiceConnection;
 import android.os.IBinder;
 import android.os.Parcel;
-import android.os.ParcelFileDescriptor;
-import androidx.test.platform.app.InstrumentationRegistry;
-import java.io.FileInputStream;
-import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
@@ -53,7 +49,7 @@ public final class CrashTest {
     }
 
     private static ApplicationExitInfo crash(int mode) throws Exception {
-        Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        Context context = LoginTest.CONTEXT;
         CompletableFuture<IBinder> service = new CompletableFuture<>();
         ServiceConnection connection = new ServiceConnection() {
             @Override
@@ -95,11 +91,7 @@ public final class CrashTest {
 
     /** The crashed process's lines with Go's logcat tag. */
     private static List<String> goLog(ApplicationExitInfo exit) throws Exception {
-        ParcelFileDescriptor output = InstrumentationRegistry.getInstrumentation().getUiAutomation()
-                .executeShellCommand("logcat -d -b main -v raw -s Go --pid=" + exit.getPid());
-        try (FileInputStream in = new ParcelFileDescriptor.AutoCloseInputStream(output)) {
-            String log = new String(in.readAllBytes(), StandardCharsets.UTF_8);
-            return log.lines().filter(line -> !line.startsWith("--------- beginning of ")).toList();
-        }
+        return NetworkChangeTest.shell("logcat -d -b main -v raw -s Go --pid=" + exit.getPid()).lines()
+                .filter(line -> !line.startsWith("--------- beginning of ")).toList();
     }
 }

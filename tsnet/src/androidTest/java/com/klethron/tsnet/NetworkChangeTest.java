@@ -4,7 +4,6 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
-import android.app.UiAutomation;
 import android.net.ConnectivityManager;
 import android.net.LinkProperties;
 import android.net.Network;
@@ -13,7 +12,9 @@ import android.os.Handler;
 import android.os.Looper;
 import android.os.ParcelFileDescriptor;
 import androidx.test.platform.app.InstrumentationRegistry;
-import java.io.FileInputStream;
+import com.google.errorprone.annotations.CanIgnoreReturnValue;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
@@ -86,11 +87,12 @@ public final class NetworkChangeTest {
         return name;
     }
 
-    private static void shell(String command) throws Exception {
-        UiAutomation automation = InstrumentationRegistry.getInstrumentation().getUiAutomation();
-        try (ParcelFileDescriptor output = automation.executeShellCommand(command);
-                var in = new FileInputStream(output.getFileDescriptor())) {
-            in.readAllBytes(); // Wait for completion.
+    /// Returns the output of `command`, run as the shell user, once it completes.
+    @CanIgnoreReturnValue
+    static String shell(String command) throws IOException {
+        ParcelFileDescriptor output = InstrumentationRegistry.getInstrumentation().getUiAutomation().executeShellCommand(command);
+        try (var in = new ParcelFileDescriptor.AutoCloseInputStream(output)) {
+            return new String(in.readAllBytes(), StandardCharsets.UTF_8);
         }
     }
 }
