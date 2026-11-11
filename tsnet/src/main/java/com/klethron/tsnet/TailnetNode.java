@@ -24,6 +24,9 @@ import java.nio.ByteBuffer;
 import java.nio.channels.ClosedChannelException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.HashSet;
+import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.jspecify.annotations.Nullable;
 
@@ -64,14 +67,17 @@ public final class TailnetNode implements AutoCloseable {
     static final NetworkRequest PHYSICAL_NETWORK = new NetworkRequest.Builder()
             .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
             .addCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN).build();
-    private static int running; // Guarded by NETWORK, as is connectivity.
+    /// Canonical state directories of running nodes. Guarded by NETWORK, as is connectivity.
+    private static final Set<String> directories = new HashSet<>();
     private static @Nullable ConnectivityManager connectivity;
 
     private final long handle;
+    private final String directory;
     private final AtomicBoolean closed = new AtomicBoolean();
 
-    private TailnetNode(long handle) {
+    private TailnetNode(long handle, String directory) {
         this.handle = handle;
+        this.directory = directory;
     }
 
     /// Starts a node that connects to Tailscale, restoring a saved login or requesting browser
@@ -80,10 +86,12 @@ public final class TailnetNode implements AutoCloseable {
     ///
     /// The directory stores this node's private keys. Give each node its own directory under
     /// [Context#getNoBackupFilesDir()]; it is created if missing. Starting again with it after
-    /// [#close] restores the same identity. Never back up or share its contents.
+    /// [#close] restores the same identity. Never back up or share its contents, and never use it
+    /// from two processes at once.
     ///
     /// @param hostname the requested device name; Tailscale may adjust it
     /// @throws IllegalArgumentException if the directory is relative or the hostname is empty or contains NUL
+    /// @throws IllegalStateException if an unclosed node in this process uses the directory
     /// @throws IOException if initialization fails
     @WorkerThread
     public static TailnetNode start(Context context, File stateDirectory, String hostname) throws IOException {
@@ -96,12 +104,13 @@ public final class TailnetNode implements AutoCloseable {
             throw new IllegalArgumentException("State directory must be absolute and hostname non-empty");
         }
         String config = stateDirectory.getPath() + '\0' + hostname + '\0' + controlUrl;
+        String directory = stateDirectory.getCanonicalPath();
         synchronized (NETWORK) {
-            if (running == 0) {
+            if (directories.isEmpty()) {
                 // Registering reports the current network at once. Without CHANGE_NETWORK_STATE, Android
                 // limits best-matching callbacks to foreground networks, and after Wi-Fi loss they never
                 // move to cellular, so follow the default network instead.
-                Context application = context.getApplicationContext();
+                Context application = Objects.requireNonNullElse(context.getApplicationContext(), context);
                 connectivity = application.getSystemService(ConnectivityManager.class);
                 String permission = Manifest.permission.CHANGE_NETWORK_STATE;
                 if (application.checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED) {
@@ -111,21 +120,26 @@ public final class TailnetNode implements AutoCloseable {
                     connectivity.registerDefaultNetworkCallback(NETWORK);
                 }
             }
-            running++;
+            // Both nodes would save their own login state over the other's.
+            if (!directories.add(directory)) {
+                throw new IllegalStateException("Another node in this process uses " + stateDirectory);
+            }
         }
         long handle = -1;
         try {
             handle = nativeStart(config.getBytes(StandardCharsets.UTF_8));
         } finally {
-            if (handle < 0) stopFollowingNetwork();
+            if (handle < 0) release(directory);
         }
         check(handle);
-        return new TailnetNode(handle);
+        return new TailnetNode(handle, directory);
     }
 
-    private static void stopFollowingNetwork() {
+    /// Frees the directory, and stops following the network once no node runs.
+    private static void release(String directory) {
         synchronized (NETWORK) {
-            if (--running == 0 && connectivity != null) {
+            directories.remove(directory);
+            if (directories.isEmpty() && connectivity != null) {
                 connectivity.unregisterNetworkCallback(NETWORK);
                 nativeSetDefaultNetwork(new byte[0], 0); // Unknown until the next start reports it.
             }
@@ -220,7 +234,7 @@ public final class TailnetNode implements AutoCloseable {
     @Override
     public void close() {
         nativeClose(handle);
-        if (!closed.getAndSet(true)) stopFollowingNetwork();
+        if (!closed.getAndSet(true)) release(directory);
     }
 
     /// Maps node.go's negative results to exceptions.

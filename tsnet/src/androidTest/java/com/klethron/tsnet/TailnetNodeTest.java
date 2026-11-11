@@ -16,13 +16,15 @@ public final class TailnetNodeTest {
     }
 
     @Test
-    public void statusBelongsToItsNode() throws Exception {
+    public void nodesKeepTheirStatusAndDirectory() throws Exception {
         Path directory = LoginTest.temporaryDirectory("status-");
         String control = "http://127.0.0.1:1"; // Unreachable: the nodes stay local.
         try (TailnetNode first = TailnetNode.start(LoginTest.CONTEXT, directory.resolve("first").toFile(), "first", control);
                 TailnetNode second = TailnetNode.start(LoginTest.CONTEXT, directory.resolve("second").toFile(), "second", control)) {
             NodeStatus status = first.awaitStatus(null, Duration.ZERO);
             assertThrows(IllegalArgumentException.class, () -> second.awaitStatus(status, Duration.ZERO));
+            assertThrows(IllegalStateException.class, () ->
+                    TailnetNode.start(LoginTest.CONTEXT, directory.resolve("second/../first").toFile(), "third", control));
         } finally {
             LoginTest.deleteDirectory(directory);
         }
