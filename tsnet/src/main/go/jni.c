@@ -1,5 +1,4 @@
 #include <jni.h>
-#include <stdint.h>
 #include <stdlib.h>
 #include "_cgo_export.h"
 
@@ -45,7 +44,7 @@ Java_com_klethron_tsnet_TailnetNode_nativeSetDefaultNetwork(JNIEnv *env, jclass 
     jsize length = (*env)->GetArrayLength(env, name);
     if (length >= (jsize) sizeof bytes) return;
     (*env)->GetByteArrayRegion(env, name, 0, length, (jbyte *) bytes);
-    klethron_set_default_network(bytes, length, (uint32_t) gateway);
+    klethron_set_default_network(bytes, length, gateway);
 }
 
 JNIEXPORT jint JNICALL

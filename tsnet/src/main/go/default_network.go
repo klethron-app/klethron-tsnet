@@ -1,8 +1,5 @@
 package main
 
-/*
-#include <stdint.h>
-*/
 import "C"
 
 import (
@@ -24,7 +21,7 @@ var (
 // upstream, so this updates every node.
 //
 //export klethron_set_default_network
-func klethron_set_default_network(name *C.char, length C.int, gateway C.uint32_t) {
+func klethron_set_default_network(name *C.char, length C.int, gateway C.int) {
 	gw := ""
 	if gateway != 0 {
 		gw = netip.AddrFrom4([4]byte{byte(gateway >> 24), byte(gateway >> 16), byte(gateway >> 8), byte(gateway)}).String()
