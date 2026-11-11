@@ -69,10 +69,9 @@ func newNode(server *tsnet.Server) *node {
 	return &node{server: server, ctx: ctx, cancel: cancel, access: access, endAccess: endAccess, changed: make(chan struct{})}
 }
 
-// start configures every connection-relevant field explicitly, so the host process environment
-// cannot redirect control. config is "directory\x00hostname\x00controlURL", which TailnetNode
-// validates; an empty control URL selects Tailscale's. State persists in a file store in the
-// caller's directory. It runs before the node is published, so no other call can race it.
+// start sets every connection-relevant field, so the host process environment cannot redirect
+// control. config is "directory\x00hostname\x00controlURL", which TailnetNode validates; an empty
+// control URL selects Tailscale's. It runs before the node is published, so no call can race it.
 func (n *node) start(config string) int {
 	directory, rest, _ := strings.Cut(config, "\x00")
 	hostname, controlURL, _ := strings.Cut(rest, "\x00")
@@ -102,13 +101,12 @@ func (n *node) close() {
 	_ = n.server.Close()
 }
 
-// watchStatus follows the IPN bus until the node closes. A new watch starts with the current
-// state and self node, so re-watching after an unexpected disconnect (such as falling behind)
-// loses nothing needed. Changes that can alter peer lines or this node's names signal refreshStatus
-// instead of reading the status here, so slow reads in large tailnets cannot make the watch fall
-// behind. Each new network map brings a SelfChange, also when only tailnet or user names change.
-// Patches, unlike the full nodes upstream otherwise sends for them, are small; those without an
-// online change are skipped.
+// watchStatus follows the IPN bus until the node closes. Each watch starts with the current state
+// and self node, so re-watching after a disconnect, as when falling behind, loses nothing needed.
+// Changes that can alter peer lines or this node's names signal refreshStatus rather than read the
+// status here, where slow reads in large tailnets could make the watch fall behind. Each new network
+// map brings a SelfChange, also when only tailnet or user names change. Peer patches let it skip
+// changes other than online status, which upstream otherwise sends as full nodes.
 func (n *node) watchStatus(refresh chan<- struct{}) {
 	for n.ctx.Err() == nil {
 		if watcher, err := n.client.WatchIPNBus(n.ctx, ipn.NotifyInitialState|ipn.NotifyInitialStatus|ipn.NotifyPeerPatches); err == nil {
@@ -243,10 +241,10 @@ func (n *node) publish(notify ipn.Notify, read *statusRead) {
 		status.loginURL = ""
 	}
 	n.selfKey, n.keyExpiry = self, expiry
-	// As upstream's state machine, which reports NeedsLogin for these reasons too.
+	// Upstream reports logout, key expiry and removal alike as NeedsLogin.
 	status.revocation = ""
 	if status.state == ipn.NeedsLogin {
-		// Set before upstream reports NeedsLogin for it; health notifications may arrive later.
+		// Upstream sets the warning before reporting NeedsLogin; health notifications may come later.
 		if _, removed := n.server.Sys().HealthTracker.Get().CurrentState().Warnings[tsconst.HealthWarnableNodeRemoved]; removed {
 			status.revocation = "NODE_REMOVED"
 		} else if !n.keyExpiry.IsZero() && n.keyExpiry.Before(time.Now()) {
@@ -357,9 +355,7 @@ func (n *node) failed(ctx context.Context, result int) int {
 
 // dial connects to host:port through the tailnet and returns one end of a Unix socket pair that
 // relays the connection, owned by the caller, or a dial result. It waits up to timeout for the
-// node to run. Unlike upstream Server.Dial, it never connects through the device's own network,
-// and the dns_lookup.go patch keeps names from reaching the device's resolver. TailnetNode
-// validates the host and port.
+// node to run. TailnetNode validates the host and port.
 func (n *node) dial(host string, port uint16, timeout time.Duration) int {
 	ctx, done, result := n.whenOpen(timeout)
 	if result != 0 {
@@ -373,14 +369,15 @@ func (n *node) dial(host string, port uint16, timeout time.Duration) int {
 	n.mu.Lock()
 	access := n.access // Ends if the node stops running from now on, also while dialing.
 	n.mu.Unlock()
-	// Resolves peer names from the network map, other names only through the tailnet's DNS.
+	// Peer names resolve from the network map, others only through the tailnet's DNS: the
+	// dns_lookup.go patch keeps them from the device's resolver.
 	dialer := n.server.Sys().Dialer.Get()
 	target, _, err := dialer.UserDialPlan(ctx, "tcp", net.JoinHostPort(host, strconv.Itoa(int(port))))
 	if err != nil {
 		return n.failed(ctx, resultUnknownHost)
 	}
-	// Netstack reaches exactly the peers and subnet routes in the network map. Upstream would dial
-	// other addresses, including Tailscale IPs of unknown nodes, through the device's network.
+	// Netstack reaches exactly the network map's peers and subnet routes. Upstream Server.Dial would
+	// dial other addresses, including unknown nodes' Tailscale IPs, through the device's network.
 	if !dialer.UseNetstackForIP(target.Addr()) {
 		return n.failed(ctx, resultNoRoute)
 	}
