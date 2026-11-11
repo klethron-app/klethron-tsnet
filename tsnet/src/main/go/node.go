@@ -51,7 +51,13 @@ type nodeStatus struct {
 	loginURL   string
 	addresses  string // This node's, as addressList.
 	err        string // The latest backend error since the node last ran, as printable ASCII.
-	peers      string // The record's peer lines, each preceded by a newline.
+	statusRead
+}
+
+// statusRead holds what refreshStatus reads from the latest network map, as printable ASCII.
+type statusRead struct {
+	dnsName, tailnet, loginName string // This node's; the DNS name without a trailing dot.
+	peers                       string // The record's peer lines, each preceded by a newline.
 }
 
 func newNode(server *tsnet.Server) *node {
@@ -81,7 +87,7 @@ func (n *node) start(config string) int {
 	}
 	refresh := make(chan struct{}, 1)
 	n.watchers.Go(func() { n.watchStatus(refresh) })
-	n.watchers.Go(func() { n.refreshPeers(refresh) })
+	n.watchers.Go(func() { n.refreshStatus(refresh) })
 	context.AfterFunc(n.ctx, watchDefaultNetwork(n.server))
 	return 0
 }
@@ -97,8 +103,9 @@ func (n *node) close() {
 
 // watchStatus follows the IPN bus until the node closes. A new watch starts with the current
 // state and self node, so re-watching after an unexpected disconnect (such as falling behind)
-// loses nothing needed. Peer changes that can alter peer lines signal refreshPeers instead of
-// reading the status here, so slow reads in large tailnets cannot make the watch fall behind.
+// loses nothing needed. Changes that can alter peer lines or this node's names signal refreshStatus
+// instead of reading the status here, so slow reads in large tailnets cannot make the watch fall
+// behind. Each new network map brings a SelfChange, also when only tailnet or user names change.
 // Patches, unlike the full nodes upstream otherwise sends for them, are small; those without an
 // online change are skipped.
 func (n *node) watchStatus(refresh chan<- struct{}) {
@@ -110,7 +117,8 @@ func (n *node) watchStatus(refresh chan<- struct{}) {
 					break
 				}
 				n.publish(notify, nil)
-				if notify.InitialStatus != nil || notify.State != nil || len(notify.PeersChanged)+len(notify.PeersRemoved) > 0 ||
+				if notify.InitialStatus != nil || notify.State != nil || notify.SelfChange != nil ||
+					len(notify.PeersChanged)+len(notify.PeersRemoved) > 0 ||
 					slices.ContainsFunc(notify.PeerChangedPatch, func(c *tailcfg.PeerChange) bool { return c.Online != nil }) {
 					select {
 					case refresh <- struct{}{}:
@@ -127,10 +135,10 @@ func (n *node) watchStatus(refresh chan<- struct{}) {
 	}
 }
 
-// refreshPeers publishes the peers after each signal on refresh until the node closes. Upstream
-// builds the status from its network map, which a logout clears, so rather than apply the
-// notified changes, it reads the status.
-func (n *node) refreshPeers(refresh <-chan struct{}) {
+// refreshStatus publishes this node's names and peers after each signal on refresh until the node
+// closes. Upstream builds the status from its network map, which a logout clears, so rather than
+// apply the notified changes, it reads the status.
+func (n *node) refreshStatus(refresh <-chan struct{}) {
 	for {
 		select {
 		case <-n.ctx.Done():
@@ -138,13 +146,13 @@ func (n *node) refreshPeers(refresh <-chan struct{}) {
 		case <-refresh:
 		}
 		if status, err := n.client.Status(n.ctx); err == nil {
-			n.publish(ipn.Notify{}, peerLines(status))
+			n.publish(ipn.Notify{}, readStatus(status))
 		}
 	}
 }
 
-// peerLines returns the record's peer lines.
-func peerLines(status *ipnstate.Status) *string {
+// readStatus returns this node's names and the record's peer lines.
+func readStatus(status *ipnstate.Status) *statusRead {
 	var lines []string
 	for _, peer := range status.Peer {
 		if line := peerLine(peer); line != "" {
@@ -152,8 +160,15 @@ func peerLines(status *ipnstate.Status) *string {
 		}
 	}
 	slices.Sort(lines)
-	joined := strings.Join(lines, "")
-	return &joined
+	read := &statusRead{peers: strings.Join(lines, "")}
+	if self := status.Self; self != nil {
+		read.dnsName = printable(strings.TrimSuffix(self.DNSName, "."), 255)
+		read.loginName = printable(status.User[self.UserID].LoginName, 255)
+	}
+	if tailnet := status.CurrentTailnet; tailnet != nil {
+		read.tailnet = printable(tailnet.Name, 255)
+	}
+	return read
 }
 
 // peerLine returns "\nname\tOS\tonline\taddresses\tSSH host keys", with comma-separated lists and
@@ -175,15 +190,15 @@ func peerLine(peer *ipnstate.PeerStatus) string {
 		addressList(peer.TailscaleIPs...), strings.Join(keys, ",")}, "\t")
 }
 
-// publish applies notify and, unless nil, the peer lines. Both status goroutines publish, so it reads
+// publish applies notify and, unless nil, a status read. Both status goroutines publish, so it reads
 // the backend under the lock: otherwise an earlier read could overwrite a later one.
-func (n *node) publish(notify ipn.Notify, peers *string) {
+func (n *node) publish(notify ipn.Notify, read *statusRead) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	status := n.status
 	status.addresses = addressList(n.server.TailscaleIPs())
-	if peers != nil {
-		status.peers = *peers
+	if read != nil {
+		status.statusRead = *read
 	}
 	if notify.State != nil {
 		status.state = *notify.State
@@ -466,14 +481,16 @@ var javaStates = map[ipn.State]string{
 	ipn.Running:          "RUNNING",
 }
 
-// record is "version\nSTATE\nREVOCATION\nloginURL\naddresses\nerror", with comma-separated address
-// literals, followed by the peer lines. All printable ASCII apart from the separators.
+// record is "version\nSTATE\nREVOCATION\nloginURL\naddresses\nerror\ndnsName\ntailnet\nloginName",
+// with comma-separated address literals, followed by the peer lines. All printable ASCII apart from
+// the separators.
 func (s nodeStatus) record(version uint64) string {
 	state, ok := javaStates[s.state]
 	if !ok {
 		state = "NO_STATE"
 	}
-	return fmt.Sprintf("%d\n%s\n%s\n%s\n%s\n%s%s", version, state, s.revocation, s.loginURL, s.addresses, s.err, s.peers)
+	return fmt.Sprintf("%d\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s%s", version, state, s.revocation, s.loginURL, s.addresses,
+		s.err, s.dnsName, s.tailnet, s.loginName, s.peers)
 }
 
 // addressList returns the valid addresses, IPv4 first, comma-separated.

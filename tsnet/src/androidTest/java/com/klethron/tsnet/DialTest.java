@@ -89,8 +89,11 @@ public final class DialTest {
             assertEquals(InetAddresses.parseNumericAddress(peer), listed.addresses().get(0));
             assertEquals(2, listed.addresses().size());
             assertEquals(List.of(), listed.sshHostKeys());
+            // testcontrol's names; the peer registered first.
+            assertEquals(List.of("klethron-dialer.tail-scale.ts.net", "fake-control.example.net", "user-2@fake-control.example.net"),
+                    Arrays.asList(status.dnsName(), status.tailnet(), status.loginName()));
             assertTrue(status.toString(), status.toString().endsWith(", peers=1}"));
-            assertFalse(status.toString().contains("klethron-peer"));
+            assertFalse(status.toString().contains("tail-scale") || status.toString().contains("example.net"));
             write(connection, new byte[] {1});
             assertEquals(1, new FileInputStream(connection.getFileDescriptor()).read());
 
@@ -108,8 +111,9 @@ public final class DialTest {
             assertThrows(SocketTimeoutException.class, () -> node.dial("100.101.0.1", 22, Duration.ofSeconds(1)));
 
             node.logout(WAIT);
-            // The peers clear after the state changes.
-            LoginTest.await(node, s -> s.state() == NodeStatus.State.NEEDS_LOGIN && s.peers().isEmpty());
+            // The peers and names clear after the state changes.
+            status = LoginTest.await(node, s -> s.state() == NodeStatus.State.NEEDS_LOGIN && s.peers().isEmpty());
+            assertEquals(Arrays.asList(null, null, null), Arrays.asList(status.dnsName(), status.tailnet(), status.loginName()));
             // The peer is gone from this node's tailnet: nothing is echoed, and new dials wait for a login.
             write(connection, new byte[] {2});
             assertFalse(poll(connection.getFileDescriptor(), OsConstants.POLLIN, 2000));

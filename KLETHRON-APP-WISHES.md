@@ -2,10 +2,9 @@
 
 Klethron, an SSH terminal for Android, plans to ship this library in an on-demand Play feature module
 (`TAILSCALE-PLAN.md` in the Klethron repository). That plan was reviewed against 0.6.0. These changes
-would let Klethron integrate without workarounds. They are ordered by importance: the second explains
-saved hosts after an account change, the third affects every open session, and the last two are
-packaging details. The first is declined and says what Klethron can do instead. Delete each entry once it
-ships.
+would let Klethron integrate without workarounds. They are ordered by importance: the second affects
+every open session, and the last two are packaging details. The first is declined and says what Klethron
+can do instead. Delete each entry once it ships.
 
 ## 1. A stable ID for each peer: declined
 
@@ -27,29 +26,7 @@ name and require the same keys, with an explicit prompt to accept changed ones.
   even when the user wants the name to keep working.
 - What remains, following a device through a rename, is not worth more API.
 
-## 2. This node's account and tailnet
-
-**Wanted:** this node's MagicDNS name, the tailnet name and the signed-in user's login name in
-`NodeStatus`. The `ipnstate.Status` that `refreshPeers` reads already carries them (`Self.DNSName`,
-`CurrentTailnet.Name`, `User[Self.UserID].LoginName`). A self change (`notify.SelfChange`) would also need
-to trigger a refresh. The login name is personal, so `toString()` should omit it, as it omits login URLs.
-Stable node or tailnet IDs are not needed: saved hosts are names, so the name's suffix decides whether
-they still resolve, and an ID would only follow renames (see 1).
-
-**Why:**
-
-- Saved hosts belong to an account and tailnet. Klethron can purge or mark them when it logs out or
-  removes the node's state itself, but it cannot tell which account a later sign-in chose: after key
-  expiry, `NODE_REMOVED` or a logout, the browser page lets the user pick any account. Names saved in
-  another tailnet then stop resolving without explanation. With this node's MagicDNS suffix and login
-  name, Klethron can say why ("this host belongs to tailnet X; you are signed in to Y") or offer to remove
-  them. The login name also reveals a different person signing in to the same tailnet, as on a shared
-  phone. Guessing the tailnet from peer names fails when there are no peers.
-- Setup should show who is signed in and the device's actual name, since `start` says Tailscale may
-  adjust the requested hostname. The user needs both to find the device in the admin console to approve,
-  rename or remove it.
-
-## 3. End open connections when tailnet access ends
+## 2. End open connections when tailnet access ends
 
 **Wanted:** when a node leaves `RUNNING` for `NEEDS_LOGIN` (logout, key expiry or removal), end every
 connection it dialed, as `close()` already does, so callers read end of stream. Keep connections open
@@ -68,7 +45,7 @@ removal are untested here and probably behave like logout.
 **Sketch:** derive each relay's context from a per-login context, which `publish` cancels on the
 transition to `NeedsLogin`.
 
-## 4. Do not export JSpecify at runtime
+## 3. Do not export JSpecify at runtime
 
 **Wanted:** declare `org.jspecify:jspecify` as `compileOnly` instead of `api`, like `androidx.annotation`
 and `error_prone_annotations`.
@@ -81,7 +58,7 @@ annotations by name in class files. Before switching, check with the minified de
 that Kotlin still sees nullability and that `javac -Werror` stays quiet without the jar. Then note in the
 README that consumers who want nullness checking add JSpecify `compileOnly` themselves.
 
-## 5. Load the native library after an on-demand install (only if needed)
+## 4. Load the native library after an on-demand install (only if needed)
 
 **Wanted:** only if Klethron's staged-install test shows the need: a way to use `TailnetNode` when
 `System.loadLibrary("klethron_tsnet")` cannot find a library the caller has already loaded. For example,

@@ -69,6 +69,11 @@ public final class LoginTest {
             addresses = status.addresses();
             assertTrue(addresses.get(0) instanceof Inet4Address);
             assertEquals(100, Byte.toUnsignedInt(((Inet4Address) addresses.get(0)).getAddress()[0]));
+            // Without MagicDNS, testcontrol names the device as requested. A rename is a status
+            // change, also without peers.
+            assertEquals("klethron-login-test", status.dnsName());
+            Probe.call("rename", "klethron-renamed");
+            await(node, s -> "klethron-renamed".equals(s.dnsName()));
         }
         assertOnlyStateFile();
 
@@ -95,7 +100,8 @@ public final class LoginTest {
 
             assertThrows(SocketTimeoutException.class, () -> node.logout(Duration.ZERO));
             node.logout(WAIT);
-            status = await(node, s -> s.state() == NodeStatus.State.NEEDS_LOGIN);
+            // The names clear after the state changes.
+            status = await(node, s -> s.state() == NodeStatus.State.NEEDS_LOGIN && s.dnsName() == null);
             assertNull(status.loginUrl());
             assertNull("A logout is not a revocation", status.revocation());
             assertTrue(status.addresses().isEmpty());
@@ -185,6 +191,7 @@ public final class LoginTest {
             assertEquals(NodeStatus.Revocation.KEY_EXPIRED, status.revocation());
             assertNull(status.loginUrl());
             assertTrue(status.toString().contains("KEY_EXPIRED"));
+            assertEquals("klethron-expiry-test", status.dnsName());
             // No login URL arrives by itself, and the tailnet is unreachable.
             status = node.awaitStatus(status, Duration.ofSeconds(2));
             assertEquals(NodeStatus.State.NEEDS_LOGIN, status.state());

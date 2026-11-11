@@ -284,6 +284,15 @@ func expireNodes(control *testcontrol.Server, _ string) string {
 	return strconv.Itoa(len(devices))
 }
 
+// renameNodes renames all registered nodes to name, as an administrator renames a device.
+func renameNodes(control *testcontrol.Server, name string) string {
+	for _, node := range control.AllNodes() {
+		node.Name = name
+		control.UpdateNode(node)
+	}
+	return ""
+}
+
 // removeNodes makes control answer map requests as for nodes deleted from the tailnet if removed
 // is "true", or no longer. A running node notices once it starts a new map request.
 func removeNodes(removed string) string {

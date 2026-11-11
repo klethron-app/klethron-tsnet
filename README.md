@@ -65,7 +65,8 @@ try (TailnetNode node = TailnetNode.start(context, directory, "my-device")) {
 
 [`awaitStatus`][awaitStatus] waits for changes without polling. A login URL lets whoever opens it claim
 the node; pass it only to the user's browser. Wait for the URL to clear before closing, so the login is saved.
-Starting with the same directory then resumes that identity.
+Starting with the same directory then resumes that identity. The status also names this device, its
+tailnet and the signed-in user, which each login may change.
 
 [`NodeStatus.peers`][peers] lists the other devices this node can see, with their MagicDNS name, operating
 system, online state, addresses and [Tailscale SSH](https://tailscale.com/kb/1193/tailscale-ssh) host

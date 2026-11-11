@@ -27,6 +27,7 @@ var probes = map[string]func(string) string{
 	"rejectRegistrations":   withControl(rejectRegistrations),
 	"release":               releaseStalled,
 	"remove":                removeNodes,
+	"rename":                withControl(renameNodes),
 	"requireMachineAuth":    withControl(requireMachineAuth),
 	"roots":                 probeRoots,
 	"setAuthKeyEnvironment": setAuthKeyEnvironment,

@@ -6,9 +6,9 @@ import java.util.Arrays;
 import java.util.List;
 import org.jspecify.annotations.Nullable;
 
-/// A snapshot of a [TailnetNode]'s connection, login progress, assigned IP addresses and peers.
-/// Pass it to [TailnetNode#awaitStatus] to wait for a change. Snapshots are immutable.
-/// [#toString()] omits login URLs, error text and peers, which may contain private information.
+/// A snapshot of a [TailnetNode]'s connection, login progress, account, assigned IP addresses and
+/// peers. Pass it to [TailnetNode#awaitStatus] to wait for a change. Snapshots are immutable.
+/// [#toString()] omits login URLs, error text, names and peers, which may contain private information.
 public final class NodeStatus {
     /// Connection and authorization progress.
     public enum State {
@@ -62,24 +62,34 @@ public final class NodeStatus {
     private final @Nullable String loginUrl;
     private final List<InetAddress> addresses;
     private final @Nullable String error;
+    private final @Nullable String dnsName;
+    private final @Nullable String tailnet;
+    private final @Nullable String loginName;
     private final List<Peer> peers;
 
-    /// Parses a native "version\nSTATE\nREVOCATION\nloginURL\naddresses\nerror" record, followed by
-    /// "\ndnsName\tos\tonline\taddresses\tsshHostKeys" peer lines; empty fields are absent. Lists
-    /// are comma-separated.
+    /// Parses a native "version\nSTATE\nREVOCATION\nloginURL\naddresses\nerror\ndnsName\ntailnet\nloginName"
+    /// record, followed by "\ndnsName\tos\tonline\taddresses\tsshHostKeys" peer lines; empty fields are
+    /// absent. Lists are comma-separated.
     NodeStatus(long owner, String record) {
         String[] fields = record.split("\n", -1);
         this.owner = owner;
         version = Long.parseLong(fields[0]);
         state = State.valueOf(fields[1]);
         revocation = fields[2].isEmpty() ? null : Revocation.valueOf(fields[2]);
-        loginUrl = fields[3].isEmpty() ? null : fields[3];
+        loginUrl = emptyToNull(fields[3]);
         addresses = addresses(fields[4]);
-        error = fields[5].isEmpty() ? null : fields[5];
-        peers = Arrays.stream(fields, 6, fields.length).map(line -> {
+        error = emptyToNull(fields[5]);
+        dnsName = emptyToNull(fields[6]);
+        tailnet = emptyToNull(fields[7]);
+        loginName = emptyToNull(fields[8]);
+        peers = Arrays.stream(fields, 9, fields.length).map(line -> {
             String[] peer = line.split("\t", -1);
             return new Peer(peer[0], peer[1], Boolean.parseBoolean(peer[2]), addresses(peer[3]), list(peer[4]));
         }).toList();
+    }
+
+    private static @Nullable String emptyToNull(String field) {
+        return field.isEmpty() ? null : field;
     }
 
     private static List<String> list(String commaSeparated) {
@@ -121,6 +131,27 @@ public final class NodeStatus {
     /// information and its wording can change.
     public @Nullable String error() {
         return error;
+    }
+
+    /// This node's [MagicDNS](https://tailscale.com/kb/1081/magicdns) name without a trailing dot,
+    /// such as `phone.tailnet-name.ts.net`; `null` before joining and after logout. Tailscale may adjust
+    /// the requested hostname, and administrators can rename the device. The part after the first
+    /// label is the tailnet's: a saved [Peer#dnsName()] with another suffix is in another tailnet.
+    /// Like [#tailnet()] and [#loginName()], it remains after key expiry and can change with the next
+    /// login, which may choose another account or tailnet.
+    public @Nullable String dnsName() {
+        return dnsName;
+    }
+
+    /// The name of this node's tailnet, such as `example.com`; `null` before joining and after logout.
+    public @Nullable String tailnet() {
+        return tailnet;
+    }
+
+    /// The login name of the user who signed in this node, such as `alice@example.com`; `null` before
+    /// joining and after logout.
+    public @Nullable String loginName() {
+        return loginName;
     }
 
     /// The other devices in this node's network map, sorted by [Peer#dnsName()]; empty before joining
