@@ -81,10 +81,10 @@ func startPeer(dir string) string {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	peer := new(loopbackTailnet)
-	stopControl := loginProbe.stop
+	stop := loginProbe.stop
 	loginProbe.stop = func() {
 		peer.close()
-		stopControl()
+		stop()
 	}
 	server, ip, problem := peer.startNode(ctx, dir, loginProbe.control.HTTPTestServer.URL, "klethron-peer")
 	if problem != "" {
@@ -214,7 +214,7 @@ func setPeerOnline(control *testcontrol.Server, _ string) string {
 }
 
 // addPeers registers three unreachable devices: an offline Linux device named klethron-other, with
-// addresses 100.101.0.1 and fd7a:115c:a1e0::101:1 and SSH host keys sshHostKey and one containing a
+// addresses 100.101.0.1 and fd7a:115c:a1e0::101:1 and an OpenSSH host key and one containing a
 // comma, a sharee node and a Mullvad exit node.
 func addPeers(control *testcontrol.Server, _ string) string {
 	add := func(id int, name string, hostinfo *tailcfg.Hostinfo, addresses ...string) {
@@ -231,16 +231,14 @@ func addPeers(control *testcontrol.Server, _ string) string {
 		}
 		control.UpdateNode(node)
 	}
-	// IPv6 first, which the library reorders.
-	other := &tailcfg.Hostinfo{OS: "linux", SSH_HostKeys: []string{sshHostKey + "\n", "ssh-rsa AAAA,invalid"}}
+	// IPv6 first, which the library reorders. It passes host keys through without parsing them.
+	other := &tailcfg.Hostinfo{OS: "linux", SSH_HostKeys: []string{
+		"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl\n", "ssh-rsa AAAA,invalid"}}
 	add(1, "klethron-other.tail-scale.ts.net.", other, "fd7a:115c:a1e0::101:1", "100.101.0.1")
 	add(2, "klethron-sharee.tail-scale.ts.net.", &tailcfg.Hostinfo{OS: "linux", ShareeNode: true}, "100.101.0.2")
 	add(3, "us-nyc-wg-301.mullvad.ts.net.", &tailcfg.Hostinfo{OS: "linux"}, "100.101.0.3")
 	return ""
 }
-
-// sshHostKey is in OpenSSH public key format; the library passes keys through without parsing them.
-const sshHostKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl"
 
 // completeLogin acts as the user's browser, approving a login URL, and returns "ok". Like real
 // control, the approval gives a re-login's new node key a fresh expiry.

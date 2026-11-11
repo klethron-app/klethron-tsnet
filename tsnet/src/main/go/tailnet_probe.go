@@ -86,11 +86,11 @@ type loopbackTailnet struct {
 func startLoopbackTailnet(ctx context.Context, dir string) (*loopbackTailnet, string) {
 	t := new(loopbackTailnet)
 	control := new(testcontrol.Server)
-	stopControl, err := startLoopbackControl(control)
+	stop, err := startLoopbackControl(control)
 	if err != nil {
 		return t, "loopback control failed"
 	}
-	t.closers = append(t.closers, stopControl)
+	t.closers = append(t.closers, stop)
 
 	var problem string
 	if t.listener, t.listenerIP, problem = t.startNode(ctx, dir, control.HTTPTestServer.URL, "klethron-listener"); problem != "" {
