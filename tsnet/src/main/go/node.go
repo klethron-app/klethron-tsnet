@@ -19,6 +19,7 @@ import (
 	"tailscale.com/client/local"
 	"tailscale.com/ipn"
 	"tailscale.com/ipn/ipnstate"
+	"tailscale.com/tailcfg"
 	"tailscale.com/tsconst"
 	"tailscale.com/tsnet"
 	"tailscale.com/types/key"
@@ -108,8 +109,9 @@ func (n *node) close() {
 
 // watchStatus follows the IPN bus until ctx ends. A new watch starts with the current state and
 // self node, so re-watching after an unexpected disconnect (such as falling behind) loses nothing
-// needed. Peer changes, which include online changes, signal refreshPeers instead of reading the
-// status here, so slow reads in large tailnets cannot make the watch fall behind.
+// needed. Peer changes that can alter peer lines signal refreshPeers instead of reading the status
+// here, so slow reads in large tailnets cannot make the watch fall behind. Patches, unlike the full
+// nodes upstream otherwise sends for them, are small; those without an online change are skipped.
 func (n *node) watchStatus(ctx context.Context) {
 	refresh, refreshed := make(chan struct{}, 1), make(chan struct{})
 	go func() {
@@ -118,14 +120,15 @@ func (n *node) watchStatus(ctx context.Context) {
 	}()
 	defer func() { <-refreshed }()
 	for ctx.Err() == nil {
-		if watcher, err := n.client.WatchIPNBus(ctx, ipn.NotifyInitialState|ipn.NotifyInitialStatus|ipn.NotifyPeerChanges); err == nil {
+		if watcher, err := n.client.WatchIPNBus(ctx, ipn.NotifyInitialState|ipn.NotifyInitialStatus|ipn.NotifyPeerPatches); err == nil {
 			for {
 				notify, err := watcher.Next()
 				if err != nil {
 					break
 				}
 				n.publish(notify, nil)
-				if notify.InitialStatus != nil || notify.State != nil || len(notify.PeersChanged)+len(notify.PeersRemoved) > 0 {
+				if notify.InitialStatus != nil || notify.State != nil || len(notify.PeersChanged)+len(notify.PeersRemoved) > 0 ||
+					slices.ContainsFunc(notify.PeerChangedPatch, func(c *tailcfg.PeerChange) bool { return c.Online != nil }) {
 					select {
 					case refresh <- struct{}{}:
 					default: // A refresh is pending, and will read this change.

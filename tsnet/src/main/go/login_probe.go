@@ -210,17 +210,19 @@ func withControl(probe func(control *testcontrol.Server, argument string) string
 	}
 }
 
-// setPeerOnline sets whether control reports the in-memory peer as online, which it does not by
-// default. It returns whether the peer is registered.
+// setPeerOnline sends the other nodes a patch of the in-memory peer's online state, as control does
+// for presence changes, without storing it. It returns whether the peer is registered.
 func setPeerOnline(control *testcontrol.Server, online string) string {
-	for _, node := range control.AllNodes() {
-		if node.Hostinfo.Hostname() == "klethron-peer" {
-			node.Online = new(online == "true")
-			control.UpdateNode(node)
-			return "true"
-		}
+	nodes := control.AllNodes()
+	i := slices.IndexFunc(nodes, func(node *tailcfg.Node) bool { return node.Hostinfo.Hostname() == "klethron-peer" })
+	if i < 0 {
+		return "false"
 	}
-	return "false"
+	patch := &tailcfg.MapResponse{PeersChangedPatch: []*tailcfg.PeerChange{{NodeID: nodes[i].ID, Online: new(online == "true")}}}
+	for _, node := range slices.Delete(nodes, i, i+1) {
+		control.AddRawMapResponse(node.Key, patch)
+	}
+	return "true"
 }
 
 // addPeers registers three unreachable devices: an offline Linux device named klethron-other, with

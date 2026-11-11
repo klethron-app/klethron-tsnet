@@ -101,17 +101,16 @@ public final class DialTest {
                 assertEquals('x', new FileInputStream(connection.getFileDescriptor()).read());
             }
 
-            assertEquals("true", Probe.call("setPeerOnline", true));
-            NodeStatus.Peer online = new NodeStatus.Peer(PEER_NAME, "android", true, listed.addresses(), List.of());
-            assertEquals(List.of(online), LoginTest.await(node, s -> !s.peers().equals(List.of(listed))).peers());
-
             // Hides the sharee and Mullvad nodes; sorts by name, lists IPv4 first, trims host keys and
             // drops one with a comma.
             Probe.call("addPeers");
             NodeStatus.Peer other = new NodeStatus.Peer("klethron-other.tail-scale.ts.net", "linux", false, List.of(
                     InetAddresses.parseNumericAddress("100.101.0.1"), InetAddresses.parseNumericAddress("fd7a:115c:a1e0::101:1")),
                     List.of("ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl"));
-            assertEquals(List.of(other, online), LoginTest.await(node, s -> s.peers().size() > 1).peers());
+            assertEquals(List.of(other, listed), LoginTest.await(node, s -> s.peers().size() > 1).peers());
+            assertEquals("true", Probe.call("setPeerOnline", true));
+            NodeStatus.Peer online = new NodeStatus.Peer(PEER_NAME, "android", true, listed.addresses(), List.of());
+            assertEquals(List.of(other, online), LoginTest.await(node, s -> !s.peers().contains(listed)).peers());
             // The other peer has no endpoints: connecting, not waiting to run, times out.
             assertThrows(SocketTimeoutException.class, () -> node.dial("100.101.0.1", 22, Duration.ofSeconds(1)));
 
