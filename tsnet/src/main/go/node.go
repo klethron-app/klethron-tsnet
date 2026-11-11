@@ -31,8 +31,8 @@ type node struct {
 	server *tsnet.Server
 	client *local.Client
 
-	lifecycle sync.RWMutex // Held for reading by calls, and for writing by close.
-	stop      func()       // Stops status watching and default-network reports after cancel.
+	lifecycle sync.RWMutex   // Held for reading by calls, and for writing by close.
+	watchers  sync.WaitGroup // Status goroutines, which use the server until ctx ends.
 
 	ctx    context.Context // Cancelled when the node closes.
 	cancel context.CancelFunc
@@ -61,20 +61,17 @@ func newNode(server *tsnet.Server) *node {
 
 // start configures every connection-relevant field explicitly, so the host process environment
 // cannot redirect control. config is "directory\x00hostname\x00controlURL", which TailnetNode
-// validates, apart from NULs in the fields; an empty control URL selects Tailscale's. State
-// persists in a file store in the caller's directory. It runs before the node is published, so
-// no other call can race it.
+// validates; an empty control URL selects Tailscale's. State persists in a file store in the
+// caller's directory. It runs before the node is published, so no other call can race it.
 func (n *node) start(config string) int {
-	fields := strings.Split(config, "\x00")
-	if len(fields) != 3 {
-		return resultInvalid
-	}
+	directory, rest, _ := strings.Cut(config, "\x00")
+	hostname, controlURL, _ := strings.Cut(rest, "\x00")
 	// tsnet reads an auth key from the environment when none is configured. This library only
 	// supports interactive login, so refuse rather than silently use a host-process credential.
 	if os.Getenv("TS_AUTHKEY") != "" || os.Getenv("TS_AUTH_KEY") != "" {
 		return resultAuthEnvironment
 	}
-	n.server.Dir, n.server.Hostname, n.server.ControlURL = fields[0], fields[1], fields[2]
+	n.server.Dir, n.server.Hostname, n.server.ControlURL = directory, hostname, controlURL
 	if n.server.ControlURL == "" {
 		n.server.ControlURL = ipn.DefaultControlURL
 	}
@@ -82,16 +79,10 @@ func (n *node) start(config string) int {
 	if n.client, err = n.server.LocalClient(); err != nil { // Starts the server.
 		return resultStartFailed
 	}
-	watching := make(chan struct{})
-	go func() {
-		defer close(watching)
-		n.watchStatus(n.ctx)
-	}()
-	unwatch := watchDefaultNetwork(n.server)
-	n.stop = func() {
-		unwatch()
-		<-watching
-	}
+	refresh := make(chan struct{}, 1)
+	n.watchers.Go(func() { n.watchStatus(refresh) })
+	n.watchers.Go(func() { n.refreshPeers(refresh) })
+	context.AfterFunc(n.ctx, watchDefaultNetwork(n.server))
 	return 0
 }
 
@@ -100,27 +91,19 @@ func (n *node) close() {
 	n.cancel()
 	n.lifecycle.Lock()
 	defer n.lifecycle.Unlock()
-	if n.stop != nil {
-		n.stop()
-		n.stop = nil
-	}
+	n.watchers.Wait()
 	_ = n.server.Close()
 }
 
-// watchStatus follows the IPN bus until ctx ends. A new watch starts with the current state and
-// self node, so re-watching after an unexpected disconnect (such as falling behind) loses nothing
-// needed. Peer changes that can alter peer lines signal refreshPeers instead of reading the status
-// here, so slow reads in large tailnets cannot make the watch fall behind. Patches, unlike the full
-// nodes upstream otherwise sends for them, are small; those without an online change are skipped.
-func (n *node) watchStatus(ctx context.Context) {
-	refresh, refreshed := make(chan struct{}, 1), make(chan struct{})
-	go func() {
-		defer close(refreshed)
-		n.refreshPeers(ctx, refresh)
-	}()
-	defer func() { <-refreshed }()
-	for ctx.Err() == nil {
-		if watcher, err := n.client.WatchIPNBus(ctx, ipn.NotifyInitialState|ipn.NotifyInitialStatus|ipn.NotifyPeerPatches); err == nil {
+// watchStatus follows the IPN bus until the node closes. A new watch starts with the current
+// state and self node, so re-watching after an unexpected disconnect (such as falling behind)
+// loses nothing needed. Peer changes that can alter peer lines signal refreshPeers instead of
+// reading the status here, so slow reads in large tailnets cannot make the watch fall behind.
+// Patches, unlike the full nodes upstream otherwise sends for them, are small; those without an
+// online change are skipped.
+func (n *node) watchStatus(refresh chan<- struct{}) {
+	for n.ctx.Err() == nil {
+		if watcher, err := n.client.WatchIPNBus(n.ctx, ipn.NotifyInitialState|ipn.NotifyInitialStatus|ipn.NotifyPeerPatches); err == nil {
 			for {
 				notify, err := watcher.Next()
 				if err != nil {
@@ -138,23 +121,23 @@ func (n *node) watchStatus(ctx context.Context) {
 			watcher.Close()
 		}
 		select {
-		case <-ctx.Done():
+		case <-n.ctx.Done():
 		case <-time.After(time.Second):
 		}
 	}
 }
 
-// refreshPeers publishes the peers after each signal on refresh until ctx ends. Upstream builds the
-// status from its network map, which a logout clears, so rather than apply the notified changes,
-// it reads the status.
-func (n *node) refreshPeers(ctx context.Context, refresh <-chan struct{}) {
+// refreshPeers publishes the peers after each signal on refresh until the node closes. Upstream
+// builds the status from its network map, which a logout clears, so rather than apply the
+// notified changes, it reads the status.
+func (n *node) refreshPeers(refresh <-chan struct{}) {
 	for {
 		select {
-		case <-ctx.Done():
+		case <-n.ctx.Done():
 			return
 		case <-refresh:
 		}
-		if status, err := n.client.Status(ctx); err == nil {
+		if status, err := n.client.Status(n.ctx); err == nil {
 			n.publish(ipn.Notify{}, peerLines(status))
 		}
 	}
@@ -325,7 +308,10 @@ const (
 // whenOpen returns a context for a call, ending at the timeout or when the node closes, and a
 // function to call when done, or resultClosed. Close waits for the call to finish.
 func (n *node) whenOpen(timeout time.Duration) (context.Context, func(), int) {
-	n.lifecycle.RLock()
+	// Only close locks for writing, after cancelling: fail at once rather than wait for shutdown.
+	if !n.lifecycle.TryRLock() {
+		return nil, nil, resultClosed
+	}
 	if n.ctx.Err() != nil {
 		n.lifecycle.RUnlock()
 		return nil, nil, resultClosed
@@ -351,11 +337,8 @@ func (n *node) failed(ctx context.Context, result int) int {
 // dial connects to host:port through the tailnet and returns one end of a Unix socket pair that
 // relays the connection, owned by the caller, or a dial result. It waits up to timeout for the
 // node to run. Unlike upstream Server.Dial, it never connects through the device's own network.
-// TailnetNode validates the host, apart from NULs, and the port.
+// TailnetNode validates the host and port.
 func (n *node) dial(host string, port uint16, timeout time.Duration) int {
-	if strings.ContainsRune(host, 0) {
-		return resultInvalid
-	}
 	ctx, done, result := n.whenOpen(timeout)
 	if result != 0 {
 		return result

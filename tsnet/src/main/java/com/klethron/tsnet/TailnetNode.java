@@ -27,6 +27,7 @@ import java.time.Duration;
 import java.util.HashSet;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.jspecify.annotations.Nullable;
 
@@ -100,8 +101,8 @@ public final class TailnetNode implements AutoCloseable {
 
     /// As [#start(Context, File, String)], with an alternative control server URL for tests.
     static TailnetNode start(Context context, File stateDirectory, String hostname, String controlUrl) throws IOException {
-        if (!stateDirectory.isAbsolute() || hostname.isEmpty()) {
-            throw new IllegalArgumentException("State directory must be absolute and hostname non-empty");
+        if (!stateDirectory.isAbsolute() || hostname.isEmpty() || hostname.indexOf(0) >= 0) {
+            throw new IllegalArgumentException("State directory must be absolute and hostname non-empty without NUL");
         }
         String config = stateDirectory.getPath() + '\0' + hostname + '\0' + controlUrl;
         String directory = stateDirectory.getCanonicalPath();
@@ -157,7 +158,7 @@ public final class TailnetNode implements AutoCloseable {
         if (previous != null && previous.owner != handle) {
             throw new IllegalArgumentException("Status belongs to another node");
         }
-        String record = nativeAwaitStatus(handle, previous == null ? -1 : previous.version, millis(timeout));
+        String record = nativeAwaitStatus(handle, previous == null ? -1 : previous.version, nanos(timeout));
         if (record == null) {
             throw new ClosedChannelException();
         }
@@ -187,10 +188,10 @@ public final class TailnetNode implements AutoCloseable {
     @WorkerThread
     public ParcelFileDescriptor dial(String host, int port, Duration timeout) throws IOException {
         byte[] name = host.getBytes(StandardCharsets.UTF_8);
-        if (name.length == 0 || name.length > 255 || port < 1 || port > 65535) {
-            throw new IllegalArgumentException("Host must have 1–255 bytes and port must be 1–65535");
+        if (name.length == 0 || name.length > 255 || host.indexOf(0) >= 0 || port < 1 || port > 65535) {
+            throw new IllegalArgumentException("Host must have 1–255 bytes without NUL and port must be 1–65535");
         }
-        int result = nativeDial(handle, name, port, millis(timeout));
+        int result = nativeDial(handle, name, port, nanos(timeout));
         check(result);
         return ParcelFileDescriptor.adoptFd(result);
     }
@@ -207,7 +208,7 @@ public final class TailnetNode implements AutoCloseable {
     /// @throws IOException if the logout fails
     @WorkerThread
     public void logout(Duration timeout) throws IOException {
-        check(nativeLogout(handle, millis(timeout)));
+        check(nativeLogout(handle, nanos(timeout)));
     }
 
     /// Requests browser authorization after logout or key expiry, or to renew an existing login.
@@ -255,19 +256,18 @@ public final class TailnetNode implements AutoCloseable {
         }
     }
 
-    /// Clamps to 0–`Long.MAX_VALUE` milliseconds; [Duration#toMillis] would throw on overflow.
-    private static long millis(Duration timeout) {
-        if (timeout.isNegative()) return 0;
-        return timeout.compareTo(Duration.ofMillis(Long.MAX_VALUE)) >= 0 ? Long.MAX_VALUE : timeout.toMillis();
+    /// Clamps to 0–`Long.MAX_VALUE` nanoseconds (about 292 years); [TimeUnit#convert] saturates.
+    private static long nanos(Duration timeout) {
+        return Math.max(0, TimeUnit.NANOSECONDS.convert(timeout));
     }
 
     private static native long nativeStart(byte[] config);
 
-    private static native @Nullable String nativeAwaitStatus(long handle, long afterVersion, long timeoutMillis);
+    private static native @Nullable String nativeAwaitStatus(long handle, long afterVersion, long timeoutNanos);
 
-    private static native int nativeDial(long handle, byte[] host, int port, long timeoutMillis);
+    private static native int nativeDial(long handle, byte[] host, int port, long timeoutNanos);
 
-    private static native int nativeLogout(long handle, long timeoutMillis);
+    private static native int nativeLogout(long handle, long timeoutNanos);
 
     private static native int nativeLogin(long handle);
 

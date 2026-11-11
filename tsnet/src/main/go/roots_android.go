@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 )
 
@@ -17,39 +18,28 @@ import (
 // Like Android's default for apps targeting API 24+, user-added CAs are not trusted.
 var rootDirectories = []string{"/apex/com.android.conscrypt/cacerts", "/system/etc/security/cacerts"}
 
-var installRoots sync.Once
-
 // usePlatformRoots must run before any TLS verification in this library: Go loads system roots once.
-func usePlatformRoots() {
-	installRoots.Do(func() {
-		pool := x509.NewCertPool()
-		for _, root := range loadPlatformRoots() {
-			pool.AddCert(root)
-		}
-		// An empty pool fails closed instead of falling back to the system image copy.
-		x509.SetFallbackRoots(pool)
-	})
-}
+var usePlatformRoots = sync.OnceFunc(func() {
+	pool := x509.NewCertPool()
+	for _, root := range loadPlatformRoots() {
+		pool.AddCert(root)
+	}
+	// An empty pool fails closed instead of falling back to the system image copy.
+	x509.SetFallbackRoots(pool)
+})
 
 // loadPlatformRoots mirrors Android's TrustedCertificateStore: use the first existing system
 // directory, without certificates the current user disabled.
 func loadPlatformRoots() []*x509.Certificate {
 	removed := make(map[string]bool)
-	userID := os.Getuid() / 100000 // Android's per-user UID range.
-	for _, cert := range readCertificates(fmt.Sprintf("/data/misc/user/%d/cacerts-removed", userID)) {
+	// Android users have UID ranges of 100000.
+	for _, cert := range readCertificates(fmt.Sprintf("/data/misc/user/%d/cacerts-removed", os.Getuid()/100000)) {
 		removed[string(cert.Raw)] = true
 	}
 	for _, directory := range rootDirectories {
-		if _, err := os.Stat(directory); err != nil {
-			continue
+		if _, err := os.Stat(directory); err == nil {
+			return slices.DeleteFunc(readCertificates(directory), func(cert *x509.Certificate) bool { return removed[string(cert.Raw)] })
 		}
-		var roots []*x509.Certificate
-		for _, cert := range readCertificates(directory) {
-			if !removed[string(cert.Raw)] {
-				roots = append(roots, cert)
-			}
-		}
-		return roots
 	}
 	return nil
 }

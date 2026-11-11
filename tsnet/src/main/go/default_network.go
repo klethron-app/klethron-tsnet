@@ -20,8 +20,8 @@ var (
 )
 
 // Upstream netmon cannot discover Android's default route; TailnetNode's network callback reports
-// the best non-VPN network instead. The interface name and IPv4 gateway are process-global upstream, so this updates
-// every node.
+// the best non-VPN network instead. The interface name and IPv4 gateway are process-global
+// upstream, so this updates every node.
 //
 //export klethron_set_default_network
 func klethron_set_default_network(name *C.char, length C.int, gateway C.uint32_t) {
@@ -29,22 +29,18 @@ func klethron_set_default_network(name *C.char, length C.int, gateway C.uint32_t
 	if gateway != 0 {
 		gw = netip.AddrFrom4([4]byte{byte(gateway >> 24), byte(gateway >> 16), byte(gateway >> 8), byte(gateway)}).String()
 	}
-	setDefaultNetwork(C.GoStringN(name, length), gw)
-}
-
-func setDefaultNetwork(name, gateway string) {
 	monitorsMu.Lock()
 	defer monitorsMu.Unlock()
-	netmon.UpdateLastKnownDefaultGateway(gateway)
-	netmon.UpdateLastKnownDefaultRouteInterface(name)
+	netmon.UpdateLastKnownDefaultGateway(gw)
+	netmon.UpdateLastKnownDefaultRouteInterface(C.GoStringN(name, length))
 	for monitor := range monitors {
 		// Forces change callbacks; a changed default interface makes the engine rebind.
 		monitor.InjectEvent()
 	}
 }
 
-// watchDefaultNetwork forwards default-network reports to a started node until the returned
-// function is called, which must happen before the node closes.
+// watchDefaultNetwork forwards default-network reports to a started node's monitor until the
+// returned function is called. Reports to a closed monitor are harmless.
 func watchDefaultNetwork(server *tsnet.Server) (unwatch func()) {
 	monitor := server.Sys().NetMon.Get()
 	monitorsMu.Lock()

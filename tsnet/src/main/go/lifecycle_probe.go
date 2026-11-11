@@ -9,10 +9,11 @@ func probeConcurrentClose(string) string {
 	n := newNode(newServer())
 	id := addNode(n)
 	entered, release := make(chan struct{}), make(chan struct{})
-	n.stop = func() {
+	n.watchers.Go(func() {
+		<-n.ctx.Done() // The first close has begun.
 		close(entered)
 		<-release
-	}
+	})
 	first, second := make(chan struct{}), make(chan struct{})
 	go func() {
 		klethron_node_close(id)

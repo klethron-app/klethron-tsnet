@@ -15,8 +15,8 @@ Java_com_klethron_tsnet_TailnetNode_nativeStart(JNIEnv *env, jclass type, jbyteA
 }
 
 JNIEXPORT jstring JNICALL
-Java_com_klethron_tsnet_TailnetNode_nativeAwaitStatus(JNIEnv *env, jclass type, jlong handle, jlong after, jlong timeoutMillis) {
-    char *record = klethron_node_await_status(handle, after, timeoutMillis);
+Java_com_klethron_tsnet_TailnetNode_nativeAwaitStatus(JNIEnv *env, jclass type, jlong handle, jlong after, jlong timeout) {
+    char *record = klethron_node_await_status(handle, after, timeout);
     if (record == NULL) return NULL; // Closed.
     // Records are ASCII, so JNI modified UTF-8 is sufficient.
     jstring result = (*env)->NewStringUTF(env, record);
@@ -49,18 +49,18 @@ Java_com_klethron_tsnet_TailnetNode_nativeSetDefaultNetwork(JNIEnv *env, jclass 
 }
 
 JNIEXPORT jint JNICALL
-Java_com_klethron_tsnet_TailnetNode_nativeDial(JNIEnv *env, jclass type, jlong handle, jbyteArray host, jint port, jlong timeoutMillis) {
+Java_com_klethron_tsnet_TailnetNode_nativeDial(JNIEnv *env, jclass type, jlong handle, jbyteArray host, jint port, jlong timeout) {
     // Java limits hosts to 255 UTF-8 bytes; copy exact bytes rather than modified UTF-8.
     char bytes[256];
     jsize length = (*env)->GetArrayLength(env, host);
     if (length >= (jsize) sizeof bytes) return -2; // Invalid; Java checks first.
     (*env)->GetByteArrayRegion(env, host, 0, length, (jbyte *) bytes);
-    return klethron_node_dial(handle, bytes, length, port, timeoutMillis);
+    return klethron_node_dial(handle, bytes, length, port, timeout);
 }
 
 JNIEXPORT jint JNICALL
-Java_com_klethron_tsnet_TailnetNode_nativeLogout(JNIEnv *env, jclass type, jlong handle, jlong timeoutMillis) {
-    return klethron_node_logout(handle, timeoutMillis);
+Java_com_klethron_tsnet_TailnetNode_nativeLogout(JNIEnv *env, jclass type, jlong handle, jlong timeout) {
+    return klethron_node_logout(handle, timeout);
 }
 
 JNIEXPORT jint JNICALL

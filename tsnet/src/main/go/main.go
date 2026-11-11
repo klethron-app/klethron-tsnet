@@ -1,14 +1,10 @@
 package main
 
-/*
-#include <stdlib.h>
-*/
 import "C"
 
 import (
 	"io"
 	"log"
-	"math"
 	"runtime/debug"
 	"sync"
 	"time"
@@ -65,12 +61,12 @@ func klethron_node_start(config *C.char, length C.int) C.longlong {
 // klethron_node_await_status returns the status record, or NULL once the node is closed.
 //
 //export klethron_node_await_status
-func klethron_node_await_status(id C.longlong, after C.longlong, timeoutMillis C.longlong) *C.char {
+func klethron_node_await_status(id C.longlong, after C.longlong, timeout C.longlong) *C.char {
 	n := lookupNode(id)
 	if n == nil {
 		return nil
 	}
-	record, open := n.await(uint64(after), milliseconds(timeoutMillis))
+	record, open := n.await(uint64(after), time.Duration(timeout))
 	if !open {
 		return nil
 	}
@@ -81,26 +77,23 @@ func klethron_node_await_status(id C.longlong, after C.longlong, timeoutMillis C
 // dial result.
 //
 //export klethron_node_dial
-func klethron_node_dial(id C.longlong, host *C.char, length C.int, port C.int, timeoutMillis C.longlong) C.int {
+func klethron_node_dial(id C.longlong, host *C.char, length C.int, port C.int, timeout C.longlong) C.int {
 	n := lookupNode(id)
 	if n == nil {
 		return resultClosed
 	}
-	if port < 1 || port > math.MaxUint16 {
-		return resultInvalid
-	}
-	return C.int(n.dial(C.GoStringN(host, length), uint16(port), milliseconds(timeoutMillis)))
+	return C.int(n.dial(C.GoStringN(host, length), uint16(port), time.Duration(timeout)))
 }
 
 // klethron_node_logout returns 0 or a negative failure result.
 //
 //export klethron_node_logout
-func klethron_node_logout(id C.longlong, timeoutMillis C.longlong) C.int {
+func klethron_node_logout(id C.longlong, timeout C.longlong) C.int {
 	n := lookupNode(id)
 	if n == nil {
 		return resultClosed
 	}
-	return C.int(n.logout(milliseconds(timeoutMillis)))
+	return C.int(n.logout(time.Duration(timeout)))
 }
 
 // klethron_node_login returns 0 or a negative failure result.
@@ -112,14 +105,6 @@ func klethron_node_login(id C.longlong) C.int {
 		return resultClosed
 	}
 	return C.int(n.login())
-}
-
-// milliseconds converts a non-negative Java timeout, saturating rather than overflowing.
-func milliseconds(millis C.longlong) time.Duration {
-	if millis >= C.longlong(math.MaxInt64/time.Millisecond) {
-		return math.MaxInt64
-	}
-	return time.Duration(millis) * time.Millisecond
 }
 
 //export klethron_node_close
