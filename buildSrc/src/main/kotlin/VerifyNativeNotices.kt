@@ -66,18 +66,15 @@ abstract class VerifyNativeNotices @Inject constructor(private val exec: ExecOpe
         fun inventory(directory: File, name: String): List<List<String>> {
             val lines = directory.resolve(name).readLines()
             requireNotice(lines.firstOrNull() == "module\tversion\tsum\tnotices", "Malformed inventory header in $name")
-            val modules = lines.drop(1).map { line ->
+            return lines.drop(1).map { line ->
                 val fields = line.split('\t')
                 requireNotice(fields.size == 4 && fields.all { it.isNotBlank() }, "Malformed inventory row in $name")
+                for (path in fields[3].split(',')) {
+                    requireNotice(!path.startsWith('/') && path.split('/').none { it == ".." }, "Invalid notice path $path")
+                    requireFile(directory.resolve(path), "Missing notice $path for ${fields[0]}")
+                }
                 fields
             }
-            for (module in modules) {
-                for (path in module[3].split(',')) {
-                    requireNotice(!path.startsWith('/') && path.split('/').none { it == ".." }, "Invalid notice path $path")
-                    requireFile(directory.resolve(path), "Missing notice $path for ${module[0]}")
-                }
-            }
-            return modules
         }
         val debugDirectory = debugNotices.orNull?.asFile
         val directories = listOfNotNull(directory, debugDirectory)
