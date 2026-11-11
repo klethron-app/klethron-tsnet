@@ -107,10 +107,12 @@ abstract class BuildGoLibrary @Inject constructor(
         patch("control/controlclient/direct.go", "a28e97e2a6822604182cdcfdd319ea9bb10c29b17e8b4592289c1cf2278160a9",
             forgetKey, "\tif err == nil {\n" + forgetKey.replace("\t", "\t\t") + "\t}\n")
         workspace.resolve("go.mod").appendText("\nreplace tailscale.com => ./tailscale\n")
-        go(workspace, "build", "-mod=readonly", "-trimpath", "-buildvcs=false",
-            "-tags=" + buildTags.get().joinToString(","), "-buildmode=c-shared",
+        val flags = arrayOf("-mod=readonly", "-trimpath", "-buildvcs=false", "-tags=" + buildTags.get().joinToString(","))
+        val target = mapOf("GOOS" to "android", "GOARCH" to arch, "CGO_ENABLED" to "1", "CC" to compiler.absolutePath)
+        // Vet the exact configuration we ship; matching flags share the build cache with go build.
+        go(workspace, "vet", *flags, ".", env = target)
+        go(workspace, "build", *flags, "-buildmode=c-shared",
             "-ldflags=-s -buildid=", // The NDK aligns to 16 KiB; VerifyNativeAar checks it.
-            "-o", output.resolve("libklethron_tsnet.so").absolutePath, ".",
-            env = mapOf("GOOS" to "android", "GOARCH" to arch, "CGO_ENABLED" to "1", "CC" to compiler.absolutePath))
+            "-o", output.resolve("libklethron_tsnet.so").absolutePath, ".", env = target)
     }
 }
