@@ -26,7 +26,7 @@ func newServer() *tsnet.Server {
 }
 
 // Java holds node IDs, never Go pointers. IDs are not reused, so a call racing or following
-// close finds no node instead of a different one.
+// close finds no node, which node calls report as closed, instead of a different one.
 var nodes = struct {
 	sync.Mutex
 	byID map[int64]*node
@@ -63,49 +63,25 @@ func klethron_node_start(config *C.char, length C.int) C.longlong {
 //
 //export klethron_node_await_status
 func klethron_node_await_status(id C.longlong, after C.longlong, timeout C.longlong) *C.char {
-	n := lookupNode(id)
-	if n == nil {
-		return nil
+	if record, open := lookupNode(id).await(uint64(after), time.Duration(timeout)); open {
+		return C.CString(record)
 	}
-	record, open := n.await(uint64(after), time.Duration(timeout))
-	if !open {
-		return nil
-	}
-	return C.CString(record)
+	return nil
 }
 
-// klethron_node_dial returns a connected socket descriptor owned by the caller, or a negative
-// dial result.
-//
 //export klethron_node_dial
 func klethron_node_dial(id C.longlong, host *C.char, length C.int, port C.int, timeout C.longlong) C.int {
-	n := lookupNode(id)
-	if n == nil {
-		return resultClosed
-	}
-	return C.int(n.dial(C.GoStringN(host, length), uint16(port), time.Duration(timeout)))
+	return C.int(lookupNode(id).dial(C.GoStringN(host, length), uint16(port), time.Duration(timeout)))
 }
 
-// klethron_node_logout returns 0 or a negative failure result.
-//
 //export klethron_node_logout
 func klethron_node_logout(id C.longlong, timeout C.longlong) C.int {
-	n := lookupNode(id)
-	if n == nil {
-		return resultClosed
-	}
-	return C.int(n.logout(time.Duration(timeout)))
+	return C.int(lookupNode(id).logout(time.Duration(timeout)))
 }
 
-// klethron_node_login returns 0 or a negative failure result.
-//
 //export klethron_node_login
 func klethron_node_login(id C.longlong) C.int {
-	n := lookupNode(id)
-	if n == nil {
-		return resultClosed
-	}
-	return C.int(n.login())
+	return C.int(lookupNode(id).login())
 }
 
 //export klethron_node_close

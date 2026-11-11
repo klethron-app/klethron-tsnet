@@ -294,6 +294,9 @@ func loginURL(raw string) string {
 // await returns the status record once its version differs from after, or the timeout elapses.
 // It returns false once the node is closed.
 func (n *node) await(after uint64, timeout time.Duration) (string, bool) {
+	if n == nil {
+		return "", false
+	}
 	ctx, cancel := context.WithTimeout(n.ctx, timeout)
 	defer cancel()
 	status, version := n.wait(ctx, func(_ nodeStatus, version uint64) bool { return version != after })
@@ -332,14 +335,11 @@ const (
 )
 
 // whenOpen returns a context for a call, ending at the timeout or when the node closes, and a
-// function to call when done, or resultClosed. Close waits for the call to finish.
+// function to call when done, or resultClosed if n is closed or nil. Close waits for the call.
 func (n *node) whenOpen(timeout time.Duration) (context.Context, func(), int) {
 	// Only close locks for writing, after cancelling: fail at once rather than wait for shutdown.
-	if !n.lifecycle.TryRLock() {
-		return nil, nil, resultClosed
-	}
-	if n.ctx.Err() != nil {
-		n.lifecycle.RUnlock()
+	// A call racing close runs with a cancelled context.
+	if n == nil || n.ctx.Err() != nil || !n.lifecycle.TryRLock() {
 		return nil, nil, resultClosed
 	}
 	ctx, cancel := context.WithTimeout(n.ctx, timeout)
