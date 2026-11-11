@@ -4,7 +4,7 @@ Notices ship in the AAR under `assets/klethron-tsnet/licenses/`, from
 `tsnet/src/main/assets/klethron-tsnet/licenses/` (both variants) and `tsnet/src/debug/…` (debug only):
 
 - Tailscale (BSD-3-Clause) at the commit [UPSTREAM.md](UPSTREAM.md) names: licence, patent notice and
-  `TAILSCALE-MODIFICATIONS`, which documents the local patch.
+  `TAILSCALE-MODIFICATIONS`, which documents the local patches.
 - Go's runtime licence and patent notice, also covering Tailscale's Go-derived `tempfork` sources.
 - [`GO-MODULES.tsv`](tsnet/src/main/assets/klethron-tsnet/licenses/GO-MODULES.tsv): the modules that
   `go version -m` reports for both ABIs and variants, with version, checksum and notice paths.

@@ -11,6 +11,11 @@ with Go 1.27.4. Entries are ordered by impact on this library; drop those upstre
   the stored login: the device stays registered. Patch: forget the key only after a successful logout.
   `BuildGoLibrary.kt` applies it to a hash-checked copy of `control/controlclient/direct.go`;
   `TAILSCALE-MODIFICATIONS` documents it. `LoginTest.failedLogoutKeepsTheLoginForRetries` fails without it.
+- **Names outside the tailnet's DNS go to the device's resolver.** When no tailnet DNS route covers a
+  name and its tailnet queries fail, `tsnet` `dnsResolver.lookupCandidate` asks `net.DefaultResolver`,
+  which sends the name to the device's network and lets its DNS answer with any address, including a
+  reachable peer's. Upstream has no option to disable this. Patch: count that case as a failed lookup,
+  in a hash-checked copy of `tsnet/dns_lookup.go`. `DialTest.reachesOnlyTheTailnet` fails without it.
 
 ## Worked around
 
@@ -67,16 +72,13 @@ with Go 1.27.4. Entries are ordered by impact on this library; drop those upstre
 
 ## Limits
 
-- **Names without a tailnet DNS route** go to the device's resolver when tailnet DNS fails (`tsnet`
-  `dnsResolver.hostLookup`), so the name leaves the tailnet; `dial` still connects only to tailnet
-  addresses. Upstream has no option to disable this.
 - **Another app's VPN.** Apps cannot see a VPN's underlying networks, so nodes follow the best non-VPN
   network. Split tunnels, such as the Tailscale app's, leave node traffic on that network (tested
   live). With a full tunnel, such as an exit node, traffic uses the VPN while nodes follow the network
   below it; this is untested with live traffic.
 - Live-tailnet coverage is still needed for network changes without another VPN, 16 KiB devices,
-  restrictive NATs, subnet routes, IPv6 peers, throughput, prolonged outages, scheduled key expiry,
-  revocation while stopped and Play split delivery.
+  restrictive NATs, subnet routes, split DNS, IPv6 peers, throughput, prolonged outages, scheduled key
+  expiry, revocation while stopped and Play split delivery.
 - Local tests use upstream's `testcontrol`, which ignores a logout's expiry (control-side
   deregistration is untested) and cannot remove a running node (removal is simulated with a 404 at the
   node's next start). It does not build with `ts_omit_tailnetlock`.
@@ -84,8 +86,8 @@ with Go 1.27.4. Entries are ordered by impact on this library; drop those upstre
 ## Updating upstream
 
 1. Pin a full `tailscale/tailscale` main SHA in `go.mod`/`go.sum`, `TailnetNodeTest`'s version
-   assertion, this file and `TAILSCALE-MODIFICATIONS`; review the patch and update its hash (never just
-   accept a new one), and recheck every entry.
+   assertion, this file and `TAILSCALE-MODIFICATIONS`; review the patches and update their hashes (never
+   just accept new ones), and recheck every entry.
 2. Re-audit environment reads, filesystem writes, `os/exec` reachability, state file permissions and
    `tailcfg.PeerChange` fields (`watchStatus` refreshes peers only for online changes), and check that
    existing state still loads.

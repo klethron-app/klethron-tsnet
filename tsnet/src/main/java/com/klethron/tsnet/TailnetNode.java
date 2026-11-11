@@ -169,8 +169,8 @@ public final class TailnetNode implements AutoCloseable {
     /// Opens a TCP connection to a tailnet address or
     /// [MagicDNS](https://tailscale.com/kb/1081/magicdns) name. `timeout` covers both waiting for
     /// [NodeStatus.State#RUNNING] and connecting. Only peers and subnet routes in this node's network
-    /// map are reachable. A name without a tailnet DNS route can be looked up through the device's
-    /// resolver, but the connection stays in the tailnet.
+    /// map are reachable. Names resolve only through the tailnet: peers' names from the network map,
+    /// others through the tailnet's DNS settings. The device's resolver never sees them.
     ///
     /// The caller owns the returned blocking Unix stream socket. Use [java.io.FileInputStream] and
     /// [java.io.FileOutputStream] on its descriptor, or [android.system.Os]. End of stream leaves the

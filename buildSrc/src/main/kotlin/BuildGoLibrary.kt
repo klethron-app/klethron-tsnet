@@ -94,17 +94,23 @@ abstract class BuildGoLibrary @Inject constructor(
                 filePermissions { unix("0644") }
             }
         }
-        // tailscale/tailscale#22248: a failed logout must not forget the node key.
-        val direct = "control/controlclient/direct.go"
-        val original = upstream.resolve(direct).readBytes()
-        val text = original.toString(Charsets.UTF_8)
-        val forgetKey = "\tc.mu.Lock()\n\tc.persist = new(persist.Persist).View()\n\tc.mu.Unlock()\n"
-        if (HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(original)) !=
-            "a28e97e2a6822604182cdcfdd319ea9bb10c29b17e8b4592289c1cf2278160a9" || text.split(forgetKey).size != 2) {
-            throw GradleException("Pinned $direct changed; review TAILSCALE-MODIFICATIONS before building")
+        // Replaces the only occurrence of `old` in an upstream file with the given SHA-256.
+        fun patch(path: String, sha256: String, old: String, new: String) {
+            val original = upstream.resolve(path).readBytes()
+            val text = original.toString(Charsets.UTF_8)
+            if (HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(original)) != sha256 ||
+                text.split(old).size != 2) {
+                throw GradleException("Pinned $path changed; review TAILSCALE-MODIFICATIONS before building")
+            }
+            workspace.resolve("tailscale/$path").writeText(text.replace(old, new))
         }
-        workspace.resolve("tailscale/$direct").writeText(
-            text.replace(forgetKey, "\tif err == nil {\n" + forgetKey.replace("\t", "\t\t") + "\t}\n"))
+        // tailscale/tailscale#22248: a failed logout must not forget the node key.
+        val forgetKey = "\tc.mu.Lock()\n\tc.persist = new(persist.Persist).View()\n\tc.mu.Unlock()\n"
+        patch("control/controlclient/direct.go", "a28e97e2a6822604182cdcfdd319ea9bb10c29b17e8b4592289c1cf2278160a9",
+            forgetKey, "\tif err == nil {\n" + forgetKey.replace("\t", "\t\t") + "\t}\n")
+        // Names that the tailnet's DNS does not answer must not reach the device's resolver.
+        patch("tsnet/dns_lookup.go", "b49ecd66f1b9f4de7e7ef20061148a0e903de2e847627db38c88715c6964dc93",
+            "return c.hostLookup(ctx, network, hostFB)", "return candidateResult{servfail: true, err: firstErr}")
         workspace.resolve("go.mod").appendText("\nreplace tailscale.com => ./tailscale\n")
         val flags = arrayOf("-mod=readonly", "-trimpath", "-buildvcs=false", "-tags=" + buildTags.get().joinToString(","))
         val target = mapOf("GOOS" to "android", "GOARCH" to arch, "CGO_ENABLED" to "1", "CC" to compiler.absolutePath)

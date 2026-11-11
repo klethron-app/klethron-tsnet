@@ -74,10 +74,10 @@ keys, so users can pick a device instead of typing its name, and SSH clients can
 trust-on-first-use. Each change, including a device going online or offline, is a status change.
 
 [`dial`][dial] accepts a tailnet IP address or MagicDNS name and returns a socket descriptor owned by the
-caller. It reaches peers and subnet routes only. [`close`][close] ends its connections but preserves
-its identity. [`logout`][logout], key expiry and device removal end its tailnet access and connections;
-[`login`][login] starts authorization again. The app decides how long to keep the node alive and whether
-to run a service.
+caller. It reaches peers and subnet routes only, and resolves names only through the tailnet, never the
+device's resolver. [`close`][close] ends its connections but preserves its identity. [`logout`][logout],
+key expiry and device removal end its tailnet access and connections; [`login`][login] starts
+authorization again. The app decides how long to keep the node alive and whether to run a service.
 
 ## Network
 

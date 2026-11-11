@@ -112,11 +112,11 @@ abstract class VerifyNativeNotices @Inject constructor(private val exec: ExecOpe
                     standardOutput = output
                 }
                 val fields = output.toString(Charsets.UTF_8).lines().drop(1).map { it.trim().split(Regex("\\s+")) }
-                // The build verifies upstream checksums before applying our documented tsnet patch.
+                // The build verifies upstream checksums before applying our documented tsnet patches.
                 // Local replacements have no binary module checksum; accept only this exact one.
                 val replacements = fields.indices.filter { fields[it].first() == "=>" }.map { fields[it - 1].take(2) + fields[it] }
                 requireNotice(replacements == listOf(listOf("dep", "tailscale.com", "=>", "./tailscale", "(devel)")),
-                    "Unexpected Go module replacement; only the documented tsnet patch is allowed")
+                    "Unexpected Go module replacement; only the documented tsnet patches are allowed")
                 val actual = fields.filter { it.first() == "dep" }.map {
                     val dependency = it.drop(1)
                     if (dependency.first() == "tailscale.com" && dependency.size == 2) {

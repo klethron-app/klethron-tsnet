@@ -362,8 +362,9 @@ func (n *node) failed(ctx context.Context, result int) int {
 
 // dial connects to host:port through the tailnet and returns one end of a Unix socket pair that
 // relays the connection, owned by the caller, or a dial result. It waits up to timeout for the
-// node to run. Unlike upstream Server.Dial, it never connects through the device's own network.
-// TailnetNode validates the host and port.
+// node to run. Unlike upstream Server.Dial, it never connects through the device's own network,
+// and the dns_lookup.go patch keeps names from reaching the device's resolver. TailnetNode
+// validates the host and port.
 func (n *node) dial(host string, port uint16, timeout time.Duration) int {
 	ctx, done, result := n.whenOpen(timeout)
 	if result != 0 {
@@ -377,7 +378,7 @@ func (n *node) dial(host string, port uint16, timeout time.Duration) int {
 	n.mu.Lock()
 	access := n.access // Ends if the node stops running from now on, also while dialing.
 	n.mu.Unlock()
-	// Resolves MagicDNS names through the tailnet's DNS configuration.
+	// Resolves peer names from the network map, other names only through the tailnet's DNS.
 	dialer := n.server.Sys().Dialer.Get()
 	target, _, err := dialer.UserDialPlan(ctx, "tcp", net.JoinHostPort(host, strconv.Itoa(int(port))))
 	if err != nil {
