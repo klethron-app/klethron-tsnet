@@ -141,12 +141,11 @@ public final class LoginTest {
     public void failedLogoutKeepsTheLoginForRetries() throws Exception {
         List<InetAddress> addresses;
         try (TailnetNode node = start()) {
-            NodeStatus status = await(node, s -> s.loginUrl() != null);
-            complete(status);
+            complete(await(node, s -> s.loginUrl() != null));
             addresses = await(node, s -> s.state() == NodeStatus.State.RUNNING).addresses();
             Probe.call("rejectRegistrations", true);
             assertThrows(IOException.class, () -> node.logout(WAIT));
-            status = await(node, s -> s.state() == NodeStatus.State.STOPPED);
+            NodeStatus status = await(node, s -> s.state() == NodeStatus.State.STOPPED);
             assertEquals(addresses, status.addresses());
         }
         assertOnlyStateFile();
@@ -172,12 +171,11 @@ public final class LoginTest {
     public void expiredKeyRequiresANewLogin() throws Exception {
         List<InetAddress> addresses;
         try (TailnetNode node = start()) {
-            NodeStatus status = await(node, s -> s.loginUrl() != null);
-            complete(status);
+            complete(await(node, s -> s.loginUrl() != null));
             addresses = await(node, s -> s.state() == NodeStatus.State.RUNNING).addresses();
 
             assertEquals("1", Probe.call("expire"));
-            status = await(node, s -> s.state() == NodeStatus.State.NEEDS_LOGIN);
+            NodeStatus status = await(node, s -> s.state() == NodeStatus.State.NEEDS_LOGIN);
             assertEquals(NodeStatus.Revocation.KEY_EXPIRED, status.revocation());
             assertNull(status.loginUrl());
             assertTrue(status.toString().contains("KEY_EXPIRED"));
@@ -226,8 +224,7 @@ public final class LoginTest {
     @Test(timeout = 120000)
     public void removedNodeRequiresANewLogin() throws Exception {
         try (TailnetNode node = start()) {
-            NodeStatus status = await(node, s -> s.loginUrl() != null);
-            complete(status);
+            complete(await(node, s -> s.loginUrl() != null));
             await(node, s -> s.state() == NodeStatus.State.RUNNING);
         }
         // testcontrol keeps streaming to a running node, so it notices at its next start.
@@ -275,9 +272,8 @@ public final class LoginTest {
     public void deviceApprovalFollowsLogin() throws Exception {
         Probe.call("requireMachineAuth");
         try (TailnetNode node = start()) {
-            NodeStatus status = await(node, s -> s.loginUrl() != null);
-            complete(status);
-            status = await(node, s -> s.state() == NodeStatus.State.NEEDS_MACHINE_AUTH);
+            complete(await(node, s -> s.loginUrl() != null));
+            NodeStatus status = await(node, s -> s.state() == NodeStatus.State.NEEDS_MACHINE_AUTH);
             assertNull(status.loginUrl());
             assertEquals("1", Probe.call("approveMachines"));
             status = await(node, s -> s.state() == NodeStatus.State.RUNNING);
