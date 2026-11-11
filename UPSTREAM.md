@@ -5,10 +5,10 @@ with Go 1.27.4. Entries are ordered by impact on this library; drop those upstre
 
 ## Patched
 
-- **A failed logout destroys the login** ([#22248](https://github.com/tailscale/tailscale/issues/22248)).
-  `controlclient.Direct.TryLogout` forgets the node key even when control rejects the logout, so a
-  retry has no key to log out with, and a network map racing the logout can save the empty key over
-  the stored login: the device stays registered. Patch: forget the key only after a successful logout.
+- **A failed logout cannot be retried** ([#22248](https://github.com/tailscale/tailscale/issues/22248);
+  fix [PR #22249](https://github.com/tailscale/tailscale/pull/22249)). `controlclient.Direct.TryLogout`
+  forgets the in-memory node key even when control rejects the logout, so retries fail until the node
+  restarts. Patch: forget the key only after a successful logout.
   `BuildGoLibrary.kt` applies it to a hash-checked copy of `control/controlclient/direct.go`;
   `TAILSCALE-MODIFICATIONS` documents it. `LoginTest.failedLogoutKeepsTheLoginForRetries` fails without it.
 - **Names outside the tailnet's DNS go to the device's resolver.** When no tailnet DNS route covers a

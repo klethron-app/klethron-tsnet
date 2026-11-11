@@ -23,9 +23,8 @@ patches, not the modified copy. BuildGoLibrary.kt applies these changes:
 +	}
 
 TryLogout forgets the node key only when control confirmed the logout. Upstream
-also forgets it after a failed request; the map poll continues and saves the
-empty key over the stored login, leaving the node registered at control with no
-local key with which to log out again.
+also forgets it in memory after a failed request, so the node cannot retry the
+logout until it restarts.
 
 --- a/tsnet/dns_lookup.go
 +++ b/tsnet/dns_lookup.go

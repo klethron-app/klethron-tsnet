@@ -151,8 +151,8 @@ public final class LoginTest {
         assertOnlyStateFile();
 
         // The login persisted: a new node resumes it. Once control accepts, the same node that
-        // failed to log out retries successfully. Unpatched upstream (#22248) forgets the node key
-        // at the first failure, so the retry fails or never reaches NEEDS_LOGIN.
+        // failed to log out retries successfully. Unpatched upstream (#22248) forgets the in-memory
+        // node key at the first failure, so the retry fails.
         Probe.call("rejectRegistrations", false);
         try (TailnetNode node = start()) {
             awaitResumed(node, addresses);
