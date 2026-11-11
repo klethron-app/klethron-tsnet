@@ -8,28 +8,9 @@ plugins {
 group = "com.klethron"
 
 android {
-    lint.warningsAsErrors = true
-    lint.informational += listOf("AndroidGradlePluginVersion", "GradleDependency")
-    enableKotlin = false
     namespace = "com.klethron.tsnet"
-    compileSdk {
-        version = release(libs.versions.compileSdk.get().toInt()) {
-            minorApiLevel = libs.versions.compileSdkMinor.get().toInt()
-        }
-    }
-    buildToolsVersion = libs.versions.buildTools.get()
-    defaultConfig {
-        minSdk = libs.versions.minSdk.get().toInt()
-        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-        consumerProguardFiles("consumer-rules.pro")
-    }
-    compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_17
-        targetCompatibility = JavaVersion.VERSION_17
-    }
+    defaultConfig.consumerProguardFiles("consumer-rules.pro")
     publishing { singleVariant("release") { withSourcesJar() } }
-    // Go already strips these libraries; do not run the Android strip task again.
-    packaging.jniLibs.keepDebugSymbols += "**/libklethron_tsnet.so"
 }
 
 // Upstream features this client never uses. gradle/native-feature-audit.init.gradle measures one's size.
@@ -116,8 +97,6 @@ dependencies {
     compileOnly(libs.androidx.annotation)
     compileOnly(libs.errorprone.annotations)
     androidTestCompileOnly(libs.errorprone.annotations)
-    androidTestImplementation(libs.android.test.runner)
-    androidTestImplementation(libs.junit)
 }
 
 publishing {
