@@ -155,13 +155,12 @@ public final class LoginTest {
             assertThrows(IOException.class, () -> node.logout(WAIT));
             status = await(node, s -> s.state() == NodeStatus.State.STOPPED);
             assertEquals(addresses, status.addresses());
-            // Let netmap updates arrive: upstream saved an empty node key over the login here.
-            assertEquals(status.version, node.awaitStatus(status, Duration.ofSeconds(3)).version);
         }
         assertOnlyStateFile();
 
         // The login persisted: a new node resumes it. Once control accepts, the same node that
-        // failed to log out retries successfully.
+        // failed to log out retries successfully. Unpatched upstream (#22248) forgets the node key
+        // at the first failure, so the retry fails or never reaches NEEDS_LOGIN.
         Probe.call("rejectRegistrations", false);
         try (TailnetNode node = TailnetNode.start(CONTEXT, directory.toFile(), "klethron-logout-failure-test", controlUrl)) {
             NodeStatus status = await(node, s -> {

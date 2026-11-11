@@ -6,11 +6,11 @@ with Go 1.27.4. Entries are ordered by impact on this library; drop those upstre
 ## Patched
 
 - **A failed logout destroys the login** ([#22248](https://github.com/tailscale/tailscale/issues/22248)).
-  `controlclient.Direct.TryLogout` forgets the node key even when control rejects the logout, and the
-  still-running map poll then saves the empty key over the stored login: the device stays registered
-  with no key to log out with. Patch: forget the key only after a successful logout. `BuildGoLibrary.kt`
-  applies it to a hash-checked copy of `control/controlclient/direct.go`; `TAILSCALE-MODIFICATIONS`
-  documents it.
+  `controlclient.Direct.TryLogout` forgets the node key even when control rejects the logout, so a
+  retry has no key to log out with, and a network map racing the logout can save the empty key over
+  the stored login: the device stays registered. Patch: forget the key only after a successful logout.
+  `BuildGoLibrary.kt` applies it to a hash-checked copy of `control/controlclient/direct.go`;
+  `TAILSCALE-MODIFICATIONS` documents it. `LoginTest.failedLogoutKeepsTheLoginForRetries` fails without it.
 
 ## Worked around
 
@@ -31,6 +31,9 @@ with Go 1.27.4. Entries are ordered by impact on this library; drop those upstre
   [PR #19150](https://github.com/tailscale/tailscale/pull/19150)). `controlclient.Auto` saves `Persist`
   only with a network map, so closing right after `LoginFinished` can lose the login. `node.publish`
   clears the login URL only once a `SelfChange` brings a different node key.
+- **The state directory is not locked.** Two servers on one directory save their state over each
+  other's. `TailnetNode.start` refuses a directory that an open node in the process uses; separate
+  processes are not guarded.
 - **`tsnet.Server.Dial` can leave the tailnet.** For addresses not in the network map, `tsdial.UserDial`
   falls back to the routing table, then a plain `net.Dialer`. `node.dial` resolves with `UserDialPlan`,
   requires `UseNetstackForIP` and connects with `NetstackDialTCP`.
