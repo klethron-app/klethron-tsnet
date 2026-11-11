@@ -9,14 +9,12 @@ import (
 	"net/netip"
 	"net/url"
 	"os"
-	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
 	"sync"
 	"syscall"
 	"time"
-	"unicode/utf8"
 
 	"tailscale.com/client/local"
 	"tailscale.com/ipn"
@@ -33,7 +31,7 @@ type node struct {
 	client *local.Client
 
 	lifecycle sync.RWMutex // Held for reading by calls, and for writing by close.
-	stop      func()       // Stops status watching and default-network reports once started.
+	stop      func()       // Stops status watching and default-network reports after cancel.
 
 	ctx    context.Context // Cancelled when the node closes.
 	cancel context.CancelFunc
@@ -61,12 +59,13 @@ func newNode(server *tsnet.Server) *node {
 }
 
 // start configures every connection-relevant field explicitly, so the host process environment
-// cannot redirect control. config is "directory\x00hostname\x00controlURL"; an empty control URL
-// selects Tailscale's. State persists in a file store in the caller's directory. It runs before
-// the node is published, so no other call can race it.
+// cannot redirect control. config is "directory\x00hostname\x00controlURL", which TailnetNode
+// validates, apart from NULs in the fields; an empty control URL selects Tailscale's. State
+// persists in a file store in the caller's directory. It runs before the node is published, so
+// no other call can race it.
 func (n *node) start(config string) int {
 	fields := strings.Split(config, "\x00")
-	if len(fields) != 3 || !utf8.ValidString(config) || !filepath.IsAbs(fields[0]) || fields[1] == "" {
+	if len(fields) != 3 {
 		return resultInvalid
 	}
 	// tsnet reads an auth key from the environment when none is configured. This library only
@@ -82,16 +81,14 @@ func (n *node) start(config string) int {
 	if n.client, err = n.server.LocalClient(); err != nil { // Starts the server.
 		return resultStartFailed
 	}
-	ctx, cancel := context.WithCancel(n.ctx)
 	watching := make(chan struct{})
 	go func() {
 		defer close(watching)
-		n.watchStatus(ctx)
+		n.watchStatus(n.ctx)
 	}()
 	unwatch := watchDefaultNetwork(n.server)
 	n.stop = func() {
 		unwatch()
-		cancel()
 		<-watching
 	}
 	return 0
@@ -199,8 +196,6 @@ func (n *node) publish(notify ipn.Notify, peers *string) {
 	defer n.mu.Unlock()
 	status := n.status
 	status.addresses = addressList(n.server.TailscaleIPs())
-	// Set before upstream reports NeedsLogin for it; health notifications may arrive later.
-	_, removed := n.server.Sys().HealthTracker.Get().CurrentState().Warnings[tsconst.HealthWarnableNodeRemoved]
 	if peers != nil {
 		status.peers = *peers
 	}
@@ -244,7 +239,8 @@ func (n *node) publish(notify ipn.Notify, peers *string) {
 	// As upstream's state machine, which reports NeedsLogin for these reasons too.
 	status.revocation = ""
 	if status.state == ipn.NeedsLogin {
-		if removed {
+		// Set before upstream reports NeedsLogin for it; health notifications may arrive later.
+		if _, removed := n.server.Sys().HealthTracker.Get().CurrentState().Warnings[tsconst.HealthWarnableNodeRemoved]; removed {
 			status.revocation = "NODE_REMOVED"
 		} else if !n.keyExpiry.IsZero() && n.keyExpiry.Before(time.Now()) {
 			status.revocation = "KEY_EXPIRED"
@@ -352,8 +348,9 @@ func (n *node) failed(ctx context.Context, result int) int {
 // dial connects to host:port through the tailnet and returns one end of a Unix socket pair that
 // relays the connection, owned by the caller, or a dial result. It waits up to timeout for the
 // node to run. Unlike upstream Server.Dial, it never connects through the device's own network.
+// TailnetNode validates the host, apart from NULs, and the port.
 func (n *node) dial(host string, port uint16, timeout time.Duration) int {
-	if host == "" || !utf8.ValidString(host) || strings.ContainsRune(host, 0) || port == 0 {
+	if strings.ContainsRune(host, 0) {
 		return resultInvalid
 	}
 	ctx, done, result := n.whenOpen(timeout)

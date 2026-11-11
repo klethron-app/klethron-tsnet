@@ -86,7 +86,7 @@ func klethron_node_dial(id C.longlong, host *C.char, length C.int, port C.int, t
 	if n == nil {
 		return resultClosed
 	}
-	if port < 0 || port > math.MaxUint16 {
+	if port < 1 || port > math.MaxUint16 {
 		return resultInvalid
 	}
 	return C.int(n.dial(C.GoStringN(host, length), uint16(port), milliseconds(timeoutMillis)))
