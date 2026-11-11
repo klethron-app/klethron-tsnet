@@ -59,8 +59,6 @@ public final class LoginTest {
             assertNull(status.revocation());
             assertNull(status.error());
             assertTrue(status.addresses().isEmpty());
-            // Never print login URLs, even in test failures.
-            assertTrue("Unexpected login URL", loginUrl(status).startsWith(controlUrl + "/auth/"));
             assertFalse(status.toString().contains("/auth/"));
             complete(status);
 
@@ -79,11 +77,7 @@ public final class LoginTest {
 
         // The persisted identity resumes without another login.
         try (TailnetNode node = TailnetNode.start(CONTEXT, directory.toFile(), "klethron-login-test", controlUrl)) {
-            NodeStatus status = await(node, s -> {
-                assertNull("Resumed node asked to log in again", s.loginUrl());
-                return s.state() == NodeStatus.State.RUNNING;
-            });
-            assertEquals(addresses, status.addresses());
+            awaitResumed(node, addresses);
         }
         assertOnlyStateFile();
     }
@@ -93,7 +87,7 @@ public final class LoginTest {
         String firstUrl;
         try (TailnetNode node = TailnetNode.start(CONTEXT, directory.toFile(), "klethron-logout-test", controlUrl)) {
             NodeStatus status = await(node, s -> s.loginUrl() != null);
-            firstUrl = loginUrl(status);
+            firstUrl = Objects.requireNonNull(status.loginUrl());
             node.logout(WAIT); // Not logged in: no effect, so the pending login completes.
             complete(status);
             assertFalse(await(node, s -> s.state() == NodeStatus.State.RUNNING).addresses().isEmpty());
@@ -115,7 +109,6 @@ public final class LoginTest {
             assertEquals(NodeStatus.State.NEEDS_LOGIN, status.state());
             assertFalse("Login URL was reused", firstUrl.equals(status.loginUrl()));
             // Logout reset the prefs, including control URL and hostname; login restores both.
-            assertTrue("Unexpected login URL", loginUrl(status).startsWith(controlUrl + "/auth/"));
             complete(status);
             assertFalse(await(node, s -> s.state() == NodeStatus.State.RUNNING).addresses().isEmpty());
             // The re-login's registration uses tsnet's hostname again.
@@ -162,16 +155,12 @@ public final class LoginTest {
         // at the first failure, so the retry fails or never reaches NEEDS_LOGIN.
         Probe.call("rejectRegistrations", false);
         try (TailnetNode node = TailnetNode.start(CONTEXT, directory.toFile(), "klethron-logout-failure-test", controlUrl)) {
-            NodeStatus status = await(node, s -> {
-                assertNull("Node asked to log in again", s.loginUrl());
-                return s.state() == NodeStatus.State.RUNNING;
-            });
-            assertEquals(addresses, status.addresses());
+            awaitResumed(node, addresses);
             Probe.call("rejectRegistrations", true);
             assertThrows(IOException.class, () -> node.logout(WAIT));
             Probe.call("rejectRegistrations", false);
             node.logout(WAIT);
-            status = await(node, s -> s.state() == NodeStatus.State.NEEDS_LOGIN);
+            NodeStatus status = await(node, s -> s.state() == NodeStatus.State.NEEDS_LOGIN);
             assertNull(status.loginUrl());
             assertTrue(status.addresses().isEmpty());
         }
@@ -203,7 +192,6 @@ public final class LoginTest {
             status = await(node, s -> s.loginUrl() != null);
             assertEquals(NodeStatus.State.NEEDS_LOGIN, status.state());
             assertEquals(NodeStatus.Revocation.KEY_EXPIRED, status.revocation());
-            assertTrue("Unexpected login URL", loginUrl(status).startsWith(controlUrl + "/auth/"));
             // Control stages the replacement key alongside the old key for the same device.
             assertEquals("klethron-expiry-test", Probe.call("hostnames"));
             complete(status);
@@ -218,7 +206,6 @@ public final class LoginTest {
                 assertEquals("Re-authentication interrupted the node", NodeStatus.State.RUNNING, s.state());
                 return s.loginUrl() != null;
             });
-            assertTrue("Unexpected login URL", loginUrl(status).startsWith(controlUrl + "/auth/"));
             assertEquals("klethron-expiry-test", Probe.call("hostnames"));
             complete(status);
             // The URL is cleared once the new key is saved, so closing then keeps the login.
@@ -231,11 +218,7 @@ public final class LoginTest {
 
         // The new key persisted.
         try (TailnetNode node = TailnetNode.start(CONTEXT, directory.toFile(), "klethron-expiry-test", controlUrl)) {
-            NodeStatus status = await(node, s -> {
-                assertNull("Node asked to log in again", s.loginUrl());
-                return s.state() == NodeStatus.State.RUNNING;
-            });
-            assertEquals(addresses, status.addresses());
+            awaitResumed(node, addresses);
         }
     }
 
@@ -331,13 +314,19 @@ public final class LoginTest {
         throw new AssertionError("Timed out at " + status);
     }
 
-    /// Completes the pending login in place of the user's browser.
-    private static void complete(NodeStatus status) {
-        assertEquals("ok", Probe.call("complete", loginUrl(status)));
+    /// Waits until a node started from saved state runs with `addresses`, without asking to log in again.
+    private static void awaitResumed(TailnetNode node, List<InetAddress> addresses) throws IOException {
+        assertEquals(addresses, await(node, s -> {
+            assertNull("Node asked to log in again", s.loginUrl());
+            return s.state() == NodeStatus.State.RUNNING;
+        }).addresses());
     }
 
-    private static String loginUrl(NodeStatus status) {
-        return Objects.requireNonNull(status.loginUrl());
+    /// Completes the pending login in place of the user's browser. Never prints the URL, even in failures.
+    private void complete(NodeStatus status) {
+        String url = Objects.requireNonNull(status.loginUrl());
+        assertTrue("Unexpected login URL", url.startsWith(controlUrl + "/auth/"));
+        assertEquals("ok", Probe.call("complete", url));
     }
 
     /// Calls a probe that starts nodes in a new directory, which must stay empty.
