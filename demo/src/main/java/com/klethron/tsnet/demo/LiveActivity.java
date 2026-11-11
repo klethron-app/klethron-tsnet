@@ -35,18 +35,18 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import org.jspecify.annotations.Nullable;
 
-/** Explicit, interactive real-tailnet test. No URLs, credentials or peer data go to logs. */
+/// Interactive real-tailnet test. No URLs, credentials or peer data go to logs.
 public final class LiveActivity extends Activity {
     // Serializes node calls across instances, including a finished instance's close.
     private static final ExecutorService WORKER = Executors.newSingleThreadExecutor();
     private static final Duration TIMEOUT = Duration.ofSeconds(10);
     private final Handler ui = new Handler(Looper.getMainLooper());
     private volatile boolean destroyed;
-    // Only accessed on WORKER: lint checks the methods' thread annotations, not field access.
+    // Accessed only on WORKER; lint checks thread annotations on methods, not fields.
     private @Nullable TailnetNode node;
     private @Nullable ParcelFileDescriptor held; // Kept-open connection.
     private @Nullable String heldTarget;
-    // Only accessed on the UI thread.
+    // Accessed only on the UI thread.
     private @Nullable NodeStatus status; // Never saved in a Bundle.
     private boolean busy;
     private boolean started;
@@ -147,13 +147,7 @@ public final class LiveActivity extends Activity {
             int port = Integer.parseInt(portText); // dial validates the host and port range.
             byte[] sent = ("klethron-tsnet:" + UUID.randomUUID() + "\n").getBytes(StandardCharsets.US_ASCII);
             long start = SystemClock.elapsedRealtime();
-            if (!keepOpen) {
-                try (ParcelFileDescriptor connection = current.dial(host, port, TIMEOUT)) {
-                    echo(connection, sent);
-                }
-                return getString(R.string.echo_verified, sent.length, SystemClock.elapsedRealtime() - start);
-            }
-            // Reuses one stream across exchanges, e.g. to test survival of a network change.
+            // With Keep open, echoes reuse one stream, e.g. to test that it survives a network change.
             String target = host + ":" + port;
             if (!target.equals(heldTarget)) closeHeld();
             boolean dialed = held == null;
@@ -168,6 +162,7 @@ public final class LiveActivity extends Activity {
                 throw failure;
             }
             long elapsed = SystemClock.elapsedRealtime() - start;
+            if (!keepOpen) closeHeld();
             return getString(dialed ? R.string.echo_verified : R.string.echo_verified_open, sent.length, elapsed);
         });
     }
