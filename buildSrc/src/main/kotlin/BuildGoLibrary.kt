@@ -105,7 +105,7 @@ abstract class BuildGoLibrary @Inject constructor(
         // empty key over the login, leaving the node registered but unable to log out again.
         val forgetKey = "\tc.mu.Lock()\n\tc.persist = new(persist.Persist).View()\n\tc.mu.Unlock()\n"
         patch("control/controlclient/direct.go", "a28e97e2a6822604182cdcfdd319ea9bb10c29b17e8b4592289c1cf2278160a9",
-            forgetKey, "\tif err == nil {\n" + forgetKey.lines().joinToString("") { "\t$it\n" } + "\t}\n")
+            forgetKey, "\tif err == nil {\n" + forgetKey.replace("\t", "\t\t") + "\t}\n")
         workspace.resolve("go.mod").appendText("\nreplace tailscale.com => ./tailscale\n")
         go(workspace, "build", "-mod=readonly", "-trimpath", "-buildvcs=false",
             "-tags=" + buildTags.get().joinToString(","), "-buildmode=c-shared",
