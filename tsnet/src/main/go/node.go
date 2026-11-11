@@ -227,27 +227,24 @@ func (n *node) publish(notify ipn.Notify, read *statusRead) {
 	if notify.BrowseToURL != nil {
 		status.loginURL = loginURL(*notify.BrowseToURL)
 	}
-	// Every interactive login creates a new node key, which upstream saves before announcing the
-	// first network map with it. Closing the node at LoginFinished, which comes first, would lose the
-	// login. A re-authenticating node stays Running, so the state does not tell either.
-	setSelf := func(self key.NodePublic, expiry time.Time) {
-		n.keyExpiry = expiry
-		if self != n.selfKey {
-			n.selfKey = self
-			status.loginURL = ""
-		}
-	}
 	// A watch has no initial SelfChange. Self has a key only with a network map.
+	self, expiry := n.selfKey, n.keyExpiry
 	if initial := notify.InitialStatus; initial != nil && initial.Self != nil && !initial.Self.PublicKey.IsZero() {
-		var expiry time.Time
+		self, expiry = initial.Self.PublicKey, time.Time{}
 		if initial.Self.KeyExpiry != nil {
 			expiry = *initial.Self.KeyExpiry
 		}
-		setSelf(initial.Self.PublicKey, expiry)
 	}
-	if self := notify.SelfChange; self != nil {
-		setSelf(self.Key, self.KeyExpiry)
+	if notify.SelfChange != nil {
+		self, expiry = notify.SelfChange.Key, notify.SelfChange.KeyExpiry
 	}
+	// Every interactive login creates a new node key, which upstream saves before announcing the
+	// first network map with it. Closing the node at LoginFinished, which comes first, would lose the
+	// login. A re-authenticating node stays Running, so the state does not tell either.
+	if self != n.selfKey {
+		status.loginURL = ""
+	}
+	n.selfKey, n.keyExpiry = self, expiry
 	// As upstream's state machine, which reports NeedsLogin for these reasons too.
 	status.revocation = ""
 	if status.state == ipn.NeedsLogin {
