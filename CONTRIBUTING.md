@@ -25,10 +25,11 @@ fixtures; release builds exclude them. The demo tests exercise an R8-minified co
 The AAR is `tsnet/build/outputs/aar/tsnet-release.aar`; native sizes are in
 `tsnet/build/reports/native/sizes.tsv`, and `verifyNativeAar` checks their 16 KiB alignment.
 
-For a live check, install `:demo:installRelease` and open **Live tailnet test**. Authorize the node in
-your own tailnet, return to the app and wait for **RUNNING / Login saved**. Test TCP echo against a peer
-you control, by IP and MagicDNS name; then check restart, logout/re-login, key expiry, device removal
-and Wi-Fi/cellular transitions. Verify direct or DERP paths from the peer's status. Record outcomes
+For a live check, install the demo app (`:demo:installRelease`, signed with the debug key) and open
+**Live tailnet test**. Authorize the node in your own tailnet, return to the app and wait for
+**RUNNING / Login saved**. Test TCP echo against a peer you control, such as one running
+`socat TCP-LISTEN:7070,fork,reuseaddr EXEC:cat`, by IP and MagicDNS name; then check restart,
+logout/re-login, key expiry, device removal and Wi-Fi/cellular transitions. Verify direct or DERP paths from the peer's status. Record outcomes
 and timings, never login URLs or node state. Remove test nodes afterwards. The demo has no service;
 background suspension can delay login and traffic.
 
