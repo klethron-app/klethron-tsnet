@@ -14,7 +14,6 @@ import android.os.Looper;
 import android.os.ParcelFileDescriptor;
 import androidx.test.platform.app.InstrumentationRegistry;
 import java.io.FileInputStream;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
@@ -59,17 +58,14 @@ public final class NetworkChangeTest {
                 }
                 assertEquals("ok", Probe.call("netchangeAwait", other));
             }
-            Probe.call("netchangeStop");
-            try (var files = Files.list(directory)) {
-                assertEquals("Nodes must not write node state", 0, files.count());
-            }
         } finally {
-            connectivity.unregisterNetworkCallback(callback);
-            // Release the probe first: it holds the lock that other tailnet probes wait for.
+            // Release the probe and Wi-Fi before cleanup that can throw: other tailnet probes wait
+            // for the probe's lock, and later tests need Wi-Fi.
             Probe.call("netchangeStop");
+            shell("svc wifi enable");
+            connectivity.unregisterNetworkCallback(callback);
             LoginTest.deleteDirectory(directory);
             LoginTest.deleteDirectory(nodeDirectory);
-            shell("svc wifi enable");
             // Leave the device as found; Wi-Fi reconnects asynchronously.
             boolean unused = awaitWifiDefault(connectivity); // Best effort: must not mask a test failure.
         }

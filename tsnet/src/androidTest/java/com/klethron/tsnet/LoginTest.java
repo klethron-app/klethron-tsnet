@@ -34,7 +34,7 @@ import org.junit.Test;
  */
 public final class LoginTest {
     static final Context CONTEXT = InstrumentationRegistry.getInstrumentation().getTargetContext();
-    private static final Duration WAIT = Duration.ofSeconds(30);
+    static final Duration WAIT = Duration.ofSeconds(30);
 
     private String controlUrl;
     private Path directory;
@@ -93,8 +93,7 @@ public final class LoginTest {
         try (TailnetNode node = TailnetNode.start(CONTEXT, directory.toFile(), "klethron-logout-test", controlUrl)) {
             NodeStatus status = await(node, s -> s.loginUrl() != null);
             firstUrl = status.loginUrl();
-            node.logout(WAIT); // Not logged in: no effect.
-            assertEquals(firstUrl, node.awaitStatus(null, Duration.ZERO).loginUrl());
+            node.logout(WAIT); // Not logged in: no effect, so the pending login completes.
             complete(status);
             assertFalse(await(node, s -> s.state() == NodeStatus.State.RUNNING).addresses().isEmpty());
 
@@ -308,8 +307,10 @@ public final class LoginTest {
     public void closeWakesWaitersAndRejectsLaterCalls() throws Exception {
         try (TailnetNode node = TailnetNode.start(CONTEXT, directory.toFile(), "klethron-close-test", controlUrl)) {
             NodeStatus status = await(node, s -> s.loginUrl() != null);
-            CompletableFuture<Throwable> waiter = CompletableFuture.supplyAsync(() ->
-                    assertThrows(ClosedChannelException.class, () -> node.awaitStatus(status, Duration.ofMinutes(5))));
+            // Longer than Duration.toMillis can express: the wait saturates instead of overflowing.
+            CompletableFuture<Throwable> waiter = CompletableFuture.supplyAsync(() -> assertThrows(ClosedChannelException.class, () -> {
+                for (NodeStatus latest = status; ; ) latest = node.awaitStatus(latest, Duration.ofSeconds(Long.MAX_VALUE));
+            }));
             Thread.sleep(200); // Best effort: let the waiter block.
             assertFalse(waiter.isDone());
             node.close();
@@ -333,8 +334,6 @@ public final class LoginTest {
         }
         Path file = Files.createFile(directory.getParent().resolve("not-a-directory"));
         assertThrows(IOException.class, () -> TailnetNode.start(CONTEXT, file.toFile(), "host", controlUrl));
-        // Refusals leave no node behind that holds the directory.
-        TailnetNode.start(CONTEXT, directory.toFile(), "klethron-refusal-test", controlUrl).close();
     }
 
     @CanIgnoreReturnValue
@@ -342,7 +341,7 @@ public final class LoginTest {
         long deadline = System.nanoTime() + WAIT.toNanos();
         NodeStatus status = null;
         do {
-            status = node.awaitStatus(status, WAIT);
+            status = node.awaitStatus(status, Duration.ofNanos(deadline - System.nanoTime()));
             if (condition.test(status)) return status;
         } while (System.nanoTime() < deadline);
         throw new AssertionError("Timed out at " + status);

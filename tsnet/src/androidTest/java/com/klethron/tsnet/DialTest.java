@@ -43,7 +43,7 @@ import org.junit.Test;
  * without login and serves MagicDNS; no real tailnet is involved.
  */
 public final class DialTest {
-    private static final Duration WAIT = Duration.ofSeconds(30);
+    private static final Duration WAIT = LoginTest.WAIT;
     private static final String PEER_NAME = "klethron-peer.tail-scale.ts.net";
 
     private String controlUrl;
@@ -112,6 +112,8 @@ public final class DialTest {
                     InetAddresses.parseNumericAddress("100.101.0.1"), InetAddresses.parseNumericAddress("fd7a:115c:a1e0::101:1")),
                     List.of("ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl"));
             assertEquals(List.of(other, online), LoginTest.await(node, s -> s.peers().size() > 1).peers());
+            // The other peer has no endpoints: connecting, not waiting to run, times out.
+            assertThrows(SocketTimeoutException.class, () -> node.dial("100.101.0.1", 22, Duration.ofSeconds(1)));
 
             node.logout(WAIT);
             // The peers clear after the state changes.
@@ -279,7 +281,7 @@ public final class DialTest {
         try (TailnetNode node = TailnetNode.start(LoginTest.CONTEXT, directory.resolve("node").toFile(), "klethron-dialer", "http://127.0.0.1:1")) {
             assertThrows(SocketTimeoutException.class, () -> node.dial(peer, 7070, Duration.ofMillis(200)));
             CompletableFuture<Throwable> dialer = CompletableFuture.supplyAsync(() ->
-                    assertThrows(ClosedChannelException.class, () -> node.dial(peer, 7070, Duration.ofMinutes(5))));
+                    assertThrows(ClosedChannelException.class, () -> node.dial(peer, 7070, Duration.ofSeconds(Long.MAX_VALUE))));
             Thread.sleep(200); // Best effort: let the dial block.
             assertFalse(dialer.isDone());
             node.close();

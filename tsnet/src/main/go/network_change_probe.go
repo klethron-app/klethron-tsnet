@@ -35,29 +35,29 @@ func startNetworkProbe(dir string) string {
 			problem = "unreported default route"
 		}
 	}
+	if problem != "" {
+		tailnet.close()
+		tailnetProbeMu.Unlock()
+		return problem
+	}
 	networkProbe.Lock()
 	defer networkProbe.Unlock()
 	networkProbe.tailnet = tailnet
-	if problem != "" {
-		stopNetworkProbeLocked()
-		return problem
-	}
 	return "ok"
 }
 
 // awaitNetworkChange waits for both nodes to finish rebinding to the named default interface, then
 // exchanges tailnet data and requires a re-established direct path.
 func awaitNetworkChange(name string) string {
+	networkProbe.Lock()
+	tailnet := networkProbe.tailnet // The test calls start, await and stop from one thread.
+	networkProbe.Unlock()
+	if tailnet == nil {
+		return "not started"
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	for {
-		networkProbe.Lock()
-		if networkProbe.tailnet == nil {
-			networkProbe.Unlock()
-			return "not started"
-		}
-		tailnet := networkProbe.tailnet
-		networkProbe.Unlock()
 		done := true
 		for _, node := range []*tsnet.Server{tailnet.dialer, tailnet.listener} {
 			rebound, ok := tailnet.rebound.Load(node)
@@ -77,14 +77,10 @@ func awaitNetworkChange(name string) string {
 func stopNetworkProbe(string) string {
 	networkProbe.Lock()
 	defer networkProbe.Unlock()
-	stopNetworkProbeLocked()
-	return ""
-}
-
-func stopNetworkProbeLocked() {
 	if networkProbe.tailnet != nil {
 		networkProbe.tailnet.close()
 		networkProbe.tailnet = nil
 		tailnetProbeMu.Unlock()
 	}
+	return ""
 }
