@@ -39,18 +39,21 @@ abstract class BuildGoLibrary @Inject constructor(
 
     @TaskAction
     fun build() {
-        fun go(directory: File, vararg args: String, env: Map<String, String> = emptyMap()): String {
+        fun go(directory: File, vararg args: String, env: Map<String, String> = emptyMap(), tool: String = "go"): String {
             val output = ByteArrayOutputStream()
-            exec.exec {
+            val result = exec.exec {
                 workingDir(directory)
-                commandLine("go", *args)
+                commandLine(tool, *args)
                 // Override ambient settings that would change the shipped code without changing inputs.
                 // Go reads empty variables from the user's go env file, so ignore that file.
-                environment(env + mapOf("GOENV" to "off", "GOTOOLCHAIN" to "local", "GOWORK" to "off",
+                environment(mapOf("GOENV" to "off", "GOTOOLCHAIN" to "local", "GOWORK" to "off",
                     "GOFLAGS" to "", "GOEXPERIMENT" to "", "GOFIPS140" to "off", "GOAMD64" to "v1", "GOARM64" to "v8.0",
-                    "CGO_CFLAGS" to "-O2 -g", "CGO_CPPFLAGS" to "", "CGO_LDFLAGS" to "-O2 -g"))
+                    "CGO_CFLAGS" to "-O2 -g", "CGO_CPPFLAGS" to "", "CGO_LDFLAGS" to "-O2 -g") + env)
                 standardOutput = output
+                isIgnoreExitValue = true
             }
+            // staticcheck reports on standard output.
+            if (result.exitValue != 0) throw GradleException("${File(tool).name} ${args.first()} failed:\n$output")
             return output.toString(Charsets.UTF_8)
         }
         val source = sources.get().asFile
@@ -105,8 +108,11 @@ abstract class BuildGoLibrary @Inject constructor(
         workspace.resolve("go.mod").appendText("\nreplace tailscale.com => ./tailscale\n")
         val flags = arrayOf("-mod=readonly", "-trimpath", "-buildvcs=false", "-tags=" + buildTags.get().joinToString(","))
         val target = mapOf("GOOS" to "android", "GOARCH" to arch, "CGO_ENABLED" to "1", "CC" to compiler.absolutePath)
-        // Vet the exact configuration we ship; matching flags share the build cache with go build.
+        // Check the exact configuration we ship; matching flags share the build cache with go build.
         go(workspace, "vet", *flags, ".", env = target)
+        // staticcheck is pinned by go.mod's tool directive and built for the host.
+        go(workspace, ".", env = target + ("GOFLAGS" to flags.joinToString(" ")),
+            tool = go(workspace, "tool", "-n", "staticcheck").trim())
         go(workspace, "build", *flags, "-buildmode=c-shared",
             "-ldflags=-s -buildid=", // The NDK aligns to 16 KiB; VerifyNativeAar checks it.
             "-o", output.resolve("libklethron_tsnet.so").absolutePath, ".", env = target)

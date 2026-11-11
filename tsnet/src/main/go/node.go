@@ -118,7 +118,7 @@ func (n *node) watchStatus(refresh chan<- struct{}) {
 					}
 				}
 			}
-			watcher.Close()
+			_ = watcher.Close()
 		}
 		select {
 		case <-n.ctx.Done():

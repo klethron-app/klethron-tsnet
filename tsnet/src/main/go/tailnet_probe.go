@@ -15,6 +15,7 @@ import (
 	"net/http/httptest"
 	"net/netip"
 	"os"
+	"slices"
 	"sync"
 	"time"
 
@@ -114,8 +115,8 @@ func startLoopbackTailnet(ctx context.Context, dir string) (*loopbackTailnet, st
 
 // close stops nodes before the servers they use.
 func (t *loopbackTailnet) close() {
-	for i := len(t.closers) - 1; i >= 0; i-- {
-		t.closers[i]()
+	for _, closer := range slices.Backward(t.closers) {
+		closer()
 	}
 }
 

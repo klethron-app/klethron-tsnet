@@ -1,5 +1,6 @@
 package main
 
+// #cgo CFLAGS: -Wall -Wextra -Wno-unused-parameter -Werror -fstack-protector-strong
 import "C"
 
 import (
