@@ -45,16 +45,13 @@ func loadPlatformRoots() []*x509.Certificate {
 func readCertificates(directory string) (certs []*x509.Certificate) {
 	entries, _ := os.ReadDir(directory)
 	for _, entry := range entries {
-		data, err := os.ReadFile(filepath.Join(directory, entry.Name()))
-		if err != nil {
-			continue
+		// One certificate per file: PEM for system roots, DER for those the user disabled.
+		data, _ := os.ReadFile(filepath.Join(directory, entry.Name()))
+		if block, _ := pem.Decode(data); block != nil {
+			data = block.Bytes
 		}
-		for block, rest := pem.Decode(data); block != nil; block, rest = pem.Decode(rest) {
-			if block.Type == "CERTIFICATE" {
-				if cert, err := x509.ParseCertificate(block.Bytes); err == nil {
-					certs = append(certs, cert)
-				}
-			}
+		if cert, err := x509.ParseCertificate(data); err == nil {
+			certs = append(certs, cert)
 		}
 	}
 	return certs
