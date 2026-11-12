@@ -62,7 +62,7 @@ androidComponents.onVariants { variant ->
 
     // Audit the binaries actually packaged in each variant, not the wider go.mod graph.
     val aar = variant.artifacts.get(SingleArtifact.AAR)
-    tasks.register<VerifyNativeNotices>("verify${variant.name.replaceFirstChar { it.uppercase() }}NativeNotices") {
+    tasks.register<VerifyNativeNotices>(variant.computeTaskName("verify", "NativeNotices")) {
         this.aar = aar
         notices = layout.projectDirectory.dir("src/main/assets/klethron-tsnet/licenses")
         if (debug) debugNotices = layout.projectDirectory.dir("src/debug/assets/klethron-tsnet/licenses")

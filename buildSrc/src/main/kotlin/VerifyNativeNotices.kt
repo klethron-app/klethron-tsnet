@@ -1,7 +1,5 @@
 import java.io.ByteArrayOutputStream
 import java.io.File
-import java.security.MessageDigest
-import java.util.HexFormat
 import java.util.zip.ZipFile
 import javax.inject.Inject
 import org.gradle.api.DefaultTask
@@ -57,8 +55,8 @@ abstract class VerifyNativeNotices @Inject constructor(private val exec: ExecOpe
             requireFile(directory.resolve(path), "Missing notice $path")
         }
         // Per-file notices come from a manual source review; any toolchain, module or build tag change invalidates it.
-        val reviewedHash = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(
-            directory.resolve("GO-MODULES.tsv").readBytes() + releaseTags.get().sorted().joinToString(",").toByteArray()))
+        val reviewedHash = sha256(directory.resolve("GO-MODULES.tsv").readBytes() +
+            releaseTags.get().sorted().joinToString(",").toByteArray())
         val reviewed = "Reviewed for Go ${goVersion.get()}, NDK ${ndkVersion.get()}, and GO-MODULES.tsv with the release\n" +
             "build tags (SHA-256 $reviewedHash)."
         requireNotice(reviewed in directory.resolve("FILE-NOTICES").readText(),
@@ -77,7 +75,6 @@ abstract class VerifyNativeNotices @Inject constructor(private val exec: ExecOpe
             }
         }
         val debugDirectory = debugNotices.orNull?.asFile
-        val directories = listOfNotNull(directory, debugDirectory)
         val modules = inventory(directory, "GO-MODULES.tsv") +
             debugDirectory?.let { inventory(it, "GO-MODULES-DEBUG.tsv") }.orEmpty()
         val expected = modules.map { it.take(3) }.toSet()
@@ -87,7 +84,7 @@ abstract class VerifyNativeNotices @Inject constructor(private val exec: ExecOpe
             "GO-MODULES.tsv's tailscale.com row differs from go.sum")
         val results = StringBuilder("entry\tmodule_count\n")
         ZipFile(aar.get().asFile).use { zip ->
-            for (root in directories) for (file in root.walkTopDown().filter { it.isFile }) {
+            for (root in listOfNotNull(directory, debugDirectory)) for (file in root.walkTopDown().filter { it.isFile }) {
                 val path = "assets/klethron-tsnet/licenses/" + file.relativeTo(root).invariantSeparatorsPath
                 val entry = zip.getEntry(path)
                 requireNotice(entry != null, "AAR is missing $path")

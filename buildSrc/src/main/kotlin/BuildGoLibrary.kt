@@ -20,6 +20,8 @@ import org.gradle.api.tasks.TaskAction
 import org.gradle.process.ExecOperations
 import org.gradle.work.DisableCachingByDefault
 
+fun sha256(bytes: ByteArray): String = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes))
+
 @DisableCachingByDefault(because = "Uses locally installed, version-checked Go and NDK toolchains")
 abstract class BuildGoLibrary @Inject constructor(
     private val exec: ExecOperations,
@@ -89,11 +91,10 @@ abstract class BuildGoLibrary @Inject constructor(
             }
         }
         // Replaces the only occurrence of `old` in an upstream file with the given SHA-256.
-        fun patch(path: String, sha256: String, old: String, new: String) {
+        fun patch(path: String, hash: String, old: String, new: String) {
             val original = upstream.resolve(path).readBytes()
             val text = original.toString(Charsets.UTF_8)
-            if (HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(original)) != sha256 ||
-                text.split(old).size != 2) {
+            if (sha256(original) != hash || text.split(old).size != 2) {
                 throw GradleException("Pinned $path changed; review TAILSCALE-MODIFICATIONS before building")
             }
             workspace.resolve("tailscale/$path").writeText(text.replace(old, new))
