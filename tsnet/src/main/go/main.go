@@ -85,7 +85,6 @@ func klethron_node_login(id C.longlong) C.int {
 func klethron_node_close(id C.longlong) {
 	if n := lookupNode(id); n != nil {
 		n.close()
-		// Keep the node reachable until shutdown finishes so concurrent closes wait for it.
 		nodes.Lock()
 		delete(nodes.byID, int64(id))
 		nodes.Unlock()

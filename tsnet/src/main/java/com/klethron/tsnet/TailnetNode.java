@@ -26,7 +26,6 @@ import java.time.Duration;
 import java.util.HashSet;
 import java.util.Objects;
 import java.util.Set;
-import java.util.concurrent.atomic.AtomicBoolean;
 import org.jspecify.annotations.Nullable;
 
 /// An embedded tsnet node: one device in a [tailnet](https://tailscale.com/kb/1136/tailnet), with
@@ -72,7 +71,7 @@ public final class TailnetNode implements AutoCloseable {
 
     private final long handle;
     private final String directory;
-    private final AtomicBoolean closed = new AtomicBoolean();
+    private boolean closed; // Guarded by this.
 
     private TailnetNode(long handle, String directory) {
         this.handle = handle;
@@ -224,9 +223,11 @@ public final class TailnetNode implements AutoCloseable {
     /// concurrent calls are safe.
     @WorkerThread
     @Override
-    public void close() {
+    public synchronized void close() {
+        // Serialized, so no call returns before the directory is free.
         nativeClose(handle);
-        if (!closed.getAndSet(true)) release(directory);
+        if (!closed) release(directory);
+        closed = true;
     }
 
     /// Maps node.go's negative results to exceptions.
