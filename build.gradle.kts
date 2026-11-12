@@ -36,7 +36,6 @@ subprojects {
         }
     }
 
-    // javac, doclint and Error Prone warnings fail the build; NullAway checks @NullMarked packages.
     apply(plugin = "net.ltgt.errorprone")
     dependencies {
         "errorprone"(libs.errorprone.core)

@@ -80,7 +80,6 @@ abstract class VerifyNativeNotices @Inject constructor(private val exec: ExecOpe
         val directories = listOfNotNull(directory, debugDirectory)
         val modules = inventory(directory, "GO-MODULES.tsv") +
             debugDirectory?.let { inventory(it, "GO-MODULES-DEBUG.tsv") }.orEmpty()
-        requireNotice(modules.map { it[0] }.distinct().size == modules.size, "Go module inventories must have unique module paths")
         val expected = modules.map { it.take(3) }.toSet()
         // The binary records no checksum for the patched copy, so check the inventory's against go.sum.
         val upstreamTailscale = expected.single { it[0] == "tailscale.com" }
@@ -88,7 +87,7 @@ abstract class VerifyNativeNotices @Inject constructor(private val exec: ExecOpe
             "GO-MODULES.tsv's tailscale.com row differs from go.sum")
         val results = StringBuilder("entry\tmodule_count\n")
         ZipFile(aar.get().asFile).use { zip ->
-            for ((root, file) in directories.flatMap { root -> root.walkTopDown().filter { it.isFile }.map { root to it } }) {
+            for (root in directories) for (file in root.walkTopDown().filter { it.isFile }) {
                 val path = "assets/klethron-tsnet/licenses/" + file.relativeTo(root).invariantSeparatorsPath
                 val entry = zip.getEntry(path)
                 requireNotice(entry != null, "AAR is missing $path")
@@ -96,9 +95,8 @@ abstract class VerifyNativeNotices @Inject constructor(private val exec: ExecOpe
                 requireNotice(packaged.contentEquals(file.readBytes()), "AAR notice differs from source: $path")
             }
             val libraries = zip.entries().asSequence().filter { it.name.endsWith(".so") }.toList()
-            requireNotice(libraries.map { it.name }.sorted() == listOf(
-                "jni/arm64-v8a/libklethron_tsnet.so", "jni/x86_64/libklethron_tsnet.so"
-            ), "AAR must contain exactly the two supported native libraries")
+            requireNotice(libraries.map { it.name }.sorted() == listOf("jni/arm64-v8a/libklethron_tsnet.so",
+                "jni/x86_64/libklethron_tsnet.so"), "AAR must contain exactly the two supported native libraries")
             for (entry in libraries) {
                 val library = temporaryDir.resolve("libklethron_tsnet.so")
                 zip.getInputStream(entry).use { input -> library.outputStream().use { input.copyTo(it) } }

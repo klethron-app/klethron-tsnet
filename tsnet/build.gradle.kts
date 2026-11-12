@@ -13,7 +13,7 @@ android {
     publishing { singleVariant("release") { withSourcesJar() } }
 }
 
-// Upstream features this client never uses. gradle/native-feature-audit.init.gradle measures one's size.
+// Upstream features this client never uses.
 val omittedFeatures = listOf(
     // Out of scope: embedded SSH server, web UI, Taildrive, app connectors, self-update.
     "ssh", "webclient", "drive", "appconnectors", "clientupdate",
@@ -110,7 +110,7 @@ publishing {
                         name = "Apache-2.0"
                         url = "https://www.apache.org/licenses/LICENSE-2.0.txt"
                         comments = "This project's code. The native libraries bundle Tailscale, Go and other code " +
-                            "under their own licences, shipped in assets/klethron-tsnet/licenses/ (THIRD-PARTY-NOTICES.md)."
+                            "under their own licences, shipped in the AAR's assets/klethron-tsnet/licenses/."
                     }
                 }
                 developers {

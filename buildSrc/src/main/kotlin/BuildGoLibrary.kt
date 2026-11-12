@@ -61,11 +61,7 @@ abstract class BuildGoLibrary @Inject constructor(
             throw GradleException("Install Go ${goVersion.get()}, then rerun ./gradlew build")
         }
         // The NDK ships Linux binaries for x86_64 only, and universal macOS binaries as darwin-x86_64.
-        val host = when (System.getProperty("os.name")) {
-            "Linux" -> if (System.getProperty("os.arch") == "amd64") "linux-x86_64" else null
-            "Mac OS X" -> "darwin-x86_64"
-            else -> null
-        } ?: throw GradleException("Build native code on Linux x86_64 or macOS with ./gradlew build")
+        val host = if (System.getProperty("os.name") == "Mac OS X") "darwin-x86_64" else "linux-x86_64"
         val ndk = sdkDirectory.dir("ndk/${ndkVersion.get()}").get().asFile
         val (arch, triple) = when (abi.get()) {
             "arm64-v8a" -> "arm64" to "aarch64-linux-android"
@@ -74,7 +70,7 @@ abstract class BuildGoLibrary @Inject constructor(
         }
         val compiler = ndk.resolve("toolchains/llvm/prebuilt/$host/bin/$triple${api.get()}-clang")
         if (!compiler.isFile) {
-            throw GradleException("Install the NDK with sdkmanager 'ndk;${ndkVersion.get()}', then rerun ./gradlew build")
+            throw GradleException("On Linux x86_64 or macOS, install the NDK with sdkmanager 'ndk;${ndkVersion.get()}', then rerun ./gradlew build")
         }
         // Patch an isolated copy of the pinned source, without changing the module cache.
         // See the distributed TAILSCALE-MODIFICATIONS notice for the upstream diff.

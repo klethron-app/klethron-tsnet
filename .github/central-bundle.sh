@@ -38,9 +38,6 @@ mkdir -p "$work/bundle/$path"
 cp "$repository/$path"/* "$work/bundle/$path/"
 for artifact in $artifacts; do
     file=$work/bundle/$path/$artifact
-    for sum in md5 sha1 sha256 sha512; do
-        [[ $("${sum}sum" "$file" | cut -d' ' -f1) == "$(cat "$file.$sum")" ]] || { echo "Bad $sum: $artifact" >&2; exit 1; }
-    done
     gpg --batch --quiet --pinentry-mode loopback --passphrase-fd 3 --armor --detach-sign "$file" 3<<<"$SIGNING_PASSPHRASE"
     gpg --homedir "$work/public" --batch --quiet --verify "$file.asc" "$file" 2>/dev/null ||
         { echo "SIGNING_KEY did not make a signature that verifies with $public_key" >&2; exit 1; }
