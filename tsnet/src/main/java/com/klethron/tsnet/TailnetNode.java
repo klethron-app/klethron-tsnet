@@ -156,35 +156,40 @@ public final class TailnetNode implements AutoCloseable {
     }
 
     /// Opens a TCP connection to a tailnet address or
-    /// [MagicDNS](https://tailscale.com/kb/1081/magicdns) name. `timeout` covers both waiting for
-    /// [NodeStatus.State#RUNNING] and connecting. Only peers and subnet routes in this node's network
-    /// map are reachable. Names resolve only through the tailnet: peers' names from the network map,
-    /// others through the tailnet's DNS settings. The device's resolver never sees them.
+    /// [MagicDNS](https://tailscale.com/kb/1081/magicdns) name and relays it onto `socket`. `timeout`
+    /// covers both waiting for [NodeStatus.State#RUNNING] and connecting. Only peers and subnet routes
+    /// in this node's network map are reachable. Names resolve only through the tailnet: peers' names
+    /// from the network map, others through the tailnet's DNS settings. The device's resolver never
+    /// sees them.
     ///
-    /// The caller owns the returned blocking Unix stream socket. Use [java.io.FileInputStream] and
-    /// [java.io.FileOutputStream] on its descriptor, or [android.system.Os]. End of stream leaves the
-    /// connection writable, but a reset or failure can also appear as end of stream. Closing the
-    /// descriptor or shutting down its output ends the whole connection once written data is
-    /// delivered, or can reset it if received data is left unread. All connections end at once when the
-    /// node closes or loses tailnet access: when it leaves [NodeStatus.State#RUNNING] for a state
-    /// other than [NodeStatus.State#STARTING], as on logout, key expiry or device removal.
+    /// `socket` is a connected TCP or Unix stream socket. The node owns it from the call on, closing it
+    /// if the dial fails, and the caller uses its other end: of a loopback TCP pair for
+    /// [java.nio.channels.SocketChannel] selectors, which do not support Unix sockets, or of
+    /// [ParcelFileDescriptor#createSocketPair()] for file streams. End of stream means that the peer
+    /// closed its side, leaving the connection writable. Closing the caller's end or shutting down its
+    /// output ends the whole connection once written data is delivered, or can reset it if received
+    /// data is left unread. The connection resets if it fails, and all connections reset at once when
+    /// the node closes or loses tailnet access: when it leaves [NodeStatus.State#RUNNING] for a state
+    /// other than [NodeStatus.State#STARTING], as on logout, key expiry or device removal. A Unix
+    /// socket reads a reset as end of stream unless data written to it is unread.
     ///
     /// @param host a tailnet IP address or MagicDNS name, at most 255 UTF-8 bytes
-    /// @throws IllegalArgumentException if the host is invalid or the port is not 1–65535
+    /// @throws IllegalArgumentException if the host is invalid, the port is not 1–65535, or `socket` is
+    /// not a connected stream socket
     /// @throws ClosedChannelException if the node is or becomes closed
     /// @throws UnknownHostException if the tailnet's DNS cannot resolve `host`
     /// @throws NoRouteToHostException if the address is outside the tailnet; it never falls back to a local connection
     /// @throws SocketTimeoutException if the timeout elapses first
     /// @throws ConnectException if the connection fails
     @WorkerThread
-    public ParcelFileDescriptor dial(String host, int port, Duration timeout) throws IOException {
-        byte[] name = host.getBytes(StandardCharsets.UTF_8);
-        if (name.length == 0 || name.length > 255 || host.indexOf(0) >= 0 || port < 1 || port > 65535) {
-            throw new IllegalArgumentException("Host must have 1–255 bytes without NUL and port must be 1–65535");
+    public void dial(String host, int port, ParcelFileDescriptor socket, Duration timeout) throws IOException {
+        try (socket) { // Closes it unless passed on.
+            byte[] name = host.getBytes(StandardCharsets.UTF_8);
+            if (name.length == 0 || name.length > 255 || host.indexOf(0) >= 0 || port < 1 || port > 65535) {
+                throw new IllegalArgumentException("Host must have 1–255 bytes without NUL and port must be 1–65535");
+            }
+            check(nativeDial(handle, name, port, socket.detachFd(), NANOSECONDS.convert(timeout)));
         }
-        int result = nativeDial(handle, name, port, NANOSECONDS.convert(timeout));
-        check(result);
-        return ParcelFileDescriptor.adoptFd(result);
     }
 
     /// Ends this node's tailnet access and connections, and deletes its saved login. The node stays
@@ -252,7 +257,7 @@ public final class TailnetNode implements AutoCloseable {
 
     private static native @Nullable String nativeAwaitStatus(long handle, long afterVersion, long timeoutNanos);
 
-    private static native int nativeDial(long handle, byte[] host, int port, long timeoutNanos);
+    private static native int nativeDial(long handle, byte[] host, int port, int socket, long timeoutNanos);
 
     private static native int nativeLogout(long handle, long timeoutNanos);
 

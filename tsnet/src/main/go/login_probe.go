@@ -127,7 +127,7 @@ func startPeer(dir string) string {
 }
 
 // floodBytes exceeds what the dialer and peer can buffer for one connection: netstack's 8 MiB
-// receive and 6 MiB send buffers, plus the relay's socket pair.
+// receive and 6 MiB send buffers, plus the relayed socket pair's.
 const floodBytes = 48 << 20
 
 // countReceived reads conn to its end, returning the bytes read, -1 after a read error, or with

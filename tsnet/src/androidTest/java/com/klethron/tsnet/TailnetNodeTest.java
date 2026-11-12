@@ -5,8 +5,11 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
+import android.os.ParcelFileDescriptor;
+import java.net.DatagramSocket;
 import java.net.SocketTimeoutException;
 import java.nio.channels.ClosedChannelException;
+import java.nio.channels.SocketChannel;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
@@ -42,12 +45,18 @@ public final class TailnetNodeTest {
         Path directory = LoginTest.temporaryDirectory("close-");
         try (TailnetNode node = TailnetNode.start(LoginTest.CONTEXT, directory.toFile(), "close", "http://127.0.0.1:1")) {
             for (String host : new String[] {"", "a".repeat(256), "a\0b"}) {
-                assertThrows(IllegalArgumentException.class, () -> node.dial(host, 22, Duration.ZERO));
+                DialTest.assertDialThrows(IllegalArgumentException.class, node, host, 22, Duration.ZERO);
             }
-            assertThrows(IllegalArgumentException.class, () -> node.dial("100.64.0.1", 0, Duration.ZERO));
-            assertThrows(IllegalArgumentException.class, () -> node.dial("100.64.0.1", 65536, Duration.ZERO));
+            DialTest.assertDialThrows(IllegalArgumentException.class, node, "100.64.0.1", 0, Duration.ZERO);
+            DialTest.assertDialThrows(IllegalArgumentException.class, node, "100.64.0.1", 65536, Duration.ZERO);
+            try (DatagramSocket datagram = new DatagramSocket(); SocketChannel unconnected = SocketChannel.open()) {
+                for (ParcelFileDescriptor socket : List.of(ParcelFileDescriptor.fromDatagramSocket(datagram),
+                        ParcelFileDescriptor.fromSocket(unconnected.socket()))) {
+                    assertThrows(IllegalArgumentException.class, () -> node.dial("100.64.0.1", 22, socket, Duration.ZERO));
+                }
+            }
             // The node never runs.
-            assertThrows(SocketTimeoutException.class, () -> node.dial("100.64.0.1", 22, Duration.ofSeconds(-1)));
+            DialTest.assertDialThrows(SocketTimeoutException.class, node, "100.64.0.1", 22, Duration.ofSeconds(-1));
             // Longer than a long of nanoseconds: the waits saturate instead of overflowing.
             Duration forever = Duration.ofSeconds(Long.MAX_VALUE);
             NodeStatus first = node.awaitStatus(null, Duration.ZERO);
@@ -55,15 +64,15 @@ public final class TailnetNodeTest {
                     CompletableFuture.supplyAsync(() -> assertThrows(ClosedChannelException.class, () -> {
                         for (NodeStatus latest = first; ; ) latest = node.awaitStatus(latest, forever);
                     })),
-                    CompletableFuture.supplyAsync(() -> assertThrows(ClosedChannelException.class,
-                            () -> node.dial("100.64.0.1", 22, forever))));
+                    CompletableFuture.supplyAsync(() ->
+                            DialTest.assertDialThrows(ClosedChannelException.class, node, "100.64.0.1", 22, forever)));
             Thread.sleep(200); // Best effort: let both calls block.
             assertFalse(blocked.stream().anyMatch(CompletableFuture::isDone));
             node.close();
             for (var call : blocked) call.get(10, TimeUnit.SECONDS);
             node.close();
             assertThrows(ClosedChannelException.class, () -> node.awaitStatus(null, Duration.ZERO));
-            assertThrows(ClosedChannelException.class, () -> node.dial("100.64.0.1", 22, Duration.ZERO));
+            DialTest.assertDialThrows(ClosedChannelException.class, node, "100.64.0.1", 22, Duration.ZERO);
             assertThrows(ClosedChannelException.class, () -> node.logout(Duration.ZERO));
             assertThrows(ClosedChannelException.class, node::login);
         } finally {

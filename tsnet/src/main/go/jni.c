@@ -1,5 +1,6 @@
 #include <jni.h>
 #include <stdlib.h>
+#include <unistd.h>
 #include "_cgo_export.h"
 
 // Returns s as a Java string, or NULL if s is, and frees it. s is ASCII, so modified UTF-8 suffices.
@@ -47,13 +48,16 @@ Java_com_klethron_tsnet_TailnetNode_nativeSetDefaultNetwork(JNIEnv *env, jclass 
 }
 
 JNIEXPORT jint JNICALL
-Java_com_klethron_tsnet_TailnetNode_nativeDial(JNIEnv *env, jclass type, jlong handle, jbyteArray host, jint port, jlong timeout) {
+Java_com_klethron_tsnet_TailnetNode_nativeDial(JNIEnv *env, jclass type, jlong handle, jbyteArray host, jint port, jint socket, jlong timeout) {
     // Java limits hosts to 255 UTF-8 bytes; copy exact bytes rather than modified UTF-8.
     char bytes[256];
     jsize length = (*env)->GetArrayLength(env, host);
-    if (length >= (jsize) sizeof bytes) return -2; // Invalid; Java checks first.
+    if (length >= (jsize) sizeof bytes) { // Invalid; Java checks first.
+        close(socket);
+        return -2;
+    }
     (*env)->GetByteArrayRegion(env, host, 0, length, (jbyte *) bytes);
-    return klethron_node_dial(handle, bytes, length, port, timeout);
+    return klethron_node_dial(handle, bytes, length, port, socket, timeout);
 }
 
 JNIEXPORT jint JNICALL

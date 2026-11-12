@@ -179,7 +179,7 @@ public final class LoginTest {
             assertEquals(HOSTNAME, status.dnsName());
             // No login URL arrives by itself, and the tailnet is unreachable.
             assertNull(node.awaitStatus(status, Duration.ofSeconds(2)).loginUrl());
-            assertThrows(SocketTimeoutException.class, () -> node.dial(addresses.get(0).getHostAddress(), 7070, Duration.ofMillis(500)));
+            DialTest.assertDialThrows(SocketTimeoutException.class, node, addresses.get(0).getHostAddress(), 7070, Duration.ofMillis(500));
 
             node.login();
             status = await(node, s -> s.loginUrl() != null);

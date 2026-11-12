@@ -57,8 +57,10 @@ try (TailnetNode node = TailnetNode.start(context, directory, "my-device")) {
         }
     } while (status.state() != NodeStatus.State.RUNNING || status.loginUrl() != null);
 
-    try (ParcelFileDescriptor connection = node.dial("my-server", 443, Duration.ofSeconds(30))) {
-        // Read/write the connected socket using android.system.Os or file streams.
+    ParcelFileDescriptor[] pair = ParcelFileDescriptor.createSocketPair();
+    try (ParcelFileDescriptor connection = pair[0]) {
+        node.dial("my-server", 443, pair[1], Duration.ofSeconds(30));
+        // Read/write the connection using android.system.Os or file streams.
     }
 }
 ```
@@ -71,8 +73,9 @@ then resumes that identity. The status also names this device, its tailnet and t
 system, online state, addresses and [Tailscale SSH](https://tailscale.com/kb/1193/tailscale-ssh) host
 keys, so users can pick a device and SSH clients can verify it without trust-on-first-use.
 
-[`dial`][dial] accepts a tailnet IP address or MagicDNS name and returns a socket descriptor owned by the
-caller. It reaches only peers and subnet routes, and resolves names only through the tailnet.
+[`dial`][dial] accepts a tailnet IP address or MagicDNS name and relays the connection onto a stream
+socket from the caller. For NIO selectors, which cannot use Unix sockets, pass one end of a loopback TCP
+pair. It reaches only peers and subnet routes, and resolves names only through the tailnet.
 [`close`][close] ends its connections but keeps its identity. [`logout`][logout], key expiry and device
 removal end tailnet access and connections; [`login`][login] starts authorization again. The app decides
 how long to keep the node alive and whether to run a service.
@@ -90,7 +93,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) to build, test or use a checkout. Origina
 [TailnetNode]: https://javadoc.io/doc/com.klethron/tsnet/latest/com/klethron/tsnet/TailnetNode.html
 [awaitStatus]: https://javadoc.io/doc/com.klethron/tsnet/latest/com/klethron/tsnet/TailnetNode.html#awaitStatus(com.klethron.tsnet.NodeStatus,java.time.Duration)
 [peers]: https://javadoc.io/doc/com.klethron/tsnet/latest/com/klethron/tsnet/NodeStatus.html#peers()
-[dial]: https://javadoc.io/doc/com.klethron/tsnet/latest/com/klethron/tsnet/TailnetNode.html#dial(java.lang.String,int,java.time.Duration)
+[dial]: https://javadoc.io/doc/com.klethron/tsnet/latest/com/klethron/tsnet/TailnetNode.html#dial(java.lang.String,int,android.os.ParcelFileDescriptor,java.time.Duration)
 [close]: https://javadoc.io/doc/com.klethron/tsnet/latest/com/klethron/tsnet/TailnetNode.html#close()
 [logout]: https://javadoc.io/doc/com.klethron/tsnet/latest/com/klethron/tsnet/TailnetNode.html#logout(java.time.Duration)
 [login]: https://javadoc.io/doc/com.klethron/tsnet/latest/com/klethron/tsnet/TailnetNode.html#login()

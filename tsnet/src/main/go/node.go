@@ -14,7 +14,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"tailscale.com/client/local"
@@ -312,7 +311,7 @@ func (n *node) wait(ctx context.Context, done func(nodeStatus, uint64) bool) (no
 	}
 }
 
-// Negative results, which TailnetNode.check maps to exceptions; only jni.c returns resultInvalid.
+// Negative results, which TailnetNode.check maps to exceptions.
 const (
 	resultClosed = -1 - iota
 	resultInvalid
@@ -352,10 +351,19 @@ func (n *node) failed(ctx context.Context, result int) int {
 	return result
 }
 
-// dial connects to host:port through the tailnet and returns one end of a Unix socket pair that
-// relays the connection, owned by the caller, or a dial result. It waits up to timeout for the
-// node to run. TailnetNode validates the host and port.
-func (n *node) dial(host string, port uint16, timeout time.Duration) int {
+// dial connects to host:port through the tailnet and relays the connection onto fd, a connected
+// stream socket that it owns from now on and closes on failure. It returns 0 or a dial result, and
+// waits up to timeout for the node to run. TailnetNode validates the host and port.
+func (n *node) dial(host string, port uint16, fd int, timeout time.Duration) (result int) {
+	app := streamSocket(fd)
+	if app == nil {
+		return resultInvalid
+	}
+	defer func() {
+		if result != 0 {
+			_ = app.Close()
+		}
+	}()
 	ctx, done, result := n.whenOpen(timeout)
 	if result != 0 {
 		return result
@@ -384,12 +392,24 @@ func (n *node) dial(host string, port uint16, timeout time.Duration) int {
 	if err != nil {
 		return n.failed(ctx, resultDialFailed)
 	}
-	fd, err := relay(access, conn)
+	relay(access, conn, app)
+	return 0
+}
+
+// streamSocket takes ownership of fd and returns it as a connection, or nil, having closed it, if it
+// is not a connected TCP or Unix stream socket.
+func streamSocket(fd int) net.Conn {
+	file := os.NewFile(uintptr(fd), "socket")
+	conn, err := net.FileConn(file) // A duplicate descriptor.
+	_ = file.Close()
 	if err != nil {
-		_ = conn.Close()
-		return n.failed(ctx, resultDialFailed)
+		return nil
 	}
-	return fd
+	if network := conn.LocalAddr().Network(); (network != "tcp" && network != "unix") || conn.RemoteAddr() == nil {
+		_ = conn.Close()
+		return nil
+	}
+	return conn
 }
 
 // logout asks control to expire this node's key, then deletes the node's profile from its state,
@@ -438,38 +458,32 @@ func (n *node) login() int {
 	return 0
 }
 
-// relay copies between conn and one end of a new socket pair until either side or ctx ends, and
-// returns the other end's descriptor; TailnetNode.dial documents the stream semantics. Failures and
-// the end of ctx close the app's socket: it reads end of stream, or a reset if data it wrote is unread.
-func relay(ctx context.Context, conn net.Conn) (int, error) {
-	fds, err := syscall.Socketpair(syscall.AF_UNIX, syscall.SOCK_STREAM|syscall.SOCK_CLOEXEC, 0)
-	if err != nil {
-		return -1, err
+// relay copies between conn and the app's socket until either side or ctx ends; TailnetNode.dial
+// documents the stream semantics. Failures and the end of ctx reset a TCP socket; a Unix socket reads
+// end of stream, or a reset if data it wrote is unread.
+func relay(ctx context.Context, conn, app net.Conn) {
+	var once sync.Once
+	end := func(reset bool) {
+		once.Do(func() {
+			if tcp, ok := app.(*net.TCPConn); ok && reset {
+				_ = tcp.SetLinger(0)
+			}
+			_ = conn.Close() // Also unblocks the other copy.
+			_ = app.Close()
+		})
 	}
-	file := os.NewFile(uintptr(fds[0]), "relay")
-	app, err := net.FileConn(file) // A duplicate descriptor.
-	_ = file.Close()
-	if err != nil {
-		_ = syscall.Close(fds[1])
-		return -1, err
-	}
-	end := sync.OnceFunc(func() {
-		_ = conn.Close() // Also unblocks the other copy.
-		_ = app.Close()
-	})
 	// Closing conn alone cannot interrupt a copy blocked writing to the app's socket.
-	unwatch := context.AfterFunc(ctx, end)
+	unwatch := context.AfterFunc(ctx, func() { end(true) })
 	go func() {
-		if _, err := io.Copy(app, conn); err != nil || app.(*net.UnixConn).CloseWrite() != nil {
-			end() // The other copy then ends and unwatches.
+		if _, err := io.Copy(app, conn); err != nil || app.(interface{ CloseWrite() error }).CloseWrite() != nil {
+			end(true) // The other copy then ends and unwatches.
 		}
 	}()
 	go func() {
-		_, _ = io.Copy(conn, app)
+		_, err := io.Copy(conn, app)
 		unwatch()
-		end()
+		end(err != nil)
 	}()
-	return fds[1], nil
 }
 
 // Java enum names, in NodeStatus.State, other than NO_STATE. InUseOtherUser is Windows-only.

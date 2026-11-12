@@ -67,8 +67,8 @@ func klethron_node_await_status(id C.longlong, after C.longlong, timeout C.longl
 }
 
 //export klethron_node_dial
-func klethron_node_dial(id C.longlong, host *C.char, length C.int, port C.int, timeout C.longlong) C.int {
-	return C.int(lookupNode(id).dial(C.GoStringN(host, length), uint16(port), time.Duration(timeout)))
+func klethron_node_dial(id C.longlong, host *C.char, length C.int, port C.int, socket C.int, timeout C.longlong) C.int {
+	return C.int(lookupNode(id).dial(C.GoStringN(host, length), uint16(port), int(socket), time.Duration(timeout)))
 }
 
 //export klethron_node_logout
