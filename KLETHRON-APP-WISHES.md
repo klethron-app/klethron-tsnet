@@ -1,9 +1,8 @@
 # Wishes from the Klethron app
 
 Klethron, an SSH terminal for Android, plans to ship this library in an on-demand Play feature module
-(`TAILSCALE-PLAN.md` in the Klethron repository). That plan was reviewed against 0.6.0. These changes
-would let Klethron integrate without workarounds. The first is declined and says what Klethron can do
-instead; the second is a packaging detail. Delete each entry once it ships.
+(`TAILSCALE-PLAN.md` in the Klethron repository). Delete each wish once it ships; declined wishes stay,
+saying what Klethron can do instead.
 
 ## 1. A stable ID for each peer: declined
 
@@ -27,10 +26,9 @@ name and require the same keys, with an explicit prompt to accept changed ones.
 
 ## 2. Load the native library after an on-demand install (only if needed)
 
-**Wanted:** only if Klethron's staged-install test shows the need: a way to use `TailnetNode` when
-`System.loadLibrary("klethron_tsnet")` cannot find a library the caller has already loaded. For example,
-the static initializer could catch `UnsatisfiedLinkError`, try a native call such as
-`tailscaleVersion()`, and rethrow the original error only if that call fails too.
+**Wanted:** a way to use `TailnetNode` when `System.loadLibrary("klethron_tsnet")` cannot find a library
+the caller has already loaded. For example, the static initializer could catch `UnsatisfiedLinkError`,
+try a native call such as `tailscaleVersion()`, and rethrow the original error only if that call fails too.
 
 **Why:** Klethron delivers this library in a Play feature module that is installed while the app runs.
 Play's documentation tells apps to load such libraries with `SplitInstallHelper.loadLibrary` after

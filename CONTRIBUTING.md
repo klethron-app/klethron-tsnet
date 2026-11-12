@@ -18,9 +18,10 @@ ANDROID_SERIAL=<serial> ./gradlew :demo:connectedReleaseAndroidTest
 CI runs both device suites on x86_64 emulators with API 34/4 KiB pages and API 37.2/16 KiB pages for
 main, pull requests and release tags. Its `reports` artifact includes per-device results.
 
-Device tests require SELinux Enforcing. The network-change test requires Wi-Fi with a cellular
-fallback and toggles Wi-Fi; use USB ADB on hardware. Debug builds include local control-server and peer
-fixtures; release builds exclude them. The demo tests exercise an R8-minified consumer.
+Device tests require SELinux Enforcing and internet access. The network-change test requires Wi-Fi
+with a cellular fallback and toggles Wi-Fi; use USB ADB on hardware. Debug builds include local
+control-server and peer fixtures; release builds exclude them. The demo tests exercise an R8-minified
+consumer.
 
 The AAR is `tsnet/build/outputs/aar/tsnet-release.aar`; native sizes are in
 `tsnet/build/reports/native/sizes.tsv`, and `verifyNativeAar` checks their 16 KiB alignment.
@@ -30,7 +31,8 @@ tailnet and wait for **RUNNING / Login saved**. Echo against a peer you control,
 `socat TCP-LISTEN:7070,fork,reuseaddr EXEC:cat`, by IP and MagicDNS name; then check restart,
 logout/re-login, key expiry, device removal, Wi-Fi/cellular switches and the direct or DERP path in the
 peer's status. Never record login URLs or node state; remove test nodes afterwards. The demo has no
-service, so background suspension can delay login and traffic.
+service, so background suspension can delay login and traffic. `:demo:connectedReleaseAndroidTest`
+uninstalls the demo, discarding its login.
 
 ## Use a checkout in another app
 
