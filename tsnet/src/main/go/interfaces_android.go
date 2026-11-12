@@ -72,16 +72,11 @@ func androidInterfaces() ([]netmon.Interface, error) {
 			if err != nil {
 				return nil, fmt.Errorf("interface %s: %w", name, err)
 			}
-			for _, flag := range []struct {
-				native uint16
-				goFlag net.Flags
-			}{
-				{unix.IFF_UP, net.FlagUp}, {unix.IFF_BROADCAST, net.FlagBroadcast},
-				{unix.IFF_LOOPBACK, net.FlagLoopback}, {unix.IFF_POINTOPOINT, net.FlagPointToPoint},
-				{unix.IFF_MULTICAST, net.FlagMulticast}, {unix.IFF_RUNNING, net.FlagRunning},
-			} {
-				if req.Uint16()&flag.native != 0 {
-					iface.Flags |= flag.goFlag
+			for native, flag := range map[uint16]net.Flags{unix.IFF_UP: net.FlagUp, unix.IFF_BROADCAST: net.FlagBroadcast,
+				unix.IFF_LOOPBACK: net.FlagLoopback, unix.IFF_POINTOPOINT: net.FlagPointToPoint,
+				unix.IFF_MULTICAST: net.FlagMulticast, unix.IFF_RUNNING: net.FlagRunning} {
+				if req.Uint16()&native != 0 {
+					iface.Flags |= flag
 				}
 			}
 			index = len(result)
