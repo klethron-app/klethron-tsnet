@@ -43,9 +43,6 @@ var loginProbe struct {
 func startControl(interactive string) string {
 	loginProbe.Lock()
 	defer loginProbe.Unlock()
-	if loginProbe.control != nil {
-		return ""
-	}
 	control := &testcontrol.Server{RequireAuth: interactive == "true"}
 	if !control.RequireAuth {
 		control.DNSConfig = &tailcfg.DNSConfig{Proxied: true}
@@ -75,7 +72,7 @@ func startControl(interactive string) string {
 func startPeer(dir string) string {
 	loginProbe.Lock()
 	defer loginProbe.Unlock()
-	if loginProbe.control == nil || loginProbe.control.RequireAuth || loginProbe.received != nil {
+	if loginProbe.control == nil {
 		return ""
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -155,7 +152,6 @@ func countReceived(conn net.Conn, pattern bool) int64 {
 	}
 }
 
-// flooded returns the bytes the peer's flooding port has written.
 func flooded(string) string {
 	return strconv.FormatInt(loginProbe.flooded.Load(), 10)
 }
@@ -201,13 +197,13 @@ func withControl(probe func(control *testcontrol.Server, argument string) string
 // setPeerOnline sends the other nodes a patch marking the in-memory peer online, as control does
 // for presence changes, without storing it. It returns whether the peer is registered.
 func setPeerOnline(control *testcontrol.Server, _ string) string {
-	nodes := control.AllNodes()
-	i := slices.IndexFunc(nodes, func(node *tailcfg.Node) bool { return node.Hostinfo.Hostname() == "klethron-peer" })
+	all := control.AllNodes()
+	i := slices.IndexFunc(all, func(node *tailcfg.Node) bool { return node.Hostinfo.Hostname() == "klethron-peer" })
 	if i < 0 {
 		return "false"
 	}
-	patch := &tailcfg.MapResponse{PeersChangedPatch: []*tailcfg.PeerChange{{NodeID: nodes[i].ID, Online: new(true)}}}
-	for _, node := range slices.Delete(nodes, i, i+1) {
+	patch := &tailcfg.MapResponse{PeersChangedPatch: []*tailcfg.PeerChange{{NodeID: all[i].ID, Online: new(true)}}}
+	for _, node := range slices.Delete(all, i, i+1) {
 		control.AddRawMapResponse(node.Key, patch)
 	}
 	return "true"
@@ -242,7 +238,7 @@ func addPeers(control *testcontrol.Server, _ string) string {
 
 // completeLogin acts as the user's browser, approving a login URL, and returns "ok". Like real
 // control, the approval gives a re-login's new node key a fresh expiry.
-func completeLogin(control *testcontrol.Server, loginURL string) string {
+func completeLogin(control *testcontrol.Server, url string) string {
 	// testcontrol stages a re-login's new key as a copy of the expired node.
 	for _, node := range control.AllNodes() {
 		if !node.KeyExpiry.IsZero() && !loginProbe.expired.Contains(node.Key) {
@@ -250,7 +246,7 @@ func completeLogin(control *testcontrol.Server, loginURL string) string {
 			control.UpdateNode(node)
 		}
 	}
-	if !control.CompleteAuth(loginURL) {
+	if !control.CompleteAuth(url) {
 		return "not completed"
 	}
 	return "ok"
@@ -347,11 +343,11 @@ func stopControl(string) string {
 	return ""
 }
 
-// setAuthKeyEnvironment sets TS_AUTHKEY if set is "true", otherwise unsets it. Go copies the
+// setAuthKeyEnvironment sets TS_AUTHKEY if enabled is "true", otherwise unsets it. Go copies the
 // process environment when the library loads; Android's Os.setenv cannot change what upstream
 // reads afterwards, but Go's own os.Setenv does.
-func setAuthKeyEnvironment(set string) string {
-	if set == "true" {
+func setAuthKeyEnvironment(enabled string) string {
+	if enabled == "true" {
 		_ = os.Setenv("TS_AUTHKEY", "tskey-test-not-a-key")
 	} else {
 		_ = os.Unsetenv("TS_AUTHKEY")

@@ -36,10 +36,8 @@ func checkProbeEnvironment() string {
 		return "logtail must be disabled"
 	}
 	// tsnet would send an ambient auth key to control.
-	for _, name := range []string{"TS_AUTHKEY", "TS_AUTH_KEY"} {
-		if os.Getenv(name) != "" {
-			return "unexpected authentication environment"
-		}
+	if os.Getenv("TS_AUTHKEY") != "" || os.Getenv("TS_AUTH_KEY") != "" {
+		return "unexpected authentication environment"
 	}
 	return ""
 }
@@ -188,9 +186,8 @@ func (t *loopbackTailnet) exchange(ctx context.Context) string {
 		return "tailnet dial failed"
 	}
 	defer conn.Close()
-	if deadline, ok := ctx.Deadline(); ok {
-		_ = conn.SetDeadline(deadline)
-	}
+	deadline, _ := ctx.Deadline() // Zero, no deadline, if ctx has none.
+	_ = conn.SetDeadline(deadline)
 	sent := make([]byte, 256<<10)
 	_, _ = rand.Read(sent)
 	written := make(chan error, 1)
@@ -220,8 +217,8 @@ func startLoopbackControl(control *testcontrol.Server) (stop func(), err error) 
 		return nil, err
 	}
 	go serveSTUN(stunConn)
-	relay := derpserver.New(key.NewNode(), logger.Discard)
-	derp := httptest.NewUnstartedServer(derpserver.Handler(relay))
+	derpServer := derpserver.New(key.NewNode(), logger.Discard)
+	derp := httptest.NewUnstartedServer(derpserver.Handler(derpServer))
 	// DERP upgrades HTTP/1.1 connections.
 	derp.Config.TLSNextProto = map[string]func(*http.Server, *tls.Conn, http.Handler){}
 	derp.StartTLS()
@@ -247,7 +244,7 @@ func startLoopbackControl(control *testcontrol.Server) (stop func(), err error) 
 		derp.CloseClientConnections()
 		derp.Close()
 		_ = stunConn.Close()
-		_ = relay.Close()
+		_ = derpServer.Close()
 	}, nil
 }
 
