@@ -1,6 +1,5 @@
-<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
-    android:layout_width="match_parent" android:layout_height="match_parent"
-    android:fillViewport="true" android:fitsSystemWindows="true">
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android" android:fitsSystemWindows="true"
+    android:layout_width="match_parent" android:layout_height="match_parent">
     <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
         android:orientation="vertical" android:padding="24dp">
         <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
@@ -20,11 +19,10 @@
             android:layout_height="wrap_content" android:text="@string/pick_peer" android:enabled="false" />
         <EditText android:id="@+id/peer_host" android:layout_width="match_parent"
             android:layout_height="wrap_content" android:hint="@string/peer_host"
-            android:inputType="textUri" android:singleLine="true" android:importantForAutofill="no" />
+            android:inputType="textUri" android:importantForAutofill="no" />
         <EditText android:id="@+id/peer_port" android:layout_width="match_parent"
-            android:layout_height="wrap_content" android:hint="@string/peer_port"
-            android:inputType="number" android:singleLine="true" android:text="@string/default_peer_port"
-            android:importantForAutofill="no" />
+            android:layout_height="wrap_content" android:hint="@string/peer_port" android:inputType="number"
+            android:text="@string/default_peer_port" android:importantForAutofill="no" />
         <CheckBox android:id="@+id/keep_open" android:layout_width="match_parent"
             android:layout_height="wrap_content" android:text="@string/keep_open" />
         <Button android:id="@+id/exchange" android:layout_width="match_parent"

@@ -7,7 +7,6 @@ android {
     defaultConfig {
         applicationId = "com.klethron.tsnet.demo"
         targetSdk = libs.versions.targetSdk.get().toInt()
-        versionCode = 1
     }
     buildTypes {
         release {
