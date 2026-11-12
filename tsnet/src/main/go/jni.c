@@ -23,7 +23,7 @@ Java_com_klethron_tsnet_TailnetNode_nativeStart(JNIEnv *env, jclass type, jbyteA
 
 JNIEXPORT jstring JNICALL
 Java_com_klethron_tsnet_TailnetNode_nativeAwaitStatus(JNIEnv *env, jclass type, jlong handle, jlong after, jlong timeout) {
-    return javaString(env, klethron_node_await_status(handle, after, timeout)); // NULL once closed.
+    return javaString(env, klethron_node_await_status(handle, after, timeout));
 }
 
 JNIEXPORT void JNICALL

@@ -92,7 +92,7 @@ func (n *node) start(config string) int {
 	return 0
 }
 
-// close wakes waiters and cancels dials. Closing the server ends relayed connections.
+// close ends waiters, calls and relayed connections, and closes the server once calls return.
 func (n *node) close() {
 	n.cancel()
 	n.lifecycle.Lock()
@@ -312,8 +312,7 @@ func (n *node) wait(ctx context.Context, done func(nodeStatus, uint64) bool) (no
 	}
 }
 
-// Failures of calls that otherwise return a file descriptor or 0; TailnetNode.check maps them to
-// exceptions.
+// Negative results, which TailnetNode.check maps to exceptions; only jni.c returns resultInvalid.
 const (
 	resultClosed = -1 - iota
 	resultInvalid
@@ -439,12 +438,9 @@ func (n *node) login() int {
 	return 0
 }
 
-// relay copies between conn and one end of a new socket pair, returning the other end's
-// descriptor. The peer's EOF reaches the app as end of stream while the app may keep writing.
-// Unix sockets cannot signal a reset, so failures and closing ctx also appear as end of stream.
-// The app's EOF (closing the descriptor or shutting down its output) closes the connection once
-// its written data reaches the peer, or resets it if received data is unread; half-closing
-// towards the peer is not supported.
+// relay copies between conn and one end of a new socket pair until either side or ctx ends, and
+// returns the other end's descriptor; TailnetNode.dial documents the stream semantics. Unix
+// sockets cannot signal a reset, so failures and the end of ctx appear as end of stream.
 func relay(ctx context.Context, conn net.Conn) (int, error) {
 	fds, err := syscall.Socketpair(syscall.AF_UNIX, syscall.SOCK_STREAM|syscall.SOCK_CLOEXEC, 0)
 	if err != nil {
@@ -463,18 +459,15 @@ func relay(ctx context.Context, conn net.Conn) (int, error) {
 	})
 	// Closing conn alone cannot interrupt a copy blocked writing to the app's socket.
 	unwatch := context.AfterFunc(ctx, end)
-	finish := func() {
-		unwatch()
-		end()
-	}
 	go func() {
 		if _, err := io.Copy(app, conn); err != nil || app.(*net.UnixConn).CloseWrite() != nil {
-			finish()
+			end() // The other copy then ends and unwatches.
 		}
 	}()
 	go func() {
 		_, _ = io.Copy(conn, app)
-		finish()
+		unwatch()
+		end()
 	}()
 	return fds[1], nil
 }

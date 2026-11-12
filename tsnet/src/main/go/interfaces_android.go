@@ -56,7 +56,6 @@ func androidInterfaces() ([]netmon.Interface, error) {
 				return nil, err
 			}
 			iface := &net.Interface{Name: name}
-			var flags uint16
 			err = unix.IoctlIfreq(fd, unix.SIOCGIFINDEX, req)
 			if err == nil {
 				iface.Index = int(req.Uint32())
@@ -66,11 +65,9 @@ func androidInterfaces() ([]netmon.Interface, error) {
 				iface.MTU = int(req.Uint32())
 				// bionic can leave ifa_flags unset yet return success.
 				err = unix.IoctlIfreq(fd, unix.SIOCGIFFLAGS, req)
-				flags = req.Uint16()
 			}
 			if errors.Is(err, unix.ENODEV) {
-				byName[name] = -1 // Removed since getifaddrs, as during network changes.
-				continue
+				continue // Removed since getifaddrs, as during network changes.
 			}
 			if err != nil {
 				return nil, fmt.Errorf("interface %s: %w", name, err)
@@ -83,16 +80,13 @@ func androidInterfaces() ([]netmon.Interface, error) {
 				{unix.IFF_LOOPBACK, net.FlagLoopback}, {unix.IFF_POINTOPOINT, net.FlagPointToPoint},
 				{unix.IFF_MULTICAST, net.FlagMulticast}, {unix.IFF_RUNNING, net.FlagRunning},
 			} {
-				if flags&flag.native != 0 {
+				if req.Uint16()&flag.native != 0 {
 					iface.Flags |= flag.goFlag
 				}
 			}
 			index = len(result)
 			byName[name] = index
 			result = append(result, netmon.Interface{Interface: iface, AltAddrs: []net.Addr{}})
-		}
-		if index < 0 {
-			continue
 		}
 		result[index].AltAddrs = append(result[index].AltAddrs, &net.IPNet{IP: ip, Mask: mask})
 	}
