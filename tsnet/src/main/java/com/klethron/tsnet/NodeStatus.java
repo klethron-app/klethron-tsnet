@@ -12,7 +12,7 @@ import org.jspecify.annotations.Nullable;
 public final class NodeStatus {
     /// Connection and authorization progress.
     public enum State {
-        /// Starting up locally.
+        /// Starting up locally, also briefly after logout.
         NO_STATE,
         /// Browser authorization is needed. After logout or revocation, call [TailnetNode#login]
         /// to request a new [NodeStatus#loginUrl()].

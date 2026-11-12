@@ -163,9 +163,9 @@ public final class TailnetNode implements AutoCloseable {
     ///
     /// The caller owns the returned blocking Unix stream socket. Use [java.io.FileInputStream] and
     /// [java.io.FileOutputStream] on its descriptor, or [android.system.Os]. End of stream leaves the
-    /// connection writable, but a reset or failure also appears as end of stream. Closing the
+    /// connection writable, but a reset or failure can also appear as end of stream. Closing the
     /// descriptor or shutting down its output ends the whole connection once written data is
-    /// delivered, or resets it if received data is left unread. All connections end at once when the
+    /// delivered, or can reset it if received data is left unread. All connections end at once when the
     /// node closes or loses tailnet access: when it leaves [NodeStatus.State#RUNNING] for a state
     /// other than [NodeStatus.State#STARTING], as on logout, key expiry or device removal.
     ///

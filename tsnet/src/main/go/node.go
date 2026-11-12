@@ -439,8 +439,8 @@ func (n *node) login() int {
 }
 
 // relay copies between conn and one end of a new socket pair until either side or ctx ends, and
-// returns the other end's descriptor; TailnetNode.dial documents the stream semantics. Unix
-// sockets cannot signal a reset, so failures and the end of ctx appear as end of stream.
+// returns the other end's descriptor; TailnetNode.dial documents the stream semantics. Failures and
+// the end of ctx close the app's socket: it reads end of stream, or a reset if data it wrote is unread.
 func relay(ctx context.Context, conn net.Conn) (int, error) {
 	fds, err := syscall.Socketpair(syscall.AF_UNIX, syscall.SOCK_STREAM|syscall.SOCK_CLOEXEC, 0)
 	if err != nil {
