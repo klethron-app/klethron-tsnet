@@ -20,9 +20,6 @@ Notices were copied verbatim from the checksum-verified module cache: each modul
 patent notice, plus the nested `internal/snapref` and `zstd/internal/xxhash` licences of the compression
 module, which are in the Android import graph.
 
-The inventory's Tailscale checksum identifies the unmodified upstream module, which the build patches
-in an isolated copy (`TAILSCALE-MODIFICATIONS`).
-
 `./gradlew build` runs `verify{Release,Debug}NativeNotices`. They compare each AAR library's
 `go version -m` modules with the inventories and each packaged notice with its source, and require
 the `FILE-NOTICES` review line for the current Go, NDK, inventory and release tags; the failure names

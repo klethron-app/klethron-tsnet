@@ -32,7 +32,8 @@ android {
 ```
 
 The library's manifest adds the `INTERNET`, `ACCESS_NETWORK_STATE` and `CHANGE_NETWORK_STATE`
-permissions to your app. All three are granted at install without a prompt.
+permissions, granted at install without a prompt. Keep `CHANGE_NETWORK_STATE`: without it, Android does
+not let nodes follow Wi-Fi to cellular.
 
 ## Connect
 
@@ -64,27 +65,23 @@ try (TailnetNode node = TailnetNode.start(context, directory, "my-device")) {
 
 [`awaitStatus`][awaitStatus] waits for changes without polling. Whoever opens a login URL can claim the
 node. Wait for the URL to clear before closing, so the login is saved; starting with the same directory
-then resumes that identity. The status also names this device, its tailnet and the signed-in user,
-which each login may change.
+then resumes that identity. The status also names this device, its tailnet and the signed-in user.
 
 [`NodeStatus.peers`][peers] lists the other devices this node can see, with their MagicDNS name, operating
 system, online state, addresses and [Tailscale SSH](https://tailscale.com/kb/1193/tailscale-ssh) host
-keys, so users can pick a device instead of typing its name, and SSH clients can verify it without
-trust-on-first-use. Each change, including a device going online or offline, is a status change.
+keys, so users can pick a device and SSH clients can verify it without trust-on-first-use.
 
 [`dial`][dial] accepts a tailnet IP address or MagicDNS name and returns a socket descriptor owned by the
-caller. It reaches peers and subnet routes only, and resolves names only through the tailnet, never the
-device's resolver. [`close`][close] ends its connections but preserves its identity. [`logout`][logout],
-key expiry and device removal end its tailnet access and connections; [`login`][login] starts
-authorization again. The app decides how long to keep the node alive and whether to run a service.
+caller. It reaches only peers and subnet routes, and resolves names only through the tailnet.
+[`close`][close] ends its connections but keeps its identity. [`logout`][logout], key expiry and device
+removal end tailnet access and connections; [`login`][login] starts authorization again. The app decides
+how long to keep the node alive and whether to run a service.
 
 ## Network
 
-Running nodes follow the device's best non-VPN network, so they reconnect after switching Wi-Fi or
-mobile networks, also while another VPN app, such as Tailscale's, is active. Do not remove
-`CHANGE_NETWORK_STATE`: without it, Android would not let them follow Wi-Fi to cellular. Native TLS uses
-Android's system CA store, excluding disabled roots; user-added CAs and the app's network security
-configuration do not apply.
+Running nodes follow the device's best non-VPN network across Wi-Fi and mobile changes, also while
+another VPN app, such as Tailscale's, is active. Native TLS uses Android's system CA store without
+user-disabled roots; user-added CAs and the app's network security configuration do not apply.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) to build, test or use a checkout. Original code is
 [Apache-2.0 licensed](LICENSE); bundled dependencies retain their

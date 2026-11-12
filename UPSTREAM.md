@@ -45,8 +45,7 @@ with Go 1.27.4. Entries are ordered by impact on this library; drop those upstre
 - **Netstack can run `/system/bin/ping`** to relay ICMP echo to subnet or 4via6 addresses
   (`ProcessSubnets`, which tsnet enables). `advertiseroutes` and `appconnectors` are omitted, so the
   packet filter accepts only the node's own and service addresses. Other `os/exec` call sites are
-  unreachable here (build tags, GOOS, omitted features, unset prefs, tsnet's fake TUN); re-audit them
-  with `go list -deps` on each update.
+  unreachable here (build tags, GOOS, omitted features, unset prefs, tsnet's fake TUN).
 - **Interface enumeration fails for app UIDs** ([#17311](https://github.com/tailscale/tailscale/issues/17311);
   proposed hook [PR #19455](https://github.com/tailscale/tailscale/pull/19455)): SELinux denies Go's
   `RTM_GETLINK`. `interfaces_android.go` registers a bionic `getifaddrs` getter with
