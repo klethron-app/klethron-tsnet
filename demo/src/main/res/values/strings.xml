@@ -1,9 +1,4 @@
 <resources>
-    <string name="load_native">Load tsnet</string>
-    <string name="native_loaded">Loaded %1$s. No network started.</string>
-    <string name="native_failed">Native smoke test failed: %1$s</string>
-    <item name="smoke_test" type="id" />
-    <string name="live_test">Live tailnet test</string>
     <string name="live_instructions">Start a node, authorize it in your browser, then verify a TCP echo from a peer in your tailnet. Identity stays in this app’s no-backup storage. Closing this screen disconnects; Start resumes the saved login.</string>
     <string name="start_node">Start / resume node</string>
     <string name="authorize">Authorize in browser</string>
