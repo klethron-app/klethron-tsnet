@@ -37,13 +37,13 @@ Java_com_klethron_tsnet_TailnetNode_tailscaleVersion(JNIEnv *env, jclass type) {
 }
 
 JNIEXPORT void JNICALL
-Java_com_klethron_tsnet_TailnetNode_nativeSetDefaultNetwork(JNIEnv *env, jclass type, jbyteArray name, jint gateway) {
-    // Android interface names fit IFNAMSIZ; preserve their standard UTF-8 bytes.
-    char bytes[16];
-    jsize length = (*env)->GetArrayLength(env, name);
+Java_com_klethron_tsnet_TailnetNode_nativeSetDefaultNetwork(JNIEnv *env, jclass type, jbyteArray network) {
+    // An interface name within IFNAMSIZ, NUL and an IPv4 address; preserve their standard UTF-8 bytes.
+    char bytes[32];
+    jsize length = (*env)->GetArrayLength(env, network);
     if (length >= (jsize) sizeof bytes) return;
-    (*env)->GetByteArrayRegion(env, name, 0, length, (jbyte *) bytes);
-    klethron_set_default_network(bytes, length, gateway);
+    (*env)->GetByteArrayRegion(env, network, 0, length, (jbyte *) bytes);
+    klethron_set_default_network(bytes, length);
 }
 
 JNIEXPORT jint JNICALL

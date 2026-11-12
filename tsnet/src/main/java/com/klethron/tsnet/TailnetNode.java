@@ -20,7 +20,6 @@ import java.net.Inet4Address;
 import java.net.NoRouteToHostException;
 import java.net.SocketTimeoutException;
 import java.net.UnknownHostException;
-import java.nio.ByteBuffer;
 import java.nio.channels.ClosedChannelException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -50,16 +49,16 @@ public final class TailnetNode implements AutoCloseable {
     private static final ConnectivityManager.NetworkCallback NETWORK = new ConnectivityManager.NetworkCallback() {
         @Override
         public void onLinkPropertiesChanged(Network network, LinkProperties properties) {
-            String name = properties.getInterfaceName();
-            int gateway = properties.getRoutes().stream()
+            String gateway = properties.getRoutes().stream()
                     .filter(route -> route.isDefaultRoute() && route.hasGateway() && route.getGateway() instanceof Inet4Address)
-                    .mapToInt(route -> ByteBuffer.wrap(route.getGateway().getAddress()).getInt()).findFirst().orElse(0);
-            nativeSetDefaultNetwork(name == null ? new byte[0] : name.getBytes(StandardCharsets.UTF_8), gateway);
+                    .map(route -> route.getGateway().getHostAddress()).findFirst().orElse("");
+            String name = Objects.toString(properties.getInterfaceName(), "");
+            nativeSetDefaultNetwork((name + '\0' + gateway).getBytes(StandardCharsets.UTF_8));
         }
 
         @Override
         public void onLost(Network network) {
-            nativeSetDefaultNetwork(new byte[0], 0);
+            nativeSetDefaultNetwork(new byte[0]);
         }
     };
     /// Another app's VPN, often a split tunnel that the node's traffic bypasses, would be the default
@@ -134,7 +133,7 @@ public final class TailnetNode implements AutoCloseable {
             directories.remove(directory);
             if (directories.isEmpty() && connectivity != null) {
                 connectivity.unregisterNetworkCallback(NETWORK);
-                nativeSetDefaultNetwork(new byte[0], 0); // Unknown until the next start reports it.
+                nativeSetDefaultNetwork(new byte[0]); // Unknown until the next start reports it.
             }
         }
     }
@@ -260,5 +259,5 @@ public final class TailnetNode implements AutoCloseable {
 
     private static native void nativeClose(long handle);
 
-    private static native void nativeSetDefaultNetwork(byte[] name, int gateway);
+    private static native void nativeSetDefaultNetwork(byte[] network);
 }

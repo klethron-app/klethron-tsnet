@@ -3,7 +3,7 @@ package main
 import "C"
 
 import (
-	"net/netip"
+	"strings"
 	"sync"
 
 	"tailscale.com/net/netmon"
@@ -17,19 +17,16 @@ var (
 )
 
 // Upstream netmon cannot discover Android's default route; TailnetNode's network callback reports
-// the best non-VPN network instead. The interface name and IPv4 gateway are process-global
-// upstream, so this updates every node.
+// the best non-VPN network instead, as "interface\x00IPv4 gateway" (either may be empty). Both are
+// process-global upstream, so this updates every node.
 //
 //export klethron_set_default_network
-func klethron_set_default_network(name *C.char, length C.int, gateway C.int) {
-	gw := ""
-	if gateway != 0 {
-		gw = netip.AddrFrom4([4]byte{byte(gateway >> 24), byte(gateway >> 16), byte(gateway >> 8), byte(gateway)}).String()
-	}
+func klethron_set_default_network(network *C.char, length C.int) {
+	name, gateway, _ := strings.Cut(C.GoStringN(network, length), "\x00")
 	monitorsMu.Lock()
 	defer monitorsMu.Unlock()
-	netmon.UpdateLastKnownDefaultGateway(gw)
-	netmon.UpdateLastKnownDefaultRouteInterface(C.GoStringN(name, length))
+	netmon.UpdateLastKnownDefaultGateway(gateway)
+	netmon.UpdateLastKnownDefaultRouteInterface(name)
 	for monitor := range monitors {
 		// Forces change callbacks; a changed default interface makes the engine rebind.
 		monitor.InjectEvent()
