@@ -198,7 +198,7 @@ OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 SUCH DAMAGE.
 
 pthread_atfork.h, linked into crtbegin_so.o (full licence text in
-JSPECIFY-LICENSE):
+go/github.com/google/btree/LICENSE):
 
 Copyright (C) 2015 The Android Open Source Project
 
