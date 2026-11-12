@@ -8,14 +8,10 @@ plugins {
     alias(libs.plugins.errorprone) apply false
 }
 
-// `./gradlew build` builds every project; also build both test APKs.
-tasks.named("check") {
-    dependsOn(":tsnet:assembleDebugAndroidTest", ":demo:assembleReleaseAndroidTest")
-}
-
 subprojects {
     val libs = rootProject.libs // A subproject's own accessor works only once it is evaluated.
     for (plugin in listOf("com.android.application", "com.android.library")) pluginManager.withPlugin(plugin) {
+        tasks.named("check") { dependsOn("assembleAndroidTest") } // Also build the test APKs.
         extensions.configure<CommonExtension> {
             enableKotlin = false
             compileSdk = libs.versions.compileSdk.get().toInt()
@@ -33,18 +29,15 @@ subprojects {
         dependencies {
             "androidTestImplementation"(libs.android.test.runner)
             "androidTestImplementation"(libs.junit)
+            // AGP has no JVM source sets, so its processor paths need Error Prone explicitly.
+            for (processor in listOf("annotationProcessor", "androidTestAnnotationProcessor")) {
+                processor(libs.errorprone.core)
+                processor(libs.nullaway)
+            }
         }
     }
 
     apply(plugin = "net.ltgt.errorprone")
-    dependencies {
-        "errorprone"(libs.errorprone.core)
-        "errorprone"(libs.nullaway)
-    }
-    // AGP has no JVM source sets, so its processor paths need Error Prone explicitly.
-    configurations.matching { it.name in setOf("annotationProcessor", "androidTestAnnotationProcessor") }.configureEach {
-        extendsFrom(configurations["errorprone"])
-    }
     tasks.withType<JavaCompile>().configureEach {
         options.compilerArgs.addAll(listOf("-Xlint:all", "-Werror", "-Xdoclint:all/private,-missing"))
         // Tests close nodes and connections inside try-with-resources to check repeated close.
