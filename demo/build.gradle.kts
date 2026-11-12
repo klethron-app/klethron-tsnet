@@ -7,6 +7,7 @@ android {
     defaultConfig {
         applicationId = "com.klethron.tsnet.demo"
         targetSdk = libs.versions.targetSdk.get().toInt()
+        versionCode = 1 // adb install -r keeps a saved demo login only without a downgrade.
     }
     buildTypes {
         release {
