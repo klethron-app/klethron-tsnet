@@ -59,8 +59,8 @@ repositories and depend on the version in [gradle.properties](gradle.properties)
    with a local build of the tag using the pinned toolchains. POMs and native libraries must be
    byte-identical, and archives must contain identical files. Compressed bytes can differ between
    JDK distributions; use the pinned JDK patch version for reproducibility.
-3. Approve the release job. It signs and publishes the prebuilt files to Maven Central; publication is
-   irreversible. Commit the next `-SNAPSHOT` version afterwards.
+3. Approve the release job. It signs and publishes the prebuilt files to Maven Central, which is
+   irreversible, then creates the GitHub release. Commit the next `-SNAPSHOT` version afterwards.
 
 The environment requires a reviewer, `v*` tags only, and secrets `SIGNING_KEY` (the signing subkey from
 `gpg --export-secret-subkeys`), `SIGNING_PASSPHRASE`, `CENTRAL_USERNAME` and `CENTRAL_PASSWORD` (a Central

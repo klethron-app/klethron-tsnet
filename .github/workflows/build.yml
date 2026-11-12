@@ -139,9 +139,12 @@ jobs:
     runs-on: ubuntu-26.04
     timeout-minutes: 60
     environment: maven-central
+    permissions:
+      contents: write # Creates the GitHub release.
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          fetch-depth: 0 # Finds the previous tag.
           persist-credentials: false
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -172,3 +175,11 @@ jobs:
           done
           echo "Deployment $id not published after 50 minutes; see https://central.sonatype.com/publishing/deployments" >&2
           exit 1
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=${GITHUB_REF_NAME#v}
+          previous=$(git describe --tags --abbrev=0 "$GITHUB_REF_NAME^")
+          gh release create "$GITHUB_REF_NAME" --verify-tag --title "Klethron tsnet $version" --notes \
+            "[Changes since $previous](https://github.com/$GITHUB_REPOSITORY/compare/$previous...$GITHUB_REF_NAME) · [Javadoc](https://javadoc.io/doc/com.klethron/tsnet/$version/) · [Maven Central](https://central.sonatype.com/artifact/com.klethron/tsnet/$version)"
