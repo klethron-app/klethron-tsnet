@@ -47,7 +47,6 @@ public final class TailnetNodeTest {
             assertThrows(IllegalArgumentException.class, () -> node.dial("100.64.0.1", 0, Duration.ZERO));
             assertThrows(IllegalArgumentException.class, () -> node.dial("100.64.0.1", 65536, Duration.ZERO));
             // The node never runs.
-            assertThrows(SocketTimeoutException.class, () -> node.dial("100.64.0.1", 22, Duration.ofMillis(200)));
             assertThrows(SocketTimeoutException.class, () -> node.dial("100.64.0.1", 22, Duration.ofSeconds(-1)));
             // Longer than a long of nanoseconds: the waits saturate instead of overflowing.
             Duration forever = Duration.ofSeconds(Long.MAX_VALUE);

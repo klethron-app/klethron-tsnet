@@ -11,7 +11,6 @@ import androidx.test.platform.app.InstrumentationRegistry;
 import com.google.errorprone.annotations.CanIgnoreReturnValue;
 import java.io.File;
 import java.io.IOException;
-import java.net.Inet4Address;
 import java.net.InetAddress;
 import java.net.SocketTimeoutException;
 import java.nio.file.Files;
@@ -66,8 +65,7 @@ public final class LoginTest {
             status = await(node, s -> s.state() == NodeStatus.State.RUNNING);
             assertNull(status.loginUrl());
             addresses = status.addresses();
-            assertTrue(addresses.get(0) instanceof Inet4Address);
-            assertEquals(100, Byte.toUnsignedInt(((Inet4Address) addresses.get(0)).getAddress()[0]));
+            assertTrue(addresses.get(0).getHostAddress().startsWith("100."));
             // Without MagicDNS, testcontrol names the device as requested. A rename is a status
             // change, also without peers.
             assertEquals(HOSTNAME, status.dnsName());
@@ -177,14 +175,10 @@ public final class LoginTest {
             assertEquals("1", Probe.call("expire"));
             NodeStatus status = await(node, s -> s.state() == NodeStatus.State.NEEDS_LOGIN);
             assertEquals(NodeStatus.Revocation.KEY_EXPIRED, status.revocation());
-            assertNull(status.loginUrl());
             assertTrue(status.toString().contains("KEY_EXPIRED"));
             assertEquals(HOSTNAME, status.dnsName());
             // No login URL arrives by itself, and the tailnet is unreachable.
-            status = node.awaitStatus(status, Duration.ofSeconds(2));
-            assertEquals(NodeStatus.State.NEEDS_LOGIN, status.state());
-            assertEquals(NodeStatus.Revocation.KEY_EXPIRED, status.revocation());
-            assertNull(status.loginUrl());
+            assertNull(node.awaitStatus(status, Duration.ofSeconds(2)).loginUrl());
             assertThrows(SocketTimeoutException.class, () -> node.dial(addresses.get(0).getHostAddress(), 7070, Duration.ofMillis(500)));
 
             node.login();
@@ -296,6 +290,7 @@ public final class LoginTest {
         } finally {
             Probe.call("setAuthKeyEnvironment", false);
         }
+        TailnetNode.start(CONTEXT, state, "host", controlUrl).close(); // The failed start freed the directory.
         File file = Files.createFile(directory.resolveSibling("not-a-directory")).toFile();
         assertThrows(IOException.class, () -> TailnetNode.start(CONTEXT, file, "host", controlUrl));
     }

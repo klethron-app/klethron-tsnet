@@ -61,19 +61,15 @@ public final class DialTest {
     }
 
     @Test(timeout = 90000)
-    public void echoesThroughAddressAndMagicDnsName() throws Exception {
-        try (TailnetNode node = startNode()) {
-            // The first dial waits for the node to join.
-            for (String host : new String[] {peer, PEER_NAME}) {
-                try (ParcelFileDescriptor connection = node.dial(host, 7070, WAIT)) {
-                    byte[] sent = new byte[1 << 20];
-                    new Random().nextBytes(sent);
-                    CompletableFuture<Void> writer = CompletableFuture.runAsync(() -> write(connection, sent));
-                    byte[] received = new FileInputStream(connection.getFileDescriptor()).readNBytes(sent.length);
-                    writer.get(30, TimeUnit.SECONDS);
-                    assertArrayEquals(sent, received);
-                }
-            }
+    public void echoesThroughTheTailnet() throws Exception {
+        // The dial waits for the node to join; listsPeersAndTheirChanges dials by name.
+        try (TailnetNode node = startNode(); ParcelFileDescriptor connection = node.dial(peer, 7070, WAIT)) {
+            byte[] sent = new byte[1 << 20];
+            new Random().nextBytes(sent);
+            CompletableFuture<Void> writer = CompletableFuture.runAsync(() -> write(connection, sent));
+            byte[] received = new FileInputStream(connection.getFileDescriptor()).readNBytes(sent.length);
+            writer.get(30, TimeUnit.SECONDS);
+            assertArrayEquals(sent, received);
         }
     }
 
