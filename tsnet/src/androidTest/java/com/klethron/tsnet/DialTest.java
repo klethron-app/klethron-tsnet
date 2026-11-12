@@ -245,8 +245,7 @@ public final class DialTest {
         return flooded;
     }
 
-    /// Bytes of the probe pattern (byte `i` is `i % 251`) that the peer floods on port 7073 and
-    /// that its stalled port 7074 expects. More than both nodes can buffer for one connection.
+    /// login_probe.go's floodBytes: bytes of the probe pattern (byte `i` is `i % 251`) on ports 7073 and 7074.
     private static final long FLOOD = 48 << 20;
 
     /// Fills `bytes` with the probe pattern from stream offset `offset`.

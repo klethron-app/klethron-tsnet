@@ -65,8 +65,7 @@ public final class NetworkChangeTest {
             shell("svc wifi enable");
             connectivity.unregisterNetworkCallback(callback);
             LoginTest.deleteDirectory(directory);
-            // Leave the device as found; Wi-Fi reconnects asynchronously.
-            boolean unused = awaitWifiDefault(connectivity); // Best effort: must not mask a test failure.
+            boolean unused = awaitWifiDefault(connectivity); // Best effort, as found: must not mask a failure.
         }
     }
 

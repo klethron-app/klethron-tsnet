@@ -32,7 +32,7 @@ func probeControl(dir string) string {
 	// Plain crypto/tls records the verified chain; tlsdial verifies in a callback and records none.
 	// Resolution uses bionic via cgo.
 	usePlatformRoots()
-	dialer := &tls.Dialer{NetDialer: new(net.Dialer), Config: &tls.Config{ServerName: controlURL.Host}}
+	dialer := new(tls.Dialer) // Verifies the address's host name.
 	address := net.JoinHostPort(controlURL.Host, "443")
 	conn, err := dialer.DialContext(ctx, "tcp", address)
 	for ; err != nil && ctx.Err() == nil; conn, err = dialer.DialContext(ctx, "tcp", address) {
@@ -47,7 +47,7 @@ func probeControl(dir string) string {
 
 	server := newServer()
 	// Explicit, ignoring any TS_CONTROL_URL.
-	server.Dir, server.Hostname, server.ControlURL = dir, "klethron-control-test", controlURL.String()
+	server.Dir, server.Hostname, server.ControlURL = dir, "klethron-control-test", ipn.DefaultControlURL
 	server.Store, server.Ephemeral = new(mem.Store), true
 	defer server.Close()
 	client, err := server.LocalClient() // Starts: fetches the control key and requests interactive login.

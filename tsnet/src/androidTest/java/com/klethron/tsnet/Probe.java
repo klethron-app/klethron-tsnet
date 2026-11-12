@@ -9,14 +9,11 @@ final class Probe {
         System.loadLibrary("klethron_tsnet");
     }
 
-    private Probe() {}
-
     @CanIgnoreReturnValue
     static String call(String name) {
         return call(name, "");
     }
 
-    /// Passes `argument` as text in standard UTF-8, so paths may contain supplementary characters.
     @CanIgnoreReturnValue
     static String call(String name, Object argument) {
         String result = nativeCall((name + '\0' + argument).getBytes(StandardCharsets.UTF_8));

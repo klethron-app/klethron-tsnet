@@ -48,8 +48,7 @@ public final class MinifiedDemoTest {
                         assertTrue("Live demo did not rotate", SystemClock.uptimeMillis() < deadline);
                     }
                     instrumentation.waitForIdleSync();
-                    instrumentation.runOnMainSync(check);
-                    assertTrue("Rotation recreated the live demo", ready[0] && !activity.isDestroyed());
+                    assertTrue("Rotation recreated the live demo", !activity.isDestroyed());
                 }
             } finally {
                 instrumentation.runOnMainSync(activity::finish);

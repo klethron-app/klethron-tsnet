@@ -144,7 +144,7 @@ public final class LoginTest {
             complete(await(node, s -> s.loginUrl() != null));
             addresses = await(node, s -> s.state() == NodeStatus.State.RUNNING).addresses();
             Probe.call("rejectRegistrations", true);
-            assertThrows(IOException.class, () -> node.logout(WAIT));
+            assertEquals("Logout failed", assertThrows(IOException.class, () -> node.logout(WAIT)).getMessage());
             NodeStatus status = await(node, s -> s.state() == NodeStatus.State.STOPPED);
             assertEquals(addresses, status.addresses());
         }
@@ -157,7 +157,7 @@ public final class LoginTest {
         try (TailnetNode node = start()) {
             awaitResumed(node, addresses);
             Probe.call("rejectRegistrations", true);
-            assertThrows(IOException.class, () -> node.logout(WAIT));
+            assertEquals("Logout failed", assertThrows(IOException.class, () -> node.logout(WAIT)).getMessage());
             Probe.call("rejectRegistrations", false);
             node.logout(WAIT);
             NodeStatus status = await(node, s -> s.state() == NodeStatus.State.NEEDS_LOGIN);
