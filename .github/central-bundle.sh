@@ -9,22 +9,15 @@ set -euo pipefail
 export LC_ALL=C
 
 version=$1 repository=$2 bundle=$3
-if [[ ! $version =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-    echo "Not a release version: $version" >&2
-    exit 1
-fi
+[[ $version =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "Not a release version: $version" >&2; exit 1; }
 path=com/klethron/tsnet/$version
-if [[ ! -d $repository/$path ]]; then
-    echo "No $path in $repository: tag only a commit whose gradle.properties sets version=$version" >&2
-    exit 1
-fi
+[[ -d $repository/$path ]] ||
+    { echo "No $path in $repository: tag only a commit whose gradle.properties sets version=$version" >&2; exit 1; }
 artifacts=$(printf "tsnet-$version%s\n" .aar .module .pom -javadoc.jar -sources.jar | sort)
 found=$(cd "$repository/$path" && find . -type f ! -name '*.md5' ! -name '*.sha1' ! -name '*.sha256' \
     ! -name '*.sha512' -printf '%P\n' | sort)
-if [[ $found != "$artifacts" ]]; then
-    printf 'Expected exactly these artifacts in %s:\n%s\nFound:\n%s\n' "$repository/$path" "$artifacts" "$found" >&2
-    exit 1
-fi
+[[ $found == "$artifacts" ]] ||
+    { printf 'Expected exactly these artifacts in %s:\n%s\nFound:\n%s\n' "$repository/$path" "$artifacts" "$found" >&2; exit 1; }
 
 public_key=$(dirname "$0")/../release-signing-key.asc
 work=$(mktemp -d)

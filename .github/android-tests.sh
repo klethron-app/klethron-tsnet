@@ -32,6 +32,6 @@ import xml.etree.ElementTree as ET
 
 for module in ('tsnet', 'demo'):
     suites = [ET.parse(p).getroot() for p in Path(module, 'build/outputs/androidTest-results').rglob('TEST-*.xml')]
-    assert suites and sum(int(s.get('tests', 0)) for s in suites) > 0, f'{module}: no tests ran'
-    assert all(int(s.get(k, 0)) == 0 for s in suites for k in ('failures', 'errors', 'skipped')), f'{module}: incomplete tests'
+    assert sum(int(s.get('tests')) for s in suites) > 0, f'{module}: no tests ran'
+    assert all(int(s.get(k)) == 0 for s in suites for k in ('failures', 'errors', 'skipped')), f'{module}: incomplete tests'
 PY
