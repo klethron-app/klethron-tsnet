@@ -13,8 +13,9 @@ android {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
-            // No default rules, whose JNI keep rule would hide gaps in the library's consumer rules.
-            testProguardFiles("test-rules.pro")
+            // Any rules file replaces AGP's defaults, whose JNI keep rule would hide consumer-rule gaps.
+            proguardFiles("rules.pro")
+            testProguardFiles("rules.pro")
             // This demo is a consumer test, not a distributable application.
             signingConfig = signingConfigs.getByName("debug")
         }
