@@ -8,11 +8,9 @@ import static org.junit.Assert.assertTrue;
 
 import android.net.InetAddresses;
 import android.os.ParcelFileDescriptor;
-import android.system.ErrnoException;
 import android.system.Os;
 import android.system.StructPollfd;
 import com.google.errorprone.annotations.CanIgnoreReturnValue;
-import java.io.FileDescriptor;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
@@ -69,21 +67,24 @@ public final class DialTest {
 
     @Test(timeout = 90000)
     public void echoesThroughTheTailnet() throws Exception {
-        // Over a Unix socket pair. The dial waits for the node to join; listsPeersAndTheirChanges
-        // dials by name.
-        try (TailnetNode node = startNode(); ParcelFileDescriptor connection = node.dial(peer, 7070, WAIT)) {
+        try (TailnetNode node = startNode()) {
             byte[] sent = new byte[1 << 20];
             new Random().nextBytes(sent);
-            CompletableFuture<Void> writer = CompletableFuture.runAsync(() -> {
-                try {
-                    new FileOutputStream(connection.getFileDescriptor()).write(sent);
-                } catch (IOException e) {
-                    throw new UncheckedIOException(e);
+            NodeStatus status = LoginTest.await(node, s -> !s.peers().isEmpty());
+            for (InetAddress address : status.peers().get(0).addresses()) {
+                try (ParcelFileDescriptor connection = node.dial(address.getHostAddress(), 7070, WAIT)) {
+                    CompletableFuture<Void> writer = CompletableFuture.runAsync(() -> {
+                        try {
+                            new FileOutputStream(connection.getFileDescriptor()).write(sent);
+                        } catch (IOException e) {
+                            throw new UncheckedIOException(e);
+                        }
+                    });
+                    byte[] received = new FileInputStream(connection.getFileDescriptor()).readNBytes(sent.length);
+                    writer.get(30, TimeUnit.SECONDS);
+                    assertArrayEquals(sent, received);
                 }
-            });
-            byte[] received = new FileInputStream(connection.getFileDescriptor()).readNBytes(sent.length);
-            writer.get(30, TimeUnit.SECONDS);
-            assertArrayEquals(sent, received);
+            }
         }
     }
 
@@ -237,7 +238,9 @@ public final class DialTest {
             assertTrue("Peer was not slowed", awaitFloodStalled() < FLOOD);
             node.close();
             // With unread data, closing only the tailnet socket leaves the relay blocked.
-            assertTrue("Relay stayed open", poll(observed.getFileDescriptor(), 0, 10000));
+            StructPollfd poll = new StructPollfd();
+            poll.fd = observed.getFileDescriptor();
+            assertEquals("Relay stayed open", 1, Os.poll(new StructPollfd[] {poll}, 10000));
             // The first write reports the reset, the next one a broken pipe without SIGPIPE.
             assertEquals("Connection reset by peer", assertThrows(IOException.class,
                     () -> connection.write(ByteBuffer.wrap(new byte[] {1}))).getMessage());
@@ -323,14 +326,6 @@ public final class DialTest {
             bytes[i] = (byte) ((offset + i) % 251);
         }
         return bytes;
-    }
-
-    /// Returns whether `fd` became ready for `events` within `timeoutMillis`.
-    private static boolean poll(FileDescriptor fd, int events, int timeoutMillis) throws ErrnoException {
-        StructPollfd poll = new StructPollfd();
-        poll.fd = fd;
-        poll.events = (short) events;
-        return Os.poll(new StructPollfd[] {poll}, timeoutMillis) == 1;
     }
 
     /// Returns whether the selector's only channel became ready within `timeoutMillis`.

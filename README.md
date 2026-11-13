@@ -12,8 +12,8 @@ Requires **Android 14 (API 34)** or later. The AAR supports **arm64-v8a**, **x86
 consumers need no Go compiler or NDK.
 
 **Under development.** Login, saved identity, TCP dialing, logout and revocation have local and live
-tailnet tests. Wi-Fi/cellular switches have live coverage only with Tailscale's VPN active; peer
-listing has local coverage. See [limitations](UPSTREAM.md#limits) and [Javadoc](https://javadoc.io/doc/com.klethron/tsnet/latest/).
+tailnet tests. IPv6 dialing and peer listing have local coverage; Wi-Fi/cellular switches have live
+coverage only with Tailscale's VPN active. See [limitations](UPSTREAM.md#limits) and [Javadoc](https://javadoc.io/doc/com.klethron/tsnet/latest/).
 
 ## Install
 

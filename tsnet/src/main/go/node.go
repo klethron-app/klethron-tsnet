@@ -140,9 +140,19 @@ func (n *node) refreshStatus(refresh <-chan struct{}) {
 func readStatus(status *ipnstate.Status) *statusRead {
 	lines := make([]string, 0, len(status.Peer))
 	for _, peer := range status.Peer {
-		if line := peerLine(peer); line != "" {
-			lines = append(lines, line)
+		name := strings.TrimSuffix(peer.DNSName, ".")
+		// Like tailscale status, hide sharees and Mullvad exit nodes.
+		if peer.ShareeNode || name == "" || strings.HasSuffix(name, ".mullvad.ts.net") || len(peer.TailscaleIPs) == 0 {
+			continue
 		}
+		keys := make([]string, 0, len(peer.SSH_HostKeys))
+		for _, key := range peer.SSH_HostKeys {
+			if key = strings.TrimSpace(key); key != "" && key == printable(key, 8192) && !strings.Contains(key, ",") {
+				keys = append(keys, key)
+			}
+		}
+		lines = append(lines, "\n"+printable(name, 255)+"\t"+printable(peer.OS, 32)+"\t"+strconv.FormatBool(peer.Online)+
+			"\t"+addressList(peer.TailscaleIPs...)+"\t"+strings.Join(keys, ","))
 	}
 	slices.Sort(lines)
 	read := &statusRead{peers: strings.Join(lines, "")}
@@ -154,23 +164,6 @@ func readStatus(status *ipnstate.Status) *statusRead {
 		read.tailnet = printable(tailnet.Name, 255)
 	}
 	return read
-}
-
-// peerLine returns "\nname\tOS\tonline\taddresses\tSSH host keys", with comma-separated lists.
-// Like "tailscale status", it hides sharees and Mullvad exit nodes. Keys must be printable without commas.
-func peerLine(peer *ipnstate.PeerStatus) string {
-	name := strings.TrimSuffix(peer.DNSName, ".")
-	if peer.ShareeNode || name == "" || strings.HasSuffix(name, ".mullvad.ts.net") || len(peer.TailscaleIPs) == 0 {
-		return ""
-	}
-	keys := make([]string, 0, len(peer.SSH_HostKeys))
-	for _, key := range peer.SSH_HostKeys {
-		if key = strings.TrimSpace(key); key != "" && key == printable(key, 8192) && !strings.Contains(key, ",") {
-			keys = append(keys, key)
-		}
-	}
-	return "\n" + printable(name, 255) + "\t" + printable(peer.OS, 32) + "\t" + strconv.FormatBool(peer.Online) +
-		"\t" + addressList(peer.TailscaleIPs...) + "\t" + strings.Join(keys, ",")
 }
 
 // publish applies notify and an optional status read. Lock backend reads against both publishers.
@@ -246,13 +239,19 @@ const watchFellBehind = "IPN bus consumer fell behind; closing watch"
 
 // printable returns at most limit bytes of s, replacing bytes other than printable ASCII with '?'.
 func printable(s string, limit int) string {
-	if len(s) <= limit && strings.IndexFunc(s, func(r rune) bool { return r < ' ' || r > '~' }) < 0 {
-		return s
+	i := 0
+	if len(s) <= limit {
+		for i < len(s) && s[i] >= ' ' && s[i] <= '~' {
+			i++
+		}
+		if i == len(s) {
+			return s
+		}
 	}
 	b := []byte(s[:min(len(s), limit)])
-	for i, c := range b {
+	for j, c := range b[i:] {
 		if c < ' ' || c > '~' {
-			b[i] = '?'
+			b[i+j] = '?'
 		}
 	}
 	return string(b)
@@ -494,8 +493,7 @@ var javaStates = map[ipn.State]string{
 }
 
 // record is "version\nSTATE\nREVOCATION\nloginURL\naddresses\nerror\ndnsName\ntailnet\nloginName",
-// with comma-separated address literals, followed by the peer lines. All printable ASCII apart from
-// the separators.
+// then "\nname\tOS\tonline\taddresses\tSSH host keys" per peer. Lists are comma-separated; fields are ASCII.
 func (s nodeStatus) record(version uint64) string {
 	return strconv.FormatUint(version, 10) + "\n" + cmp.Or(javaStates[s.state], "NO_STATE") + "\n" +
 		s.revocation + "\n" + s.loginURL + "\n" + addressList(s.addresses[:]...) + "\n" + s.err + "\n" +
