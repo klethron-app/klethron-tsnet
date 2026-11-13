@@ -70,6 +70,10 @@ repositories and depend on the version in [gradle.properties](gradle.properties)
 3. Approve the release job. It signs and publishes the prebuilt files to Maven Central, which is
    irreversible, then creates the GitHub release. Commit the next `-SNAPSHOT` version afterwards.
 
+A separate `javadoc` job then imports the published version into javadoc.io, with attempts at 5-minute
+intervals from minute 5 through minute 30. It stops once that version's documentation is available.
+If it fails, rerun the failed job to retry the import without publishing again.
+
 The environment requires a reviewer, `v*` tags only, and secrets `SIGNING_KEY` (from
 `gpg --export-secret-subkeys`), `SIGNING_PASSPHRASE`, `CENTRAL_USERNAME` and `CENTRAL_PASSWORD` (a Central
 Portal token). The build job receives no secrets. [central-bundle.sh](.github/central-bundle.sh)

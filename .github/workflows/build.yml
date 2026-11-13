@@ -196,3 +196,14 @@ jobs:
           previous=$(git describe --tags --abbrev=0 "$GITHUB_REF_NAME^")
           gh release create "$GITHUB_REF_NAME" --verify-tag --title "Klethron tsnet $version" --notes \
             "[Changes since $previous](https://github.com/$GITHUB_REPOSITORY/compare/$previous...$GITHUB_REF_NAME) · [Javadoc](https://javadoc.io/doc/com.klethron/tsnet/$version/) · [Maven Central](https://central.sonatype.com/artifact/com.klethron/tsnet/$version)"
+
+  javadoc:
+    needs: release
+    runs-on: ubuntu-26.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Import the published Javadoc
+        run: bash .github/import-javadoc.sh "${GITHUB_REF_NAME#v}"
