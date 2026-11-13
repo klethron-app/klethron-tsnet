@@ -25,7 +25,6 @@ import java.nio.channels.SelectionKey;
 import java.nio.channels.Selector;
 import java.nio.channels.SocketChannel;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Path;
 import java.time.Duration;
 import java.util.Arrays;
 import java.util.List;
@@ -43,22 +42,19 @@ public final class DialTest {
     private static final String PEER_NAME = "klethron-peer.tail-scale.ts.net";
 
     private String controlUrl;
-    private Path directory;
     private String peer;
 
     @Before
-    public void startPeer() throws Exception {
+    public void startPeer() {
         controlUrl = Probe.call("startControl", false);
         assertTrue(controlUrl.startsWith("http://127.0.0.1:"));
-        directory = LoginTest.temporaryDirectory("dial-");
-        peer = Probe.call("startPeer", directory.resolve("peer"));
+        peer = Probe.call("startPeer");
         assertTrue("Peer failed to start", peer.startsWith("100."));
     }
 
     @After
-    public void stopPeer() throws Exception {
+    public void stopPeer() {
         Probe.call("stopControl");
-        LoginTest.deleteDirectory(directory);
     }
 
     @Test(timeout = 90000)
@@ -275,7 +271,7 @@ public final class DialTest {
     }
 
     private TailnetNode startNode() throws IOException {
-        return TailnetNode.start(LoginTest.CONTEXT, directory.resolve("node").toFile(), "klethron-dialer", controlUrl);
+        return TailnetNode.start(LoginTest.CONTEXT, new MemoryStore(), "klethron-dialer", controlUrl);
     }
 
     /// Waits until the peer on port 7073 has written and then made no progress for a second.

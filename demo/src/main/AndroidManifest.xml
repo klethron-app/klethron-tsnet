@@ -1,7 +1,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <application android:label="Klethron tsnet demo" android:icon="@android:drawable/sym_def_app_icon"
         android:supportsRtl="true" android:theme="@android:style/Theme.Material.Light.NoActionBar">
-        <!-- One instance owns the state directory. Recreation would close the node, losing a pending login:
+        <!-- One instance owns the state store. Recreation would close the node, losing a pending login:
              handle configuration changes in place. -->
         <activity android:name=".LiveActivity" android:exported="true" android:launchMode="singleTask"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|density|uiMode|fontScale|fontWeightAdjustment|keyboard|keyboardHidden|navigation|locale|layoutDirection|mcc|mnc|touchscreen|colorMode|grammaticalGender">

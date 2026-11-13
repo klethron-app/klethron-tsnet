@@ -12,6 +12,8 @@
 - Pin dependencies and toolchains. Never resolve a moving Tailscale branch during normal builds.
 - Keep the Java/JNI/Go boundary narrow. No SSH, UI, Android services or app lifecycle policy in the library.
 - No subprocesses, downloaded executables, hidden APIs or device-wide VPN in shipped code.
+- Library code, including embedded tsnet, must not access the filesystem directly. Use caller-owned
+  storage callbacks for persistence and Android APIs for platform data.
 - Never log, back up or transfer credentials. Node state belongs in caller-owned no-backup storage.
 - Verify changes with `./gradlew build`; use `ANDROID_SERIAL=<serial> ./gradlew :tsnet:connectedDebugAndroidTest`
   for JNI changes. Record device/API/page-size coverage and test counts from JUnit XML in the commit message.

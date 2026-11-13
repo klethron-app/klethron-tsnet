@@ -5,7 +5,6 @@ package main
 import "C"
 
 import (
-	"strconv"
 	"strings"
 )
 
@@ -39,11 +38,9 @@ var probes = map[string]func(string) string{
 	"startControl":          startControl,
 	"startPeer":             startPeer,
 	"stopControl":           stopControl,
-	"tailnet":               func(dir string) string { return probeTailnet(dir, false) },
-	"tailnetDerp":           func(dir string) string { return probeTailnet(dir, true) },
-	"holdDirectory": func(dir string) string {
-		return strconv.FormatInt(int64(startNode(dir+"\x00crash\x00http://127.0.0.1:1")), 10)
-	},
+	"store":                 probeStore,
+	"tailnet":               func(string) string { return probeTailnet(false) },
+	"tailnetDerp":           func(string) string { return probeTailnet(true) },
 }
 
 // klethron_probe calls the probe named before the first NUL in call with the rest as argument.

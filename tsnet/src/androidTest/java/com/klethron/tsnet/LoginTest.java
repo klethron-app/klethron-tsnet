@@ -10,13 +10,11 @@ import static org.junit.Assert.assertTrue;
 import android.content.Context;
 import androidx.test.platform.app.InstrumentationRegistry;
 import com.google.errorprone.annotations.CanIgnoreReturnValue;
-import java.io.File;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.SocketTimeoutException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Duration;
 import java.util.Comparator;
 import java.util.List;
@@ -34,18 +32,21 @@ public final class LoginTest {
 
     private String controlUrl;
     private Path directory;
+    private SqliteStore store;
 
     @Before
     public void startControl() throws Exception {
         controlUrl = Probe.call("startControl", true);
         assertTrue(controlUrl.startsWith("http://127.0.0.1:"));
-        directory = temporaryDirectory("login-🔒-").resolve("node");
+        directory = temporaryDirectory("login-");
+        store = new SqliteStore(directory.resolve("state.db").toFile());
     }
 
     @After
     public void stopControl() throws Exception {
         Probe.call("stopControl");
-        deleteDirectory(Objects.requireNonNull(directory.getParent()));
+        store.close();
+        deleteDirectory(directory);
     }
 
     @Test(timeout = 90000)
@@ -69,12 +70,10 @@ public final class LoginTest {
             Probe.call("rename", "klethron-renamed");
             await(node, s -> "klethron-renamed".equals(s.dnsName()));
         }
-        assertOnlyStateFile();
 
         try (TailnetNode node = start()) {
             awaitResumed(node, addresses);
         }
-        assertOnlyStateFile();
     }
 
     @Test(timeout = 120000)
@@ -112,7 +111,6 @@ public final class LoginTest {
             assertNull(status.loginUrl());
             assertTrue(status.addresses().isEmpty());
         }
-        assertOnlyStateFile();
 
         try (TailnetNode node = start()) {
             NodeStatus status = await(node, s -> {
@@ -122,28 +120,6 @@ public final class LoginTest {
             assertFalse("Login URL was reused", firstUrl.equals(status.loginUrl()));
             complete(status);
             assertFalse(await(node, s -> s.state() == NodeStatus.State.RUNNING).addresses().isEmpty());
-        }
-        assertOnlyStateFile();
-    }
-
-    @Test(timeout = 90000)
-    public void keepsTheResolvedStateDirectory() throws Exception {
-        Files.createDirectory(directory);
-        Path alias = Files.createSymbolicLink(directory.resolveSibling("alias"), directory);
-        List<InetAddress> addresses;
-        try (TailnetNode node = TailnetNode.start(CONTEXT, alias.toFile(), HOSTNAME, controlUrl)) {
-            NodeStatus status = await(node, s -> s.loginUrl() != null);
-            Files.delete(alias);
-            Path redirected = Files.createDirectory(directory.resolveSibling("redirected"));
-            Files.createSymbolicLink(alias, redirected);
-            complete(status);
-            addresses = await(node, s -> s.state() == NodeStatus.State.RUNNING && s.loginUrl() == null).addresses();
-            try (var files = Files.list(redirected)) {
-                assertEquals("Node followed the changed symlink", 0, files.count());
-            }
-        }
-        try (TailnetNode node = start()) {
-            awaitResumed(node, addresses);
         }
     }
 
@@ -158,7 +134,6 @@ public final class LoginTest {
             NodeStatus status = await(node, s -> s.state() == NodeStatus.State.STOPPED);
             assertEquals(addresses, status.addresses());
         }
-        assertOnlyStateFile();
 
         // Unpatched upstream (#22248) forgets the key on failure, preventing a retry.
         Probe.call("rejectRegistrations", false);
@@ -172,7 +147,6 @@ public final class LoginTest {
             assertNull(status.loginUrl());
             assertTrue(status.addresses().isEmpty());
         }
-        assertOnlyStateFile();
     }
 
     @Test(timeout = 120000)
@@ -216,7 +190,6 @@ public final class LoginTest {
             assertEquals(addresses, status.addresses());
             assertEquals(HOSTNAME, Probe.call("hostnames"));
         }
-        assertOnlyStateFile();
 
         try (TailnetNode node = start()) {
             awaitResumed(node, addresses);
@@ -246,7 +219,6 @@ public final class LoginTest {
             assertNull(status.revocation());
             assertFalse(status.addresses().isEmpty());
         }
-        assertOnlyStateFile();
     }
 
     @Test(timeout = 90000)
@@ -266,7 +238,6 @@ public final class LoginTest {
             status = await(node, s -> s.state() == NodeStatus.State.RUNNING);
             assertNull(status.error());
         }
-        assertOnlyStateFile();
     }
 
     @Test(timeout = 90000)
@@ -280,14 +251,11 @@ public final class LoginTest {
             status = await(node, s -> s.state() == NodeStatus.State.RUNNING);
             assertFalse(status.addresses().isEmpty());
         }
-        assertOnlyStateFile();
     }
 
     @Test(timeout = 30000)
     public void refusesInvalidConfigurationAndEnvironmentAuthKeys() throws Exception {
-        File relative = new File("relative");
-        File state = directory.toFile();
-        assertThrows(IllegalArgumentException.class, () -> TailnetNode.start(CONTEXT, relative, "host"));
+        StateStore state = store;
         assertThrows(IllegalArgumentException.class, () -> TailnetNode.start(CONTEXT, state, ""));
         assertThrows(IllegalArgumentException.class, () -> TailnetNode.start(CONTEXT, state, "a\0b", controlUrl));
         Probe.call("setAuthKeyEnvironment", true);
@@ -297,9 +265,7 @@ public final class LoginTest {
         } finally {
             Probe.call("setAuthKeyEnvironment", false);
         }
-        TailnetNode.start(CONTEXT, state, "host", controlUrl).close(); // The failed start freed the directory.
-        File file = Files.createFile(directory.resolveSibling("not-a-directory")).toFile();
-        assertThrows(IOException.class, () -> TailnetNode.start(CONTEXT, file, "host", controlUrl));
+        TailnetNode.start(CONTEXT, state, "host", controlUrl).close();
     }
 
     @CanIgnoreReturnValue
@@ -314,7 +280,9 @@ public final class LoginTest {
     }
 
     private TailnetNode start() throws IOException {
-        return TailnetNode.start(CONTEXT, directory.toFile(), HOSTNAME, controlUrl);
+        store.close();
+        store = new SqliteStore(directory.resolve("state.db").toFile());
+        return TailnetNode.start(CONTEXT, store, HOSTNAME, controlUrl);
     }
 
     private static void awaitResumed(TailnetNode node, List<InetAddress> addresses) throws IOException {
@@ -331,20 +299,6 @@ public final class LoginTest {
         assertEquals("ok", Probe.call("complete", url));
     }
 
-    /// Calls a probe that starts nodes in a new directory, which must stay empty.
-    static String callWithoutFiles(String probe) throws Exception {
-        Path directory = temporaryDirectory(probe + "-🔒-");
-        try {
-            String result = Probe.call(probe, directory);
-            try (var files = Files.list(directory)) {
-                assertEquals("Probe nodes must not write files", 0, files.count());
-            }
-            return result;
-        } finally {
-            deleteDirectory(directory);
-        }
-    }
-
     static Path temporaryDirectory(String prefix) throws Exception {
         return Files.createTempDirectory(CONTEXT.getNoBackupFilesDir().toPath(), prefix);
     }
@@ -355,13 +309,5 @@ public final class LoginTest {
                 Files.delete(path);
             }
         }
-    }
-
-    private void assertOnlyStateFile() throws Exception {
-        try (var files = Files.list(directory)) {
-            assertEquals(List.of(directory.resolve("tailscaled.state")), files.toList());
-        }
-        assertEquals("rw-------", PosixFilePermissions.toString(Files.getPosixFilePermissions(directory.resolve("tailscaled.state"))));
-        assertEquals("rwx------", PosixFilePermissions.toString(Files.getPosixFilePermissions(directory)));
     }
 }

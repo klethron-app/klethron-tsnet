@@ -40,6 +40,7 @@ public final class LiveActivity extends Activity {
     private volatile boolean destroyed;
     // Accessed only on WORKER; lint checks thread annotations on methods, not fields.
     private @Nullable TailnetNode node;
+    private @Nullable SqliteStore store;
     private @Nullable SocketChannel held; // Kept-open connection.
     private @Nullable String heldTarget;
     // Accessed only on the UI thread.
@@ -87,7 +88,8 @@ public final class LiveActivity extends Activity {
         WORKER.execute(() -> {
             if (destroyed) return;
             try {
-                TailnetNode current = TailnetNode.start(this, new File(getNoBackupFilesDir(), "tailnet"), "klethron-tsnet-demo");
+                store = new SqliteStore(new File(getNoBackupFilesDir(), "tailnet.db"));
+                TailnetNode current = TailnetNode.start(this, store, "klethron-tsnet-demo");
                 node = current;
                 runOnUiThread(() -> {
                     if (destroyed) return;
@@ -97,6 +99,8 @@ public final class LiveActivity extends Activity {
                 });
                 new Thread(() -> watch(current), "tsnet-demo-status").start();
             } catch (IOException | RuntimeException | LinkageError failure) {
+                if (store != null) store.close();
+                store = null;
                 complete(getString(R.string.operation_failed, failure.getClass().getSimpleName()));
             }
         });
@@ -116,7 +120,9 @@ public final class LiveActivity extends Activity {
                 previous = next;
             }
         } catch (ClosedChannelException closed) {
-            // closeNode closes it and wakes this waiter.
+            // closeNode wakes this waiter.
+        } catch (IOException failure) {
+            complete(getString(R.string.operation_failed, failure.getClass().getSimpleName()));
         }
     }
 
@@ -258,7 +264,7 @@ public final class LiveActivity extends Activity {
     @Override
     public void onPause() {
         super.onPause();
-        // Destruction can follow a new instance's start, which would find the state directory in use.
+        // Destruction can follow a new instance's start, which would find the state store in use.
         if (isFinishing()) closeNode();
     }
 
@@ -277,6 +283,8 @@ public final class LiveActivity extends Activity {
             closeHeld();
             if (node != null) node.close();
             node = null;
+            if (store != null) store.close();
+            store = null;
         });
     }
 }

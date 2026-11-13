@@ -69,7 +69,7 @@ func startControl(interactive string) string {
 // On port 7074 it reads nothing until released, then reports how many bytes of the probe pattern
 // it received until the dialer closed, or -3 at the first other byte. It returns the peer's
 // tailnet IPv4 address, or "" on failure.
-func startPeer(dir string) string {
+func startPeer(string) string {
 	loginProbe.Lock()
 	defer loginProbe.Unlock()
 	if loginProbe.control == nil {
@@ -83,7 +83,7 @@ func startPeer(dir string) string {
 		peer.close()
 		stop()
 	}
-	server, ip, problem := peer.startNode(ctx, dir, loginProbe.control.HTTPTestServer.URL, "klethron-peer")
+	server, ip, problem := peer.startNode(ctx, loginProbe.control.HTTPTestServer.URL, "klethron-peer")
 	if problem != "" {
 		return ""
 	}

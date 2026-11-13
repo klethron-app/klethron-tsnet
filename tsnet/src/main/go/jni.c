@@ -12,14 +12,27 @@ static jstring javaString(JNIEnv *env, char *s) {
 }
 
 JNIEXPORT jlong JNICALL
-Java_com_klethron_tsnet_TailnetNode_nativeStart(JNIEnv *env, jclass type, jbyteArray config) {
-    // Java encodes standard UTF-8, including supplementary characters in paths.
+Java_com_klethron_tsnet_TailnetNode_nativeStart(JNIEnv *env, jclass type, jobject callback, jbyteArray config) {
     jsize length = (*env)->GetArrayLength(env, config);
     jbyte *bytes = (*env)->GetByteArrayElements(env, config, NULL);
     if (bytes == NULL) return -1; // Pending allocation exception; Java never sees the result.
-    jlong result = klethron_node_start((char *) bytes, length);
+    state_store *store = state_new(env, callback);
+    jlong result = store == NULL ? -10 : klethron_node_start(store, (char *) bytes, length);
     (*env)->ReleaseByteArrayElements(env, config, bytes, JNI_ABORT);
     return result;
+}
+
+JNIEXPORT void JNICALL
+Java_com_klethron_tsnet_TailnetNode_nativeSetRoots(JNIEnv *env, jclass type, jbyteArray certificates) {
+    jsize length = (*env)->GetArrayLength(env, certificates);
+    jbyte *bytes = (*env)->GetByteArrayElements(env, certificates, NULL);
+    if (bytes == NULL) return;
+    int result = klethron_set_roots((char *) bytes, length);
+    (*env)->ReleaseByteArrayElements(env, certificates, bytes, JNI_ABORT);
+    if (result != 0) {
+        jclass exception = (*env)->FindClass(env, "java/security/cert/CertificateException");
+        if (exception != NULL) (*env)->ThrowNew(env, exception, "Invalid Android system roots");
+    }
 }
 
 JNIEXPORT jstring JNICALL

@@ -11,11 +11,11 @@ import org.junit.Test;
 public final class TailnetTest {
     @Test(timeout = 90000)
     public void exchangesDataOverDirectPath() throws Exception {
-        assertEquals("ok", LoginTest.callWithoutFiles("tailnet"));
+        assertEquals("ok", Probe.call("tailnet"));
     }
 
     @Test(timeout = 90000)
     public void exchangesDataOverDerpRelayOnly() throws Exception {
-        assertEquals("ok", LoginTest.callWithoutFiles("tailnetDerp"));
+        assertEquals("ok", Probe.call("tailnetDerp"));
     }
 }

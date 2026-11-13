@@ -1,7 +1,6 @@
 package com.klethron.tsnet;
 
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
 import android.app.ActivityManager;
@@ -13,13 +12,14 @@ import android.content.ServiceConnection;
 import android.os.IBinder;
 import android.os.Parcel;
 import java.nio.file.Path;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import org.junit.Test;
 
-/// Fatal failures release state locks and, under Android's AT_SECURE, omit Go argument dumps.
+/// Fatal failures preserve caller-owned state and, under Android's AT_SECURE, omit Go argument dumps.
 public final class CrashTest {
     @Test
     public void panicAbortsWithItsMessageOnly() throws Exception {
@@ -42,7 +42,6 @@ public final class CrashTest {
         assertEquals(List.of("fatal error: sync: unlock of unlocked mutex"), goLog(exit));
     }
 
-    @SuppressWarnings("AssertThrowsMinimizer") // Close an unexpectedly opened node.
     private static ApplicationExitInfo crash(int mode, int reason) throws Exception {
         Context context = LoginTest.CONTEXT;
         CompletableFuture<IBinder> service = new CompletableFuture<>();
@@ -57,6 +56,7 @@ public final class CrashTest {
         };
         assertTrue(context.bindService(new Intent(context, CrashService.class), connection, Context.BIND_AUTO_CREATE));
         Path directory = LoginTest.temporaryDirectory("crash-");
+        byte[] machineKey;
         try {
             IBinder binder = service.get(10, TimeUnit.SECONDS);
             // Match this process, not an earlier crash or the restarted service.
@@ -67,11 +67,12 @@ public final class CrashTest {
             Parcel data = Parcel.obtain();
             Parcel reply = Parcel.obtain();
             try {
-                data.writeString(directory.toString());
+                data.writeString(directory.resolve("state.db").toString());
                 binder.transact(IBinder.LAST_CALL_TRANSACTION, data, reply, 0);
-                assertTrue("Crash process failed to start a node", Long.parseLong(Objects.requireNonNull(reply.readString())) > 0);
-                assertThrows(IllegalStateException.class, () -> TailnetNode.start(context,
-                        directory.toFile(), "contender", "http://127.0.0.1:1").close());
+                assertEquals("ok", reply.readString());
+                try (SqliteStore store = new SqliteStore(directory.resolve("state.db").toFile())) {
+                    machineKey = Objects.requireNonNull(store.read("_machinekey"));
+                }
                 binder.transact(IBinder.FIRST_CALL_TRANSACTION + mode, data, null, IBinder.FLAG_ONEWAY);
             } finally {
                 reply.recycle();
@@ -83,6 +84,10 @@ public final class CrashTest {
             for (int i = 0; i < 100; i++) {
                 exits = activities.getHistoricalProcessExitReasons(null, pid, 1);
                 if (!exits.isEmpty() && exits.get(0).getReason() == reason) {
+                    try (SqliteStore store = new SqliteStore(directory.resolve("state.db").toFile());
+                            TailnetNode node = TailnetNode.start(context, store, "recovered", "http://127.0.0.1:1")) {
+                        assertTrue("Machine identity changed after crash", Arrays.equals(machineKey, store.read("_machinekey")));
+                    }
                     return exits.get(0);
                 }
                 Thread.sleep(100);
@@ -90,7 +95,6 @@ public final class CrashTest {
             throw new AssertionError("No exit reason " + reason + ": " + exits);
         } finally {
             context.unbindService(connection);
-            TailnetNode.start(context, directory.toFile(), "recovered", "http://127.0.0.1:1").close();
             LoginTest.deleteDirectory(directory);
         }
     }

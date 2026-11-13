@@ -1,6 +1,7 @@
-Klethron tsnet modifies three tailscale.com source files in an isolated build copy.
+Klethron tsnet modifies four tailscale.com source files in an isolated build copy.
 Upstream revision: 59064619a0f4ea3293be038e08651c66c2886255
 Original file SHA-256:
+net/tlsdial/tlsdial.go: 49adc77dc68cf066fa695037cc41164509949dfa8a97e96a9c4fd334cd3b7e1e
 control/controlclient/direct.go: ccdcc186decb2efe76c98af7e4914b77f15a7d7eda9406b1bb2b441c7fa1575a
 tsnet/dns_lookup.go: b49ecd66f1b9f4de7e7ef20061148a0e903de2e847627db38c88715c6964dc93
 tsnet/tsnet.go: c37b19724de27737147f427e4a6e81e947736244848d55d6425a966cdbf24125
@@ -45,3 +46,19 @@ Append a direct status accessor to avoid LocalAPI's HTTP/JSON round trip:
 
 // Status reads directly from the backend; call only between Start and Close.
 func (s *Server) Status() *ipnstate.Status { return s.lb.Status() }
+
+In tsnet/tsnet.go startup, use the caller's Hostname directly, remove executable
+and state-directory discovery/creation, keep rootPath empty, require Store,
+and remove the fallback FileStore setup and unused runtime/ipn/store imports.
+The Java StateStore supplies persistence; an empty var-root prevents auxiliary
+state directories. Tailnet Lock authority history is currently memory-only.
+
+--- a/net/tlsdial/tlsdial.go
++++ b/net/tlsdial/tlsdial.go
+@@
+ 			DNSName:       dialedHost,
++			Roots: SystemRoots,
+
+Append an exported SystemRoots *x509.CertPool, initialized with AndroidCAStore's
+enabled system certificates before TLS use. Verification no longer discovers
+roots through Go's filesystem loader. Baked-in roots remain omitted by build tag.

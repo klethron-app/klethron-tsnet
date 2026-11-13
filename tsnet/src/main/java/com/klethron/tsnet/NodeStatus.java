@@ -106,7 +106,7 @@ public final class NodeStatus {
 
     /// Browser authorization URL, or `null` when none is pending. Also used while [State#RUNNING]
     /// to renew a login. Whoever opens it can claim the node: send it only to the user's browser,
-    /// never log or share it. Wait for it to clear before closing, so the new login is saved.
+    /// never log or share it. Wait for it to clear before closing, so the new login reaches [StateStore].
     public @Nullable String loginUrl() {
         return loginUrl;
     }

@@ -1,5 +1,6 @@
 package main
 
+// #include "store.h"
 // #cgo CFLAGS: -Wall -Wextra -Wno-unused-parameter -Werror -fstack-protector-strong
 import "C"
 
@@ -18,7 +19,6 @@ import (
 func init() { log.SetOutput(io.Discard) }
 
 func newServer() *tsnet.Server {
-	usePlatformRoots()
 	return &tsnet.Server{UserLogf: logger.Discard, Logf: logger.Discard}
 }
 
@@ -47,13 +47,14 @@ func addNode(n *node) C.longlong {
 // klethron_node_start starts a node and returns its positive ID, or a negative failure result.
 //
 //export klethron_node_start
-func klethron_node_start(config *C.char, length C.int) C.longlong {
-	return startNode(C.GoStringN(config, length))
-}
-
-func startNode(config string) C.longlong {
+func klethron_node_start(store *C.state_store, config *C.char, length C.int) C.longlong {
 	n := newNode(newServer())
-	if result := n.start(config); result != 0 {
+	n.store = &javaStore{handle: store, node: n}
+	n.server.Store = n.store
+	n.lifecycle.RLock() // A failing startup callback must not close the server during Start.
+	result := n.start(C.GoStringN(config, length))
+	n.lifecycle.RUnlock()
+	if result != 0 {
 		n.close()
 		return C.longlong(result)
 	}

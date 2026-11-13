@@ -47,7 +47,7 @@ var tailnetProbeMu sync.Mutex
 
 // probeTailnet exchanges TCP data over a loopback tailnet's direct path, or only through DERP if
 // relayOnly.
-func probeTailnet(dir string, relayOnly bool) string {
+func probeTailnet(relayOnly bool) string {
 	if problem := checkProbeEnvironment(); problem != "" {
 		return problem
 	}
@@ -60,7 +60,7 @@ func probeTailnet(dir string, relayOnly bool) string {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	tailnet, problem := startLoopbackTailnet(ctx, dir)
+	tailnet, problem := startLoopbackTailnet(ctx)
 	defer tailnet.close()
 	if problem == "" {
 		problem = tailnet.verify(ctx, relayOnly)
@@ -80,7 +80,7 @@ type loopbackTailnet struct {
 }
 
 // startLoopbackTailnet returns a fixed diagnostic on failure. Close the result in either case.
-func startLoopbackTailnet(ctx context.Context, dir string) (*loopbackTailnet, string) {
+func startLoopbackTailnet(ctx context.Context) (*loopbackTailnet, string) {
 	t := new(loopbackTailnet)
 	control := new(testcontrol.Server)
 	stop, err := startLoopbackControl(control)
@@ -90,10 +90,10 @@ func startLoopbackTailnet(ctx context.Context, dir string) (*loopbackTailnet, st
 	t.closers = append(t.closers, stop)
 
 	var problem string
-	if t.listener, t.listenerIP, problem = t.startNode(ctx, dir, control.HTTPTestServer.URL, "klethron-listener"); problem != "" {
+	if t.listener, t.listenerIP, problem = t.startNode(ctx, control.HTTPTestServer.URL, "klethron-listener"); problem != "" {
 		return t, problem
 	}
-	if t.dialer, _, problem = t.startNode(ctx, dir, control.HTTPTestServer.URL, "klethron-dialer"); problem != "" {
+	if t.dialer, _, problem = t.startNode(ctx, control.HTTPTestServer.URL, "klethron-dialer"); problem != "" {
 		return t, problem
 	}
 	ln, err := t.listener.Listen("tcp", ":7070")
@@ -112,7 +112,7 @@ func (t *loopbackTailnet) close() {
 	}
 }
 
-func (t *loopbackTailnet) startNode(ctx context.Context, dir, controlURL, hostname string) (*tsnet.Server, netip.Addr, string) {
+func (t *loopbackTailnet) startNode(ctx context.Context, controlURL, hostname string) (*tsnet.Server, netip.Addr, string) {
 	server := newServer()
 	server.Logf = func(format string, args ...any) {
 		// Observe successful UDP rebinding without formatting or retaining log messages.
@@ -120,7 +120,7 @@ func (t *loopbackTailnet) startNode(ctx context.Context, dir, controlURL, hostna
 			t.rebound.Store(server, args[0])
 		}
 	}
-	server.Dir, server.Hostname, server.ControlURL = dir, hostname, controlURL
+	server.Hostname, server.ControlURL = hostname, controlURL
 	server.Store, server.Ephemeral = new(mem.Store), true
 	t.closers = append(t.closers, func() { _ = server.Close() })
 	status, err := server.Up(ctx)

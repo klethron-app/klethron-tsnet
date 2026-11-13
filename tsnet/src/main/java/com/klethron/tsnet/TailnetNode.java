@@ -13,7 +13,7 @@ import android.os.Looper;
 import android.os.ParcelFileDescriptor;
 import androidx.annotation.AnyThread;
 import androidx.annotation.WorkerThread;
-import java.io.File;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.net.ConnectException;
 import java.net.Inet4Address;
@@ -26,8 +26,13 @@ import java.nio.channels.ClosedChannelException;
 import java.nio.channels.ServerSocketChannel;
 import java.nio.channels.SocketChannel;
 import java.nio.charset.StandardCharsets;
+import java.security.GeneralSecurityException;
+import java.security.KeyStore;
 import java.time.Duration;
+import java.util.Collections;
+import java.util.IdentityHashMap;
 import java.util.Objects;
+import java.util.Set;
 import org.jspecify.annotations.Nullable;
 
 /// An embedded [tailnet](https://tailscale.com/kb/1136/tailnet) device with caller-owned keys and
@@ -39,6 +44,18 @@ import org.jspecify.annotations.Nullable;
 public final class TailnetNode implements AutoCloseable {
     static {
         System.loadLibrary("klethron_tsnet");
+        try {
+            KeyStore roots = KeyStore.getInstance("AndroidCAStore");
+            roots.load(null);
+            ByteArrayOutputStream certificates = new ByteArrayOutputStream();
+            for (String alias : Collections.list(roots.aliases())) {
+                var certificate = alias.startsWith("system:") ? roots.getCertificate(alias) : null;
+                if (certificate != null) certificates.writeBytes(certificate.getEncoded());
+            }
+            nativeSetRoots(certificates.toByteArray());
+        } catch (GeneralSecurityException | IOException failure) {
+            throw new ExceptionInInitializerError(failure);
+        }
     }
 
     private static final class NetworkMonitor extends ConnectivityManager.NetworkCallback {
@@ -74,56 +91,71 @@ public final class TailnetNode implements AutoCloseable {
     static final NetworkRequest PHYSICAL_NETWORK = new NetworkRequest.Builder()
             .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
             .addCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN).build();
-    private static int users; // Guarded with network by TailnetNode.class.
+    private static final Set<StateStore> stores = Collections.newSetFromMap(new IdentityHashMap<>());
     private static @Nullable NetworkMonitor network;
 
     private final long handle;
+    private final StateStore store;
     private volatile boolean closed;
 
-    private TailnetNode(long handle) {
+    private TailnetNode(long handle, StateStore store) {
         this.handle = handle;
+        this.store = store;
     }
 
     /// Starts with the saved login or browser authorization. Returns after local initialization;
     /// [#awaitStatus] reports progress and the login URL. `context` supplies [ConnectivityManager].
     ///
-    /// Give each node its own directory under [Context#getNoBackupFilesDir()]. It stores private keys:
-    /// never back it up or share it. The directory is locked until [#close] or process death;
-    /// do not move or delete it while open. Reusing it after [#close] restores the identity.
+    /// The caller supplies exclusive, private [StateStore] storage. Reusing its persisted values
+    /// restores the identity. This library does not create state files or directories.
     ///
     /// @param hostname the requested device name; Tailscale may adjust it
-    /// @throws IllegalArgumentException if the directory is relative or the hostname is empty or contains NUL
-    /// @throws IllegalStateException if another node uses the directory, including in another process
-    /// @throws IOException if initialization fails
+    /// @throws IllegalArgumentException if the hostname is empty or contains NUL
+    /// @throws IllegalStateException if an open node already uses this store instance
+    /// @throws IOException if initialization or storage fails
     @WorkerThread
-    public static TailnetNode start(Context context, File stateDirectory, String hostname) throws IOException {
-        return start(context, stateDirectory, hostname, "");
+    public static TailnetNode start(Context context, StateStore store, String hostname) throws IOException {
+        return start(context, store, hostname, "");
     }
 
-    /// As [#start(Context, File, String)], with an alternative control server URL for tests.
-    static TailnetNode start(Context context, File stateDirectory, String hostname, String controlUrl) throws IOException {
-        if (!stateDirectory.isAbsolute() || hostname.isEmpty() || hostname.indexOf(0) >= 0) {
-            throw new IllegalArgumentException("State directory must be absolute and hostname non-empty without NUL");
+    static TailnetNode start(Context context, StateStore store, String hostname, String controlUrl) throws IOException {
+        Objects.requireNonNull(store);
+        if (hostname.isEmpty() || hostname.indexOf(0) >= 0) {
+            throw new IllegalArgumentException("Hostname must be non-empty without NUL");
         }
-        String config = stateDirectory.getCanonicalPath() + '\0' + hostname + '\0' + controlUrl;
         synchronized (TailnetNode.class) {
-            if (users == 0) {
-                network = new NetworkMonitor(context);
-            }
-            users++;
+            if (stores.contains(store)) throw new IllegalStateException("Another node uses this state store");
+            if (stores.isEmpty()) network = new NetworkMonitor(context);
+            stores.add(store);
         }
         long handle = -1;
         try {
-            handle = nativeStart(config.getBytes(StandardCharsets.UTF_8));
+            handle = nativeStart(new Store(store), (hostname + '\0' + controlUrl).getBytes(StandardCharsets.UTF_8));
         } finally {
-            if (handle < 0) release();
+            if (handle < 0) release(store);
         }
         check(handle);
-        return new TailnetNode(handle);
+        return new TailnetNode(handle, store);
     }
 
-    private static synchronized void release() {
-        if (--users == 0 && network != null) {
+    // Byte arrays preserve standard UTF-8 keys across JNI; only these callback names are kept by R8.
+    private static final class Store {
+        final StateStore delegate;
+
+        Store(StateStore delegate) { this.delegate = delegate; }
+
+        private byte @Nullable [] read(byte[] key) throws IOException {
+            return delegate.read(new String(key, StandardCharsets.UTF_8));
+        }
+
+        private void write(byte[] key, byte @Nullable [] value) throws IOException {
+            delegate.write(new String(key, StandardCharsets.UTF_8), value);
+        }
+    }
+
+    private static synchronized void release(StateStore store) {
+        stores.remove(store);
+        if (stores.isEmpty() && network != null) {
             NetworkMonitor previous = network;
             network = null;
             try {
@@ -139,9 +171,10 @@ public final class TailnetNode implements AutoCloseable {
     /// changes may be skipped. Returns `previous` itself if nothing changed.
     ///
     /// @throws IllegalArgumentException if `previous` belongs to another node
+    /// @throws IOException if a storage callback failed
     /// @throws ClosedChannelException if the node is or becomes closed
     @WorkerThread
-    public NodeStatus awaitStatus(@Nullable NodeStatus previous, Duration timeout) throws ClosedChannelException {
+    public NodeStatus awaitStatus(@Nullable NodeStatus previous, Duration timeout) throws IOException {
         if (previous != null && previous.owner != handle) {
             throw new IllegalArgumentException("Status belongs to another node");
         }
@@ -149,6 +182,7 @@ public final class TailnetNode implements AutoCloseable {
         if (record == null) {
             throw new ClosedChannelException();
         }
+        if (record.equals("!")) check(-11);
         return record.isEmpty() ? Objects.requireNonNull(previous) : new NodeStatus(handle, record);
     }
 
@@ -229,8 +263,8 @@ public final class TailnetNode implements AutoCloseable {
     /// [NodeStatus.State#NEEDS_LOGIN] and can [#login] again. Does nothing if already logged out.
     ///
     /// If logout fails, the node stops connecting but keeps its saved login: retry the logout.
-    /// Deleting its files instead leaves the device registered in the tailnet. After a successful
-    /// logout, [#close] and delete the state directory to also forget the remaining device key.
+    /// Clearing the store instead leaves the device registered in the tailnet. After a successful
+    /// logout, [#close] and clear the store to also forget the remaining device key.
     ///
     /// @throws ClosedChannelException if the node is or becomes closed
     /// @throws SocketTimeoutException if Tailscale does not confirm within `timeout`
@@ -262,11 +296,11 @@ public final class TailnetNode implements AutoCloseable {
     @WorkerThread
     @Override
     public synchronized void close() {
-        // Serialized, so no call returns before the directory is free.
+        // Serialized, so no call returns before the store is free.
         if (closed) return;
         closed = true;
         nativeClose(handle);
-        release();
+        release(store);
     }
 
     /// Maps node.go's negative results to exceptions.
@@ -283,12 +317,14 @@ public final class TailnetNode implements AutoCloseable {
             case -8 -> throw new IOException("Login failed");
             case -9 -> throw new IOException("TS_AUTHKEY or TS_AUTH_KEY is set in the process environment");
             case -10 -> throw new IOException("Node failed to start");
-            case -11 -> throw new IllegalStateException("Another node uses the state directory");
+            case -11 -> throw new IOException("State store failed; close the node before retrying");
             default -> throw new IOException("Native failure " + result);
         }
     }
 
-    private static native long nativeStart(byte[] config);
+    private static native long nativeStart(Store store, byte[] config);
+
+    private static native void nativeSetRoots(byte[] certificates) throws GeneralSecurityException;
 
     private static native @Nullable String nativeAwaitStatus(long handle, long afterVersion, long timeoutNanos);
 

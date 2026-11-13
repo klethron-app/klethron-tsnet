@@ -15,7 +15,6 @@ import androidx.test.platform.app.InstrumentationRegistry;
 import com.google.errorprone.annotations.CanIgnoreReturnValue;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Path;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import org.junit.Test;
@@ -32,7 +31,6 @@ public final class NetworkChangeTest {
         ConnectivityManager connectivity = LoginTest.CONTEXT.getSystemService(ConnectivityManager.class);
         assertTrue("The default network must be Wi-Fi", awaitWifiDefault(connectivity));
 
-        Path directory = LoginTest.temporaryDirectory("netchange-");
         // Learns the interface names of the network the library follows; only it reports them to the nodes.
         LinkedBlockingQueue<String> names = new LinkedBlockingQueue<>();
         ConnectivityManager.NetworkCallback callback = new ConnectivityManager.NetworkCallback() {
@@ -47,8 +45,8 @@ public final class NetworkChangeTest {
         try {
             String wifi = nextName(names);
             // Checks that, with no node running, Android netmon has no default route.
-            assertEquals("ok", Probe.call("netchangeStart", directory));
-            try (TailnetNode node = TailnetNode.start(LoginTest.CONTEXT, directory.resolve("node").toFile(), "klethron-netchange",
+            assertEquals("ok", Probe.call("netchangeStart"));
+            try (TailnetNode node = TailnetNode.start(LoginTest.CONTEXT, new MemoryStore(), "klethron-netchange",
                     "http://127.0.0.1:1")) { // Unreachable: the node only follows the default network.
                 assertEquals("ok", Probe.call("netchangeAwait", wifi));
                 shell("svc wifi disable");
@@ -64,7 +62,6 @@ public final class NetworkChangeTest {
             Probe.call("netchangeStop");
             shell("svc wifi enable");
             connectivity.unregisterNetworkCallback(callback);
-            LoginTest.deleteDirectory(directory);
             boolean unused = awaitWifiDefault(connectivity); // Best effort, as found: must not mask a failure.
         }
     }

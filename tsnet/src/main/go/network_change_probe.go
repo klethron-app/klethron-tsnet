@@ -15,14 +15,14 @@ import (
 // through the public Java API. The started tailnet holds tailnetProbeMu until stopNetworkProbe.
 var networkTailnet atomic.Pointer[loopbackTailnet]
 
-func startNetworkProbe(dir string) string {
+func startNetworkProbe(string) string {
 	if problem := checkProbeEnvironment(); problem != "" {
 		return problem
 	}
 	tailnetProbeMu.Lock()
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	tailnet, problem := startLoopbackTailnet(ctx, dir)
+	tailnet, problem := startLoopbackTailnet(ctx)
 	if problem == "" {
 		problem = tailnet.verify(ctx, false)
 	}

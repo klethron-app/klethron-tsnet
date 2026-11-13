@@ -6,8 +6,6 @@ import static org.junit.Assert.assertTrue;
 
 import java.net.SocketTimeoutException;
 import java.nio.channels.ClosedChannelException;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
@@ -16,29 +14,25 @@ import org.junit.Test;
 
 public final class TailnetNodeTest {
     @Test
-    public void nodesKeepTheirStatusAndDirectory() throws Exception {
+    public void nodesKeepTheirStatusAndStore() throws Exception {
         String version = TailnetNode.tailscaleVersion();
         assertTrue(version, version.startsWith("v1.") && version.endsWith("-59064619a0f4"));
-        Path directory = LoginTest.temporaryDirectory("status-");
-        String control = "http://127.0.0.1:1"; // Unreachable: the nodes stay local.
-        try (TailnetNode first = TailnetNode.start(LoginTest.CONTEXT, directory.resolve("first").toFile(), "first", control);
-                TailnetNode second = TailnetNode.start(LoginTest.CONTEXT, directory.resolve("second").toFile(), "second", control)) {
+        StateStore store = new MemoryStore();
+        String control = "http://127.0.0.1:1";
+        try (TailnetNode first = TailnetNode.start(LoginTest.CONTEXT, store, "first", control);
+                TailnetNode second = TailnetNode.start(LoginTest.CONTEXT, new MemoryStore(), "second", control)) {
             NodeStatus status = first.awaitStatus(null, Duration.ZERO);
             assertThrows(IllegalArgumentException.class, () -> second.awaitStatus(status, Duration.ZERO));
-            assertThrows(IllegalStateException.class, () ->
-                    TailnetNode.start(LoginTest.CONTEXT, directory.resolve("second/../first").toFile(), "third", control));
-            Path alias = Files.createSymbolicLink(directory.resolve("alias"), directory.resolve("first"));
-            assertThrows(IllegalStateException.class, () -> TailnetNode.start(LoginTest.CONTEXT, alias.toFile(), "alias", control));
-        } finally {
-            LoginTest.deleteDirectory(directory);
+            assertThrows(IllegalStateException.class, () -> TailnetNode.start(LoginTest.CONTEXT, store, "third", control));
         }
+        TailnetNode.start(LoginTest.CONTEXT, store, "reopened", control).close();
     }
 
     @Test(timeout = 30000)
     @SuppressWarnings({"AssertThrowsMultipleStatements", "NullAway"}) // Check blocking loops and null arguments.
     public void refusesInvalidCallsAndCloseEndsBlockedOnes() throws Exception {
-        Path directory = LoginTest.temporaryDirectory("close-");
-        try (TailnetNode node = TailnetNode.start(LoginTest.CONTEXT, directory.toFile(), "close", "http://127.0.0.1:1")) {
+        StateStore store = new MemoryStore();
+        try (TailnetNode node = TailnetNode.start(LoginTest.CONTEXT, store, "close", "http://127.0.0.1:1")) {
             for (String host : new String[] {"", "a".repeat(256), "a\0b"}) {
                 DialTest.assertDialThrows(IllegalArgumentException.class, node, host, 22, Duration.ZERO);
             }
@@ -67,9 +61,7 @@ public final class TailnetNodeTest {
             DialTest.assertDialThrows(ClosedChannelException.class, node, "100.64.0.1", 22, Duration.ZERO);
             assertThrows(ClosedChannelException.class, () -> node.logout(Duration.ZERO));
             assertThrows(ClosedChannelException.class, node::login);
-            TailnetNode.start(LoginTest.CONTEXT, directory.toFile(), "reopened", "http://127.0.0.1:1").close();
-        } finally {
-            LoginTest.deleteDirectory(directory);
+            TailnetNode.start(LoginTest.CONTEXT, store, "reopened", "http://127.0.0.1:1").close();
         }
     }
 }

@@ -91,27 +91,45 @@ abstract class BuildGoLibrary @Inject constructor(
                 filePermissions { unix("0644") }
             }
         }
-        // Replaces the only occurrence of `old` in an upstream file with the given SHA-256.
-        fun patch(path: String, hash: String, old: String, new: String) {
+        fun patch(path: String, hash: String, vararg changes: Pair<String, String>) {
             val original = upstream.resolve(path).readBytes()
-            val text = original.toString(Charsets.UTF_8)
-            if (sha256(original) != hash || text.split(old).size != 2) {
-                throw GradleException("Pinned $path changed; review TAILSCALE-MODIFICATIONS before building")
+            if (sha256(original) != hash) throw GradleException("Pinned $path changed; review TAILSCALE-MODIFICATIONS")
+            var text = original.toString(Charsets.UTF_8)
+            for ((old, new) in changes) {
+                if (text.split(old).size != 2) throw GradleException("Patch does not match $path")
+                text = text.replace(old, new)
             }
-            workspace.resolve("tailscale/$path").writeText(text.replace(old, new))
+            workspace.resolve("tailscale/$path").writeText(text)
         }
         // tailscale/tailscale#22248: a failed logout must not forget the node key.
         val forgetKey = "\tc.mu.Lock()\n\tc.persist = new(persist.Persist).View()\n\tc.mu.Unlock()\n"
         patch("control/controlclient/direct.go", "ccdcc186decb2efe76c98af7e4914b77f15a7d7eda9406b1bb2b441c7fa1575a",
-            forgetKey, "\tif err == nil {\n" + forgetKey.replace("\t", "\t\t") + "\t}\n")
+            forgetKey to "\tif err == nil {\n" + forgetKey.replace("\t", "\t\t") + "\t}\n")
         // Names that the tailnet's DNS does not answer must not reach the device's resolver.
         patch("tsnet/dns_lookup.go", "b49ecd66f1b9f4de7e7ef20061148a0e903de2e847627db38c88715c6964dc93",
-            "return c.hostLookup(ctx, network, hostFB)", "return candidateResult{servfail: true, err: firstErr}")
+            "return c.hostLookup(ctx, network, hostFB)" to "return candidateResult{servfail: true, err: firstErr}")
+        val tsnetSource = upstream.resolve("tsnet/tsnet.go").readText()
+        val hostnameSetup = "\texe, err := os.Executable()" + tsnetSource.substringAfter("\texe, err := os.Executable()")
+            .substringBefore("\n\ts.rootPath =")
+        val directorySetup = "\tif s.rootPath == \"\" {" + tsnetSource.substringAfter("\tif s.rootPath == \"\" {")
+            .substringBefore("\n\ttsLogf :=")
+        val fileStoreSetup = "\tif s.Store == nil {" + tsnetSource.substringAfter("\tif s.Store == nil {")
+            .substringBefore("\n\tsys.Set(s.Store)")
         patch("tsnet/tsnet.go", "c37b19724de27737147f427e4a6e81e947736244848d55d6425a966cdbf24125",
-            "\tgo s.printAuthURLLoop()\n", "")
+            "\tgo s.printAuthURLLoop()\n" to "",
+            hostnameSetup to "\tvar err error\n\ts.hostname = s.Hostname\n",
+            "\ts.rootPath = s.Dir" to "\ts.rootPath = \"\"",
+            directorySetup to "\tif s.Store == nil { return errors.New(\"StateStore is required\") }\n",
+            fileStoreSetup to "",
+            "\t\"tailscale.com/ipn/store\"\n" to "",
+            "\t\"runtime\"\n" to "")
         workspace.resolve("tailscale/tsnet/tsnet.go").appendText(
             "\n// Status reads directly from the backend; call only between Start and Close.\n" +
             "func (s *Server) Status() *ipnstate.Status { return s.lb.Status() }\n")
+        patch("net/tlsdial/tlsdial.go", "49adc77dc68cf066fa695037cc41164509949dfa8a97e96a9c4fd334cd3b7e1e",
+            "\t\t\tDNSName:       dialedHost," to "\t\t\tDNSName:       dialedHost,\n\t\t\tRoots: SystemRoots,")
+        workspace.resolve("tailscale/net/tlsdial/tlsdial.go").appendText(
+            "\n// SystemRoots is supplied by Android before TLS is used.\nvar SystemRoots *x509.CertPool\n")
         workspace.resolve("go.mod").appendText("\nreplace tailscale.com => ./tailscale\n")
         val flags = arrayOf("-mod=readonly", "-trimpath", "-buildvcs=false", "-tags=" + buildTags.get().joinToString(","))
         val target = mapOf("GOOS" to "android", "GOARCH" to arch, "CGO_ENABLED" to "1", "CC" to compiler.absolutePath)

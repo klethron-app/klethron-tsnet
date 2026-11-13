@@ -11,9 +11,10 @@ no Tailscale app or device-wide VPN is needed.
 Requires **Android 14 (API 34)** or later. The AAR supports **arm64-v8a**, **x86_64** and 16 KiB pages;
 consumers need no Go compiler or NDK.
 
-**Under development.** Login, saved identity, logout and revocation have local and live tailnet tests.
-The `SocketChannel` API, IPv6 connections and peer listing have local coverage. The underlying TCP
-transport and Wi-Fi/cellular switches also have live coverage, the latter only with Tailscale's VPN
+**Under development.** Login, logout and revocation have local and live tailnet tests. Caller-owned
+SQLite persistence has local restart and crash coverage. The `SocketChannel` API, IPv6 connections
+and peer listing have local coverage. TCP transport and Wi-Fi/cellular switches also have live
+coverage, the latter only with Tailscale's VPN
 active. See [limitations](UPSTREAM.md#limits) and [Javadoc](https://javadoc.io/doc/com.klethron/tsnet/latest/).
 
 ## Install
@@ -34,13 +35,14 @@ The manifest adds `INTERNET`, `ACCESS_NETWORK_STATE` and `CHANGE_NETWORK_STATE`,
 
 ## Connect
 
-Run `TailnetNode` operations on a worker thread. Give each node a directory under
-`Context.getNoBackupFilesDir()`; it holds private keys and must never be logged, backed up or shared.
-The directory is locked until the node closes or its process dies; do not move or delete it while open.
+Run `TailnetNode` operations on a worker thread. Supply a `StateStore` with synchronous `read(String)`
+and `write(String, byte[])` callbacks; `null` means absent on read and delete on write. It holds private
+keys: exclude it from backups, exports and sync. Give each live node exclusive access to its records,
+including across processes. See the demo
+[SQLite store](demo/src/main/java/com/klethron/tsnet/demo/SqliteStore.java) for an implementation.
 
 ```java
-File directory = new File(context.getNoBackupFilesDir(), "tailscale");
-try (TailnetNode node = TailnetNode.start(context, directory, "my-device")) {
+try (TailnetNode node = TailnetNode.start(context, store, "my-device")) {
     NodeStatus status = null;
     do {
         status = node.awaitStatus(status, Duration.ofSeconds(30));
@@ -55,8 +57,14 @@ try (TailnetNode node = TailnetNode.start(context, directory, "my-device")) {
 ```
 
 `awaitStatus` waits without polling; closing from another thread cancels it with `ClosedChannelException`.
-Whoever opens a login URL can claim the node. Wait for it to clear before closing so the login is saved.
-Restarting with the same directory resumes that identity.
+Whoever opens a login URL can claim the node. Wait for it to clear before closing so the login reaches
+the store. Restarting with those values resumes that identity.
+
+Callbacks are serialized; do not call node methods from them. A returned write must be visible to later
+reads. The caller chooses durability: it can handle a disk failure, retain state in memory and return
+normally. An exception escaping a callback stops the node and makes node operations throw `IOException`.
+Close the node before closing or reusing its store. The library creates no state files or directories;
+apps using files should keep them under `Context.getNoBackupFilesDir()`.
 
 `NodeStatus` reports the device name, tailnet, user and peers (names, OS, online state, addresses and
 [Tailscale SSH](https://tailscale.com/kb/1193/tailscale-ssh) host keys).

@@ -24,7 +24,7 @@ public final class TrustRootsTest {
     /// connection. The node stops at an unauthorized login request; the URL never leaves native code.
     @Test(timeout = 60000)
     public void reachesRealControlPlaneUntilLoginWithoutWritingFiles() throws Exception {
-        String root = LoginTest.callWithoutFiles("control");
+        String root = Probe.call("control");
         assertTrue("The verified control chain must end at an Android system root, not " + root,
                 systemRootFingerprints().contains(root));
     }

@@ -21,7 +21,7 @@ import (
 // interactive login URL. The URL is checked here and never returned, logged or opened, so the
 // pending registration cannot be authorized. It returns the SHA-256 hex of the verified chain's
 // root certificate, or a fixed diagnostic.
-func probeControl(dir string) string {
+func probeControl(string) string {
 	if problem := checkProbeEnvironment(); problem != "" {
 		return problem
 	}
@@ -31,8 +31,7 @@ func probeControl(dir string) string {
 
 	// Plain crypto/tls records the verified chain; tlsdial verifies in a callback and records none.
 	// Resolution uses bionic via cgo.
-	usePlatformRoots()
-	dialer := new(tls.Dialer) // Verifies the address's host name.
+	dialer := &tls.Dialer{Config: &tls.Config{RootCAs: platformRoots}} // Verifies the address's host name.
 	address := net.JoinHostPort(controlURL.Host, "443")
 	conn, err := dialer.DialContext(ctx, "tcp", address)
 	for ; err != nil && ctx.Err() == nil; conn, err = dialer.DialContext(ctx, "tcp", address) {
@@ -47,7 +46,7 @@ func probeControl(dir string) string {
 
 	server := newServer()
 	// Explicit, ignoring any TS_CONTROL_URL.
-	server.Dir, server.Hostname, server.ControlURL = dir, "klethron-control-test", ipn.DefaultControlURL
+	server.Hostname, server.ControlURL = "klethron-control-test", ipn.DefaultControlURL
 	server.Store, server.Ephemeral = new(mem.Store), true
 	defer server.Close()
 	client, err := server.LocalClient() // Starts: fetches the control key and requests interactive login.

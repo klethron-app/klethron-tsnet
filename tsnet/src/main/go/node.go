@@ -15,7 +15,6 @@ import (
 	"sync"
 	"time"
 
-	"golang.org/x/sys/unix"
 	"tailscale.com/client/local"
 	"tailscale.com/ipn"
 	"tailscale.com/ipn/ipnstate"
@@ -26,9 +25,9 @@ import (
 )
 
 type node struct {
-	server   *tsnet.Server
-	client   *local.Client
-	stateDir *os.File // Locked until shutdown; process death also releases it.
+	server *tsnet.Server
+	client *local.Client
+	store  *javaStore
 
 	lifecycle sync.RWMutex   // Held for reading by calls, and for writing by close.
 	watchers  sync.WaitGroup // Status goroutines, which use the server until ctx ends.
@@ -67,30 +66,20 @@ func newNode(server *tsnet.Server) *node {
 	return &node{server: server, ctx: ctx, cancel: cancel, access: access, endAccess: endAccess, changed: make(chan struct{})}
 }
 
-// start runs before publication. TailnetNode validates config: "directory\x00hostname\x00controlURL".
+// start runs before publication. TailnetNode validates config: "hostname\x00controlURL".
 func (n *node) start(config string) int {
-	directory, rest, _ := strings.Cut(config, "\x00")
-	hostname, controlURL, _ := strings.Cut(rest, "\x00")
+	hostname, controlURL, _ := strings.Cut(config, "\x00")
 	// tsnet must not use a host-process credential or control URL.
 	if os.Getenv("TS_AUTHKEY") != "" || os.Getenv("TS_AUTH_KEY") != "" {
 		return resultAuthEnvironment
 	}
-	n.server.Dir, n.server.Hostname, n.server.ControlURL = directory, hostname, cmp.Or(controlURL, ipn.DefaultControlURL)
-	if err := os.MkdirAll(directory, 0700); err != nil {
-		return resultStartFailed
-	}
+	n.server.Hostname, n.server.ControlURL = hostname, cmp.Or(controlURL, ipn.DefaultControlURL)
 	var err error
-	if n.stateDir, err = os.Open(directory); err != nil {
-		return resultStartFailed
-	}
-	if err := unix.Flock(int(n.stateDir.Fd()), unix.LOCK_EX|unix.LOCK_NB); err != nil {
-		if err == unix.EWOULDBLOCK {
-			return resultDirectoryInUse
-		}
-		return resultStartFailed
-	}
 	if n.client, err = n.server.LocalClient(); err != nil { // Starts the server.
-		return resultStartFailed
+		return n.failed(n.ctx, resultStartFailed)
+	}
+	if n.store != nil && n.store.failed.Load() {
+		return resultStoreFailed
 	}
 	refresh := make(chan struct{}, 1)
 	n.watchers.Go(func() { n.watchStatus(refresh) })
@@ -104,7 +93,9 @@ func (n *node) close() {
 	defer n.lifecycle.Unlock()
 	n.watchers.Wait()
 	_ = n.server.Close()
-	_ = n.stateDir.Close()
+	if n.store != nil {
+		n.store.close()
+	}
 }
 
 // watchStatus resumes with current state after disconnects. Refresh names and peers separately:
@@ -222,7 +213,7 @@ func (n *node) publish(notify ipn.Notify, read *statusRead) {
 	if notify.SelfChange != nil {
 		self, expiry = notify.SelfChange.Key, notify.SelfChange.KeyExpiry
 	}
-	// A changed node key confirms the new login is saved. LoginFinished is too early, and state
+	// A changed node key confirms the new login reached the store. LoginFinished is too early; state
 	// stays Running during re-authentication.
 	if self != n.selfKey {
 		status.loginURL = ""
@@ -293,6 +284,9 @@ func (n *node) await(after uint64, timeout time.Duration) (string, bool) {
 		defer cancel()
 		status, version, _ = n.wait(ctx, func(_ nodeStatus, version uint64) bool { return version != after })
 	}
+	if n.store != nil && n.store.failed.Load() {
+		return "!", true
+	}
 	if n.ctx.Err() != nil {
 		return "", false
 	}
@@ -330,7 +324,7 @@ const (
 	resultLoginFailed
 	resultAuthEnvironment
 	resultStartFailed
-	resultDirectoryInUse
+	resultStoreFailed
 )
 
 // whenOpen bounds a call by timeout and node lifetime. Close waits until the returned function runs.
@@ -338,7 +332,7 @@ func (n *node) whenOpen(timeout time.Duration) (context.Context, func(), int) {
 	// Only close locks for writing, after cancelling: fail at once rather than wait for shutdown.
 	// A call racing close runs with a cancelled context.
 	if n == nil || n.ctx.Err() != nil || !n.lifecycle.TryRLock() {
-		return nil, nil, resultClosed
+		return nil, nil, n.failed(context.Background(), resultClosed)
 	}
 	ctx, cancel := context.WithTimeout(n.ctx, timeout)
 	return ctx, func() {
@@ -349,7 +343,10 @@ func (n *node) whenOpen(timeout time.Duration) (context.Context, func(), int) {
 
 // failed maps a failure of a call with ctx from whenOpen to closed or timed out, if applicable.
 func (n *node) failed(ctx context.Context, result int) int {
-	if n.ctx.Err() != nil {
+	if n != nil && n.store != nil && n.store.failed.Load() {
+		return resultStoreFailed
+	}
+	if n == nil || n.ctx.Err() != nil {
 		return resultClosed
 	}
 	if ctx.Err() != nil {
@@ -442,7 +439,7 @@ func (n *node) logout(timeout time.Duration) int {
 	if err := n.client.Logout(ctx); err != nil {
 		return n.failed(ctx, resultLogoutFailed)
 	}
-	return 0
+	return n.failed(ctx, 0)
 }
 
 func (n *node) login() int {
@@ -469,7 +466,7 @@ func (n *node) login() int {
 	if err := n.client.StartLoginInteractive(ctx); err != nil {
 		return n.failed(ctx, resultLoginFailed)
 	}
-	return 0
+	return n.failed(ctx, 0)
 }
 
 // relay copies between conn and the app's socket until either side or ctx ends; TailnetNode.connect

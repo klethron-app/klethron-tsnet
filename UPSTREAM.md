@@ -18,27 +18,28 @@ with Go 1.27.4. All entries rechecked 2026-11-13; none fixed upstream. Remove en
   reads the same backend snapshot directly. Called only between startup and watcher shutdown.
 - **The login logger polls even with logging discarded.** Remove the `printAuthURLLoop` launch;
   our IPN watcher already receives login URLs. This saves two goroutines and five-second status polls
-  while awaiting initial login. Both changes are hash-checked in `tsnet/tsnet.go`.
+  while awaiting initial login.
+- **A custom store still requires a directory.** Patch `tsnet/tsnet.go` to require an injected
+  `StateStore`, skip directory and executable discovery, and leave the backend var-root empty.
+  Java callbacks own persistence; no directory lock or file-store fallback remains.
+- **TLS discovers roots through filesystem reads.** Android supplies enabled system certificates via
+  `AndroidCAStore`; patch `tlsdial` to use that explicit pool. `bakedroots` is omitted. This also fixes
+  Go missing Android 14's updatable Conscrypt store and user-disabled roots
+  ([golang/go#71258](https://github.com/golang/go/issues/71258)).
 
 ## Worked around
 
 - **Logs can contain login URLs.** `main.go` discards `tsnet.Server.UserLogf`, `Logf` and Go's standard
   log output, which netmon and others use directly.
-- **`tsnet.Server` fills empty fields from the environment.** `node.start` sets `Dir`, `Hostname` and
+- **`tsnet.Server` fills empty fields from the environment.** `node.start` sets `Hostname` and
   `ControlURL`, overriding `TS_CONTROL_URL`, and rejects `TS_AUTHKEY`/`TS_AUTH_KEY`. `oauthkey` and
   `useproxy` are omitted; nothing imports `identityfederation`, which reads ID-token variables.
-- **TLS trusts the wrong roots.** Go's `crypto/x509` reads only `/system/etc/security/cacerts`, missing
-  Android 14's updatable Conscrypt APEX store, and ignores roots the user disabled
-  ([golang/go#71258](https://github.com/golang/go/issues/71258)). `tlsdial` also falls back to baked-in
-  Let's Encrypt roots. `roots_android.go` installs the APEX (or system) store minus the user's
-  `cacerts-removed` with `x509.SetFallbackRoots`; `bakedroots` is omitted.
 - **`LoginFinished` comes before the new node key is saved**
   ([#19149](https://github.com/tailscale/tailscale/issues/19149); draft fix
   [PR #19150](https://github.com/tailscale/tailscale/pull/19150)). `controlclient.Auto` saves `Persist`
   only with a network map, so closing right after `LoginFinished` can lose the login. `node.publish`
-  clears the login URL only once the self node's key changes.
-- **The state directory is not locked.** `node.start` holds an exclusive directory `flock` until
-  shutdown or process death, rejecting concurrent use across processes without an extra state file.
+  clears the login URL only once the self node's key changes. Storage callback exceptions cancel
+  the node, including failures upstream only logs; callers may handle persistence errors themselves.
 - **`tsnet.Server.Dial` can leave the tailnet.** For addresses not in the network map, `tsdial.UserDial`
   falls back to the routing table, then a plain `net.Dialer`. `node.dial` resolves with `UserDialPlan`,
   requires `UseNetstackForIP` and connects with `NetstackDialTCP`.
@@ -99,7 +100,7 @@ with Go 1.27.4. All entries rechecked 2026-11-13; none fixed upstream. Remove en
 1. Pin a full `tailscale/tailscale` main SHA in `go.mod`/`go.sum`, `TailnetNodeTest`'s version
    assertion, this file and `TAILSCALE-MODIFICATIONS`; review the patches and update their hashes (never
    just accept new ones), and recheck every entry.
-2. Re-audit environment reads, filesystem writes, `os/exec` reachability, state file permissions and
+2. Re-audit environment reads, filesystem access, `os/exec` reachability, storage callbacks and
    `tailcfg.PeerChange` fields (`watchStatus` refreshes peers only for online changes), and check that
    existing state still loads.
 3. Update the notice inventories (THIRD-PARTY-NOTICES.md), rebuild both ABIs and run the device tests.
