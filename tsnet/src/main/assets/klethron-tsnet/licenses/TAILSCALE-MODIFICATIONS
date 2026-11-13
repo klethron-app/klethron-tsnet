@@ -1,6 +1,6 @@
 Klethron tsnet modifies ten tailscale.com source files in an isolated build copy.
 Debug builds also patch tstest/integration/testcontrol/testcontrol.go, as described below.
-Upstream revision: 59064619a0f4ea3293be038e08651c66c2886255
+Upstream revision: e0d532cca9beeb8ed235bf30b9198a7c0e0afa02
 Original file SHA-256:
 net/tlsdial/tlsdial.go: 49adc77dc68cf066fa695037cc41164509949dfa8a97e96a9c4fd334cd3b7e1e
 net/dns/resolver/forwarder.go: 804a86c6264a7fcb3d2795e33d047a88502836ca74f5eaa516331acc8e0e4b94

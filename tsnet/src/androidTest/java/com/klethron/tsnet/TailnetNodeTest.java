@@ -18,7 +18,7 @@ public final class TailnetNodeTest {
     @Test
     public void nodesKeepTheirStatusAndStore() throws Exception {
         String version = TailnetNode.tailscaleVersion();
-        assertTrue(version, version.startsWith("v1.") && version.endsWith("-59064619a0f4"));
+        assertTrue(version, version.startsWith("v1.") && version.endsWith("-e0d532cca9be"));
         StateStore store = new MemoryStore();
         String control = "http://127.0.0.1:1";
         try (TailnetNode first = TailnetNode.start(CONTEXT, store, "first", control);

@@ -1,7 +1,12 @@
 # Upstream issues
 
-Pinned: Tailscale [`59064619a0f4`](https://github.com/tailscale/tailscale/commit/59064619a0f4ea3293be038e08651c66c2886255)
+Pinned: Tailscale [`e0d532cca9be`](https://github.com/tailscale/tailscale/commit/e0d532cca9beeb8ed235bf30b9198a7c0e0afa02)
 with Go 1.27.4. Reviewed 2026-11-13. Remove patches when equivalent fixes reach the pin.
+
+The update from `59064619a0f4` extracts the network-map cache's file store and gates home-DERP
+cache writes on `CacheNetworkMaps`. `ts_omit_cachenetmap` still disables cache creation, loading,
+writes and clearing; the new close calls return immediately because no cache exists. All patched
+files, transitive dependency versions, storage formats and `tailcfg.PeerChange` fields are unchanged.
 
 This pin already includes the [netstack shutdown fix](https://github.com/tailscale/tailscale/pull/21668)
 needed by [Tailcat #151](https://github.com/tailscale/tailcat/issues/151); no backport is needed.

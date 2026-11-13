@@ -27,9 +27,13 @@ the line to record after a review. Reports are in `tsnet/build/reports/native/no
 
 ## Per-file review
 
-Reviewed 2026-11-13 for the release libraries: all 2,734 Go, assembly, C, header and embedded files that
+Reviewed 2026-11-13 for the release libraries: all 2,739 Go, assembly, C, header and embedded files that
 `go list -deps` selects for either ABI (1,381 from the standard library), searched for copyright, licence,
 SPDX, public-domain and "derived/adapted/copied from" text and for `Code generated` headers.
+
+The `e0d532cca9be` update changes five selected files, including two new cache-store files. All carry
+Tailscale's BSD-3-Clause notice; no additional licence text or module notice is needed. Other selected
+files and transitive dependency versions are unchanged.
 
 - **Per-file notices** beyond the module licences are in `FILE-NOTICES`: Sun (FreeBSD msun) and Cephes
   code in Go's `math`, Inferno's MIT `memmove` (x86_64), gVisor's BSD-licensed `pkg/sync`, half-rs (MIT)

@@ -3,8 +3,9 @@ module github.com/klethron-app/klethron-tsnet/tsnet
 go 1.27.4
 
 require (
+	golang.org/x/net v0.62.0
 	golang.org/x/sys v0.50.0
-	tailscale.com v1.105.0-pre.0.20261113020038-59064619a0f4
+	tailscale.com v1.105.0-pre.0.20261113150507-e0d532cca9be
 )
 
 require (
@@ -50,7 +51,6 @@ require (
 	golang.org/x/exp v0.0.0-20260908205506-85c1c2202aba // indirect
 	golang.org/x/exp/typeparams v0.0.0-20260811152304-ee035b5b010f // indirect
 	golang.org/x/mod v0.41.0 // indirect
-	golang.org/x/net v0.62.0 // indirect
 	golang.org/x/oauth2 v0.37.0 // indirect
 	golang.org/x/sync v0.24.0 // indirect
 	golang.org/x/term v0.47.0 // indirect
