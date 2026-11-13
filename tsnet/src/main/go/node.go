@@ -18,6 +18,7 @@ import (
 	"tailscale.com/client/local"
 	"tailscale.com/ipn"
 	"tailscale.com/ipn/ipnstate"
+	"tailscale.com/net/netx"
 	"tailscale.com/tailcfg"
 	"tailscale.com/tsconst"
 	"tailscale.com/tsnet"
@@ -101,8 +102,8 @@ func (n *node) close() {
 }
 
 // watchStatus resumes with current state after disconnects. Refresh names and peers separately:
-// large status reads can stall the watch. Every map sends SelfChange; among peer patches, only
-// online changes affect our records. Other peer changes arrive as full nodes.
+// large status reads can stall the watch. Full maps send SelfChange; profile-only updates can
+// change the login name. Among peer patches, only online changes affect our records.
 func (n *node) watchStatus(refresh chan<- struct{}) {
 	defer watchDefaultNetwork(n.server)()
 	for n.ctx.Err() == nil {
@@ -114,7 +115,7 @@ func (n *node) watchStatus(refresh chan<- struct{}) {
 				}
 				n.publish(notify, nil)
 				if notify.InitialStatus != nil || notify.State != nil || notify.SelfChange != nil ||
-					len(notify.PeersChanged)+len(notify.PeersRemoved) > 0 ||
+					len(notify.PeersChanged)+len(notify.PeersRemoved)+len(notify.UserProfiles) > 0 ||
 					slices.ContainsFunc(notify.PeerChangedPatch, func(c *tailcfg.PeerChange) bool { return c.Online != nil }) {
 					select {
 					case refresh <- struct{}{}:
@@ -411,20 +412,41 @@ func (n *node) dial(host string, port uint16, fd int, timeout time.Duration) (re
 	// Peer names resolve from the network map, others only through the tailnet's DNS: the
 	// dns_lookup.go patch keeps them from the device's resolver.
 	dialer := n.server.Sys().Dialer.Get()
-	target, _, err := dialer.UserDialPlan(dialCtx, "tcp", net.JoinHostPort(host, strconv.Itoa(int(port))))
+	addresses, err := n.server.LookupIPForDial(dialCtx, host)
 	if err != nil {
 		if access.Err() != nil {
 			return n.failed(ctx, resultDialFailed)
 		}
 		return n.failed(ctx, resultUnknownHost)
 	}
-	target = netip.AddrPortFrom(target.Addr().Unmap(), target.Port())
 	// Netstack reaches exactly the network map's peers and subnet routes. Upstream Server.Dial would
 	// dial other addresses, including unknown nodes' Tailscale IPs, through the device's network.
-	if !dialer.UseNetstackForIP(target.Addr()) {
+	var allowed []netip.AddrPort
+	for _, address := range addresses {
+		target := netip.AddrPortFrom(address.Unmap(), port)
+		if dialer.UseNetstackForIP(target.Addr()) && !slices.Contains(allowed, target) {
+			allowed = append(allowed, target)
+		}
+	}
+	if len(allowed) == 0 {
 		return n.failed(ctx, resultNoRoute)
 	}
-	conn, err := dialer.NetstackDialTCP(dialCtx, target)
+	dial := dialer.NetstackDialTCP
+	var conn net.Conn
+	if len(allowed) == 1 {
+		conn, err = dial(dialCtx, allowed[0])
+	} else {
+		conn, err = netx.RaceDial(dialCtx, allowed, func(ctx context.Context, _, address string) (net.Conn, error) {
+			// RaceDial cancels losers without waiting for them. Keep each attempt inside the node's
+			// lifetime, including an attempt scheduled just as the caller returns or closes the node.
+			n.lifecycle.RLock()
+			defer n.lifecycle.RUnlock()
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			return dial(ctx, netip.MustParseAddrPort(address))
+		}, 300*time.Millisecond)
+	}
 	if err != nil {
 		return n.failed(ctx, resultDialFailed)
 	}

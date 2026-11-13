@@ -1,10 +1,12 @@
-Klethron tsnet modifies eight tailscale.com source files in an isolated build copy.
+Klethron tsnet modifies ten tailscale.com source files in an isolated build copy.
 Debug builds also patch tstest/integration/testcontrol/testcontrol.go, as described below.
 Upstream revision: 59064619a0f4ea3293be038e08651c66c2886255
 Original file SHA-256:
 net/tlsdial/tlsdial.go: 49adc77dc68cf066fa695037cc41164509949dfa8a97e96a9c4fd334cd3b7e1e
 net/dns/resolver/forwarder.go: 804a86c6264a7fcb3d2795e33d047a88502836ca74f5eaa516331acc8e0e4b94
 util/dnsname/dnsname.go: 5608189341565036e81b5d09c808034dd2f44e9d9cd8c7c9b7cd90764a7cdf3c
+ipn/ipnlocal/node_backend.go: 872efabb907356dd3305342b01f849654e65916e927384b39b896233e9113a07
+ipn/ipnlocal/resolve.go: 1a072fd225a45c548606bbad0f7188a1b124eb95f63de77be3e2e4a77e276814
 control/controlclient/direct.go: ccdcc186decb2efe76c98af7e4914b77f15a7d7eda9406b1bb2b441c7fa1575a
 tsnet/dns_lookup.go: b49ecd66f1b9f4de7e7ef20061148a0e903de2e847627db38c88715c6964dc93
 tsnet/tsnet.go: c37b19724de27737147f427e4a6e81e947736244848d55d6425a966cdbf24125
@@ -76,6 +78,27 @@ Control-supplied route keys can contain uppercase letters, while the resolver
 lowercases query names. This applies the Contains fix from the broader proposal
 https://github.com/tailscale/tailscale/pull/22380.
 
+The same file validates the final label in ToFQDN after stripping the trailing
+dot: iterate through len(s) inclusively, and treat the end as a label boundary.
+This rejects empty and overlong final labels, following
+https://github.com/tailscale/tailscale/pull/22107.
+
+In tsnet/tsnet.go, append LookupIPForDial to resolve IP literals, then all
+addresses from the fast network-map lookup, then other names with LookupIP.
+In ipn/ipnlocal/resolve.go, append ResolveMagicDNSAll to return all addresses
+of the matching peer or ExtraRecords name. This preserves peer names even with
+MagicDNS disabled, and multiple records in either family. The caller filters
+every address for tailnet reachability before racing NetstackDialTCP;
+UserDial's host-network fallback is never used.
+
+In ipn/ipnlocal/node_backend.go, store extraDNS as map[string][]netip.Addr,
+append each record's address, and return the slice from ExtraDNSByName. In
+ipn/ipnlocal/resolve.go, share addrForNetwork between peer and Service name
+lookups to preserve both families and select the requested one. Remove the
+unused addrFamilyMatch helper. This follows
+https://github.com/tailscale/tailscale/pull/22292; the prior map let the last
+record overwrite the other family of a Service VIP.
+
 --- a/tsnet/tsnet.go
 +++ b/tsnet/tsnet.go
 @@ -1049 +1048,0 @@
@@ -85,7 +108,19 @@ Remove the discarded login logger's two goroutines and five-second status polls.
 Append a direct status accessor to avoid LocalAPI's HTTP/JSON round trip:
 
 // Status reads directly from the backend; call only between Start and Close.
-func (s *Server) Status() *ipnstate.Status { return s.lb.Status() }
+func (s *Server) Status() *ipnstate.Status {
+    status := s.lb.Status()
+    if self := status.Self; self != nil {
+        if profile, ok := s.lb.UserProfile(self.UserID); ok {
+            mak.Set(&status.User, self.UserID, *profile.AsStruct())
+        }
+    }
+    return status
+}
+
+The self user's profile comes from the live incremental cache. Upstream Status
+reads the profile snapshot frozen at the last full network map, missing later
+UserProfiles-only updates even when a new status read is requested.
 
 Append a direct logout accessor so cancellation waits for backend completion;
 an HTTP client can return while its handler is still changing authentication state:

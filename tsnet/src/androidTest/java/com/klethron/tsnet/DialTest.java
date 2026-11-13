@@ -120,6 +120,14 @@ public final class DialTest {
             assertEquals("true", Probe.call("setPeerOnline"));
             NodeStatus.Peer online = new NodeStatus.Peer(PEER_NAME, "android", true, listed.addresses(), List.of());
             assertEquals(List.of(other, online), await(node, s -> !s.peers().contains(listed)).peers());
+            // Profile-only updates arrive separately from self and peer changes.
+            assertEquals("2", Probe.call("setLoginName", "renamed@fake-control.example.net"));
+            NodeStatus renamed = await(node, s -> "renamed@fake-control.example.net".equals(s.loginName()));
+            assertEquals(NodeStatus.State.RUNNING, renamed.state());
+            assertEquals(status.dnsName(), renamed.dnsName());
+            assertEquals(status.tailnetName(), renamed.tailnetName());
+            assertEquals(status.addresses(), renamed.addresses());
+            assertEquals(List.of(other, online), renamed.peers());
             // The other peer has no endpoints: connecting, not waiting to run, times out.
             assertDialThrows(SocketTimeoutException.class, node, "100.101.0.1", 22, Duration.ofSeconds(1));
 

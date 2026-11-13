@@ -12,8 +12,8 @@ Requires **Android 14 (API 34)** or later. The AAR supports **arm64-v8a**, **x86
 consumers need no Go compiler or NDK.
 
 **Under development.** Local tests cover login, logout, revocation, SQLite restart and crash recovery,
-`SocketChannel` operations, IPv6, peer listing, split DNS, DNS-over-HTTPS trust, network replacement
-and Tailnet Lock persistence.
+`SocketChannel` operations, IPv6, peer listing, DNS address fallback, split DNS, DNS-over-HTTPS trust,
+network replacement and Tailnet Lock persistence.
 Live tests cover login, logout, revocation, TCP transport and Wi-Fi/cellular switches; switches have
 only been tested with Tailscale's VPN active. Tailnet Lock status and signing APIs are not exposed.
 See [limitations](UPSTREAM.md#limits) and [Javadoc](https://javadoc.io/doc/com.klethron/tsnet/latest/).
@@ -78,6 +78,8 @@ Tailscale's retention policy and removed on logout; callers should treat all sto
 It handles the local socket bridge internally; socket addresses and options describe that bridge.
 For concurrent reads and writes, use the channel directly; Android's channel-backed streams share a lock.
 Only peers and subnet routes are reachable; names resolve only through the tailnet.
+Connections try eligible IPv4 and IPv6 addresses under one timeout, so an unreachable first DNS
+answer does not block later candidates.
 `close` ends connections and keeps the identity. `logout`, key expiry and device removal end access
 and connections; `login` requests authorization again. A status notification gap also ends existing
 connections, since it could hide revocation or a change of login. Completing a new login closes

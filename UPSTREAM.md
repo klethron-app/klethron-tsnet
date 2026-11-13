@@ -5,6 +5,8 @@ with Go 1.27.4. Reviewed 2026-11-13. Remove patches when equivalent fixes reach 
 
 This pin already includes the [netstack shutdown fix](https://github.com/tailscale/tailscale/pull/21668)
 needed by [Tailcat #151](https://github.com/tailscale/tailcat/issues/151); no backport is needed.
+It also already checks UDP DNS reply sources and transaction IDs, covering
+[PR #20654](https://github.com/tailscale/tailscale/pull/20654).
 
 ## Patched
 
@@ -32,8 +34,24 @@ needed by [Tailcat #151](https://github.com/tailscale/tailcat/issues/151); no ba
   lowercased. Patch `dnsname.FQDN.Contains` to compare case-insensitively, retaining label boundaries
   ([PR #22380](https://github.com/tailscale/tailscale/pull/22380)). `DnsTest` covers an uppercase route,
   a mixed-case query and a nonmatching label suffix.
+- **DNS name validation skips the final label.** `dnsname.ToFQDN` accepts an empty or overlong
+  final label after removing the trailing dot. Include the final label in its validation loop
+  ([PR #22107](https://github.com/tailscale/tailscale/pull/22107)); the debug parser probe covers
+  malformed names and valid label length boundaries.
+- **The dial planner exposes only the first DNS address.** Add `Server.LookupIPForDial` to
+  retain all addresses from fast peer and Service name lookups, falling back to `Server.LookupIP`
+  for other names. Following [Haven #691's fix](https://github.com/GlassHaven/Haven/commit/2bd2338c92a8a7207ba233ea8c3da2e699e514b6),
+  `node.dial` checks every candidate with `UseNetstackForIP`, then uses upstream `netx.RaceDial`
+  to stagger netstack attempts under the caller's deadline. Losing and late connections close;
+  logout and node shutdown cancel the attempts. Peer names still work with MagicDNS disabled.
+- **Service DNS records overwrite other addresses for the same name.** Preserve both IPv4 and IPv6
+  Service VIPs in `nodeBackend.extraDNS` and select the requested family, following
+  [PR #22292](https://github.com/tailscale/tailscale/pull/22292). This lets the multi-address dialer
+  try either family instead of inheriting whichever record arrived last.
 - **Status reads serialize the whole peer list through HTTP and JSON.** A `Server.Status` accessor
-  reads the same backend snapshot directly. Called only between startup and watcher shutdown.
+  reads the backend directly. It also refreshes the self user's profile from the live incremental
+  cache: upstream status reads otherwise use the profile frozen at the last full map. Called only
+  between startup and watcher shutdown.
 - **The login logger polls even with logging discarded.** Remove the `printAuthURLLoop` launch;
   our IPN watcher already receives login URLs. This saves two goroutines and five-second status polls
   while awaiting initial login.
@@ -72,8 +90,8 @@ needed by [Tailcat #151](https://github.com/tailscale/tailcat/issues/151); no ba
   Storage callback exceptions stop the node, including failures upstream only logs.
 - **`tsnet.Server.Dial` can leave the tailnet.** For addresses not in the network map, `tsdial.UserDial`
   falls back to the routing table, then a plain `net.Dialer`. `node.dial` requires `UseNetstackForIP`
-  after `UserDialPlan`, normalizing IPv4-mapped IPv6 addresses before checking the route. It connects
-  with `NetstackDialTCP` and closes connections that arrive after timeout.
+  for each resolved candidate, normalizing IPv4-mapped IPv6 addresses before checking the route.
+  It connects with `NetstackDialTCP` and closes connections that arrive after timeout.
 - **Android NIO cannot adopt a socket descriptor.** `TailnetNode.connect` creates a private loopback
   TCP pair to return a standard `SocketChannel`. Setup is non-blocking and verifies the accepted
   socket's remote address against the client's local address before passing a duplicate to Go.
@@ -115,6 +133,11 @@ needed by [Tailcat #151](https://github.com/tailscale/tailcat/issues/151); no ba
   key ends access granted to the previous key, even while Running.
 - **The IPN bus reports logout, key expiry and removal as `NeedsLogin`.** `node.publish` distinguishes
   removal by the `node-removed` health warning, otherwise expiry by the latest key expiry time.
+- **User profiles can change without a self or peer update.** Following
+  [Android PR #897](https://github.com/tailscale/tailscale-android/pull/897), `watchStatus` refreshes
+  status for `UserProfiles` notifications too. Otherwise `loginName` can remain stale until another
+  event arrives. `DialTest` sends a profile-only control update and checks the new name while the
+  node, addresses and peer list remain unchanged.
 - **A watch that falls behind ends with an `ErrMessage`.** `watchStatus` treats `watchFellBehind`
   (upstream's unexported `watchIPNBusFellBehindMessage`) as terminal without waiting for EOF.
   Any watch interruption ends previously granted access for dials and relays: missed
@@ -125,14 +148,14 @@ needed by [Tailcat #151](https://github.com/tailscale/tailcat/issues/151); no ba
 
 ## Limits
 
-- **Only the first resolved address is dialed.** `UserDialPlan` discards later DNS answers, so an
-  unreachable first address can prevent a connection even when another works. Haven's
-  [#691 follow-up](https://github.com/GlassHaven/Haven/blob/db7c77d872852f0e0b19fcd7d79d99c8fae2f273/rclone-android/go/tsbridge/tsbridge.go)
-  handles this by trying multiple answers. See [TODO.md](TODO.md#multiple-dns-addresses).
 - **Roaming can pause traffic while a peer trusts an old endpoint**
   ([#22337](https://github.com/tailscale/tailscale/issues/22337), proposed
   [PR #22359](https://github.com/tailscale/tailscale/pull/22359)). A local rebind does not eliminate
   the remote peer's stale-path delay; the proposed transport change is not backported.
+- **Local IPv6 endpoints can advertise the IPv4 socket's port.** When the independently bound
+  sockets have different ports, this can prevent a direct IPv6 path
+  ([PR #21755](https://github.com/tailscale/tailscale/pull/21755)). The proposed change remains
+  unpatched pending targeted runtime coverage; the local tailnet tests do not cover this case.
 - **Tailnet Lock has no public status or signing API.** Authority persistence, restart, unsigned-peer
   filtering and compaction have local tests; live locked-tailnet operation remains unverified.
   See [TODO.md](TODO.md) for remaining coverage.

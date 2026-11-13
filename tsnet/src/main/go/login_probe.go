@@ -264,6 +264,20 @@ func setPeerOnline(control *testcontrol.Server, _ string) string {
 	return "true"
 }
 
+// setLoginName sends profile-only updates, without a self or peer change to trigger a status read.
+// AddRawMapResponse also suppresses later automatic full maps, keeping the update isolated.
+// Returns the number of connected nodes that received an update.
+func setLoginName(control *testcontrol.Server, name string) string {
+	updated := 0
+	for _, node := range control.AllNodes() {
+		response := &tailcfg.MapResponse{UserProfiles: []tailcfg.UserProfile{{ID: node.User, LoginName: name}}}
+		if control.AddRawMapResponse(node.Key, response) {
+			updated++
+		}
+	}
+	return strconv.Itoa(updated)
+}
+
 // addPeers registers three unreachable devices: an offline Linux device named klethron-other, with
 // addresses 100.101.0.1 and fd7a:115c:a1e0::101:1 and an OpenSSH host key and one containing a
 // comma, a sharee node and a Mullvad exit node.

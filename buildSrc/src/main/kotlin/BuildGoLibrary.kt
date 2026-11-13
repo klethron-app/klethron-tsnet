@@ -137,7 +137,56 @@ abstract class BuildGoLibrary @Inject constructor(
         patch("util/dnsname/dnsname.go", "5608189341565036e81b5d09c808034dd2f44e9d9cd8c7c9b7cd90764a7cdf3c",
             "\tif f == other {" to "\tif strings.EqualFold(string(f), string(other)) {",
             "\treturn strings.HasSuffix(other.WithTrailingDot(), cmp)" to
-                "\tname := other.WithTrailingDot()\n\treturn len(name) >= len(cmp) && strings.EqualFold(name[len(name)-len(cmp):], cmp)")
+                "\tname := other.WithTrailingDot()\n\treturn len(name) >= len(cmp) && strings.EqualFold(name[len(name)-len(cmp):], cmp)",
+            // tailscale/tailscale#22107: also validate the last label after removing the trailing dot.
+            "\tfor i := range len(s) {\n\t\tif s[i] != '.' {" to
+                "\tfor i := range len(s) + 1 {\n\t\tif i < len(s) && s[i] != '.' {")
+        // tailscale/tailscale#22292: an AAAA Service record must not overwrite its A record.
+        patch("ipn/ipnlocal/node_backend.go", "872efabb907356dd3305342b01f849654e65916e927384b39b896233e9113a07",
+            "extraDNS map[string]netip.Addr" to "extraDNS map[string][]netip.Addr",
+            "\t\tmak.Set(&nb.extraDNS, strings.ToLower(strings.TrimSuffix(rec.Name, \".\")), ip)" to
+                "\t\tname := strings.ToLower(strings.TrimSuffix(rec.Name, \".\"))\n\t\tmak.Set(&nb.extraDNS, name, append(nb.extraDNS[name], ip))",
+            "// ExtraDNSByName returns the IP for a DNS.ExtraRecords entry (e.g. service VIPs)." to
+                "// ExtraDNSByName returns all IPs for a DNS.ExtraRecords entry (e.g. service VIPs).",
+            "func (nb *nodeBackend) ExtraDNSByName(hostname string) (_ netip.Addr, ok bool)" to
+                "func (nb *nodeBackend) ExtraDNSByName(hostname string) (_ []netip.Addr, ok bool)")
+        val resolveSource = upstream.resolve("ipn/ipnlocal/resolve.go").readText()
+        val familyMatch = "// addrFamilyMatch reports" + resolveSource.substringAfter("// addrFamilyMatch reports")
+            .substringBefore("// PeerForIP returns")
+        patch("ipn/ipnlocal/resolve.go", "1a072fd225a45c548606bbad0f7188a1b124eb95f63de77be3e2e4a77e276814",
+            "\tif ip, ok := nb.ExtraDNSByName(hostname); ok && addrFamilyMatch(ip, network) {\n\t\treturn ip, true" to
+                "\tif ips, ok := nb.ExtraDNSByName(hostname); ok {\n\t\treturn addrForNetwork(ips, network)",
+            "\twant4 := strings.HasSuffix(network, \"4\")" to """
+                    ips := make([]netip.Addr, 0, addrs.Len())
+                    for _, pfx := range addrs.All() { ips = append(ips, pfx.Addr()) }
+                    return addrForNetwork(ips, network)
+                }
+
+                // addrForNetwork applies the same family preference to peers and Service records.
+                func addrForNetwork(addrs []netip.Addr, network string) (_ netip.Addr, ok bool) {
+                    want4 := strings.HasSuffix(network, "4")
+            """.trimIndent(),
+            "\tfor _, pfx := range addrs.All() {\n\t\tip := pfx.Addr()" to "\tfor _, ip := range addrs {",
+            familyMatch to "")
+        workspace.resolve("tailscale/ipn/ipnlocal/resolve.go").appendText("""
+
+            // ResolveMagicDNSAll returns every address from the map, including short peer names
+            // when MagicDNS is disabled and multiple Service records in the same family.
+            func (b *LocalBackend) ResolveMagicDNSAll(hostname string) []netip.Addr {
+                hostname = strings.ToLower(strings.TrimSuffix(hostname, "."))
+                nb := b.currentNode()
+                if id, ok := nb.NodeByName(hostname); ok {
+                    node, ok := nb.NodeByID(id)
+                    if !ok { return nil }
+                    addresses := make([]netip.Addr, 0, node.Addresses().Len())
+                    for _, prefix := range node.Addresses().All() { addresses = append(addresses, prefix.Addr()) }
+                    return addresses
+                }
+                addresses, _ := nb.ExtraDNSByName(hostname)
+                return append([]netip.Addr(nil), addresses...)
+            }
+
+        """.trimIndent())
         if ("klethron_test" in buildTags.get()) {
             patch("tstest/integration/testcontrol/testcontrol.go", "e8f952ff2ea480a7e52dc95faeb824f13b3e7102ef0b8afedd5f14077e890a53",
                 "\t\tif isFollowup {" to "\t\tif isFollowup || !s.RequireAuth {")
@@ -157,11 +206,31 @@ abstract class BuildGoLibrary @Inject constructor(
             fileStoreSetup to "",
             "\t\"tailscale.com/ipn/store\"\n" to "",
             "\t\"runtime\"\n" to "")
-        workspace.resolve("tailscale/tsnet/tsnet.go").appendText(
-            "\n// Status reads directly from the backend; call only between Start and Close.\n" +
-            "func (s *Server) Status() *ipnstate.Status { return s.lb.Status() }\n" +
-            "\n// Logout waits for backend completion even when ctx is cancelled.\n" +
-            "func (s *Server) Logout(ctx context.Context) error { return s.lb.Logout(ctx, ipnauth.Self) }\n")
+        workspace.resolve("tailscale/tsnet/tsnet.go").appendText("""
+
+            // Status reads directly from the backend; call only between Start and Close.
+            func (s *Server) Status() *ipnstate.Status {
+                status := s.lb.Status()
+                // Upstream Status reads profiles frozen at the last full map. Include later deltas.
+                if self := status.Self; self != nil {
+                    if profile, ok := s.lb.UserProfile(self.UserID); ok {
+                        mak.Set(&status.User, self.UserID, *profile.AsStruct())
+                    }
+                }
+                return status
+            }
+
+            // Logout waits for backend completion even when ctx is cancelled.
+            func (s *Server) Logout(ctx context.Context) error { return s.lb.Logout(ctx, ipnauth.Self) }
+
+            // LookupIPForDial preserves all map and DNS candidates. Call only between Start and Close.
+            func (s *Server) LookupIPForDial(ctx context.Context, host string) ([]netip.Addr, error) {
+                if ip, err := netip.ParseAddr(host); err == nil { return []netip.Addr{ip}, nil }
+                if addresses := s.lb.ResolveMagicDNSAll(host); len(addresses) != 0 { return addresses, nil }
+                return s.LookupIP(ctx, "ip", host)
+            }
+
+        """.trimIndent())
         val tailnetSource = upstream.resolve("ipn/ipnlocal/tailnet-lock.go").readText()
         val loadTailnet = "\troot := b.TailscaleVarRoot()" + tailnetSource.substringAfter("\troot := b.TailscaleVarRoot()")
             .substringBefore("\n\treturn nil\n}")
