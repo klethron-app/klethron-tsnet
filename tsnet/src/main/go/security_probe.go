@@ -29,12 +29,6 @@ func probeLoginURL(argument string) string {
 	return "accepted"
 }
 
-type watchProbeTransport struct{ body io.ReadCloser }
-
-func (t watchProbeTransport) RoundTrip(*http.Request) (*http.Response, error) {
-	return &http.Response{StatusCode: http.StatusOK, Body: t.body, Header: make(http.Header)}, nil
-}
-
 // A watch gap or a changed node key must end the old access even if the next state is Running.
 func probeWatchDisconnect(reason string) string {
 	n := newNode(newServer())
@@ -47,7 +41,9 @@ func probeWatchDisconnect(reason string) string {
 	body, writer := io.Pipe()
 	defer body.Close()
 	defer writer.Close()
-	n.client = &local.Client{Transport: watchProbeTransport{body}}
+	n.client = &local.Client{Transport: probeTransport(func(*http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusOK, Body: body, Header: make(http.Header)}, nil
+	})}
 	n.watchers.Go(func() { n.watchStatus(make(chan struct{}, 1)) })
 	ctx, cancel := context.WithTimeout(n.ctx, 5*time.Second)
 	defer cancel()
@@ -56,20 +52,22 @@ func probeWatchDisconnect(reason string) string {
 	encoder := json.NewEncoder(writer)
 	self := &tailcfg.Node{Key: key.NewNode().Public()}
 	url := n.server.ControlURL + "/auth/test"
-	if err := encoder.Encode(ipn.Notify{State: new(ipn.NeedsLogin), BrowseToURL: &url,
-		InitialStatus: &ipnstate.Status{Self: &ipnstate.PeerStatus{PublicKey: self.Key}}}); err != nil {
+	if err := encoder.Encode(ipn.Notify{State: new(ipn.Running),
+		InitialStatus: &ipnstate.Status{AuthURL: url, Self: &ipnstate.PeerStatus{PublicKey: self.Key}}}); err != nil {
 		return "initial notification failed"
 	}
-	status, _, _ := n.wait(ctx, func(s nodeStatus, _ uint64) bool { return s.state == ipn.NeedsLogin })
-	if status.loginURL != url {
-		return "initial node key hid the pending login URL"
+	status, _, access := n.wait(ctx, func(s nodeStatus, _ uint64) bool { return s.state == ipn.Running })
+	if status.loginURL != url || access.Err() != nil || ctx.Err() != nil {
+		return "initial renewal or access unavailable"
 	}
-	if err := encoder.Encode(ipn.Notify{State: new(ipn.Running), SelfChange: self}); err != nil {
-		return "running notification failed"
-	}
-	_, _, access := n.wait(ctx, func(status nodeStatus, _ uint64) bool { return status.state == ipn.Running })
-	if access.Err() != nil || ctx.Err() != nil {
-		return "initial access unavailable"
+	// An empty AuthURL can precede persistence; keep the renewal until the key changes.
+	renewal := url + "/renew"
+	for _, test := range []struct{ raw, want string }{{renewal, renewal}, {"", renewal}, {"http://unexpected.example/auth", ""}} {
+		n.publish(ipn.Notify{InitialStatus: &ipnstate.Status{AuthURL: test.raw}}, nil)
+		status, _, _ := n.wait(ctx, func(nodeStatus, uint64) bool { return true })
+		if status.loginURL != test.want {
+			return "watch snapshot lost a renewal or accepted an unsafe login URL"
+		}
 	}
 	if reason == "key" {
 		n.publish(ipn.Notify{SelfChange: self}, nil)

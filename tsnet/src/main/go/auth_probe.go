@@ -13,9 +13,9 @@ import (
 	"tailscale.com/ipn/store/mem"
 )
 
-type authProbeTransport func(*http.Request) (*http.Response, error)
+type probeTransport func(*http.Request) (*http.Response, error)
 
-func (t authProbeTransport) RoundTrip(request *http.Request) (*http.Response, error) {
+func (t probeTransport) RoundTrip(request *http.Request) (*http.Response, error) {
 	return t(request)
 }
 
@@ -31,7 +31,7 @@ func probeAuthentication(mode string) string {
 	}
 	entered, release := make(chan struct{}), make(chan struct{})
 	var calls []string // Written by login, read after it returns.
-	n.client = &local.Client{Transport: authProbeTransport(func(request *http.Request) (*http.Response, error) {
+	n.client = &local.Client{Transport: probeTransport(func(request *http.Request) (*http.Response, error) {
 		path := strings.TrimPrefix(request.URL.Path, "/localapi/v0/")
 		calls = append(calls, path)
 		status := http.StatusNoContent

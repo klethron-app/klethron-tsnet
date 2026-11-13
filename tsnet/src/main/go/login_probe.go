@@ -78,7 +78,7 @@ func startControl(interactive string) string {
 	return control.HTTPTestServer.URL
 }
 
-// testcontrol must retire the previous key even when no browser followup is required.
+// Check the retired key: cancelled registrations can leave unrelated nodes in testcontrol.
 func probeNonInteractiveRotation(string) string {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -100,7 +100,7 @@ func probeNonInteractiveRotation(string) string {
 		return "login failed"
 	}
 	for ctx.Err() == nil {
-		if server.Status().Self.PublicKey != previous && len(control.AllNodes()) == 1 {
+		if server.Status().Self.PublicKey != previous && control.Node(previous) == nil {
 			return "ok"
 		}
 		time.Sleep(10 * time.Millisecond)

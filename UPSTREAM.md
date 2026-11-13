@@ -40,10 +40,11 @@ with Go 1.27.4. All entries rechecked 2026-11-13; none fixed upstream. Remove en
 
 - **Logs can contain login URLs.** `main.go` discards `tsnet.Server.UserLogf`, `Logf` and Go's standard
   log output, which netmon and others use directly.
-- **Initial watch snapshots bypass the browser URL filter.** `WatchIPNBus` copies the saved auth URL
-  directly into its initial notification. `node.loginURL` enforces HTTPS and tailscale.com hosts for
-  production control, rejects userinfo, and permits HTTP only for an explicitly selected loopback
-  test control server at the same origin. This also protects callers if upstream filtering changes.
+- **Initial watch snapshots bypass the browser URL filter.** While Running, they carry pending
+  renewals only in `InitialStatus.AuthURL`. `node.publish` restores nonempty URLs on reconnect; only a
+  changed node key confirms persistence. Empty URLs can arrive earlier.
+  `node.loginURL` enforces HTTPS and tailscale.com hosts, rejects userinfo, and permits HTTP only for
+  an explicitly selected loopback test server at the same origin.
 - **`tsnet.Server` fills empty fields from the environment.** `node.start` sets `Hostname` and
   `ControlURL`, overriding `TS_CONTROL_URL`, and rejects `TS_AUTHKEY`/`TS_AUTH_KEY`. `oauthkey` and
   `useproxy` are omitted; nothing imports `identityfederation`, which reads ID-token variables.

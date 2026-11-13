@@ -206,7 +206,7 @@ func (n *node) publish(notify ipn.Notify, read *statusRead) {
 	if notify.ErrMessage != nil {
 		status.err = printable(*notify.ErrMessage, 256)
 	}
-	// A watch has no initial SelfChange. Self has a key only with a network map.
+	// Initial snapshots have no SelfChange.
 	self, expiry := n.selfKey, n.keyExpiry
 	if initial := notify.InitialStatus; initial != nil && initial.Self != nil && !initial.Self.PublicKey.IsZero() {
 		self, expiry = initial.Self.PublicKey, time.Time{}
@@ -217,12 +217,9 @@ func (n *node) publish(notify ipn.Notify, read *statusRead) {
 	if notify.SelfChange != nil {
 		self, expiry = notify.SelfChange.Key, notify.SelfChange.KeyExpiry
 	}
-	// A changed node key confirms the new login reached the store. LoginFinished is too early; state
-	// stays Running during re-authentication.
+	// A new key confirms persistence; LoginFinished is too early. Running can span a change of account.
 	if self != n.selfKey {
 		status.loginURL = ""
-		// Re-authentication can switch accounts without leaving Running. Connections opened
-		// under the old key must not survive into the new identity.
 		if !n.selfKey.IsZero() {
 			n.endAccess()
 		}
@@ -231,7 +228,10 @@ func (n *node) publish(notify ipn.Notify, read *statusRead) {
 		}
 	}
 	n.selfKey, n.keyExpiry = self, expiry
-	// An initial snapshot can contain an old key and a pending renewal URL.
+	// Running snapshots omit BrowseToURL, even during renewal. Replace stale URLs after a watch gap.
+	if initial := notify.InitialStatus; initial != nil && initial.AuthURL != "" {
+		status.loginURL = n.loginURL(initial.AuthURL)
+	}
 	if notify.BrowseToURL != nil {
 		status.loginURL = n.loginURL(*notify.BrowseToURL)
 	}
