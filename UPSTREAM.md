@@ -37,6 +37,15 @@ with Go 1.27.4. Remove entries when fixed upstream.
 - **`tsnet.Server.Dial` can leave the tailnet.** For addresses not in the network map, `tsdial.UserDial`
   falls back to the routing table, then a plain `net.Dialer`. `node.dial` resolves with `UserDialPlan`,
   requires `UseNetstackForIP` and connects with `NetstackDialTCP`.
+- **Android NIO cannot adopt a socket descriptor.** `TailnetNode.connect` creates a private loopback
+  TCP pair to return a standard `SocketChannel`. Setup is non-blocking and verifies the accepted
+  socket's remote address against the client's local address before passing a duplicate to Go.
+  The listener closes before tailnet connection setup. Socket addresses and options apply to the
+  local bridge, not the tailnet peer.
+- **Android's channel-backed streams serialize reads and writes.** `SocketAdaptor`'s input stream
+  and `Channels.newOutputStream` hold the channel's `blockingLock` while doing I/O. Use streams for
+  sequential request/response exchanges; use `SocketChannel.read`/`write` directly or a selector for
+  concurrent traffic.
 - **Netstack can run `/system/bin/ping`** to relay ICMP echo to subnet or 4via6 addresses
   (`ProcessSubnets`, which tsnet enables). `advertiseroutes` and `appconnectors` are omitted, so the
   packet filter accepts only the node's own and service addresses. Other `os/exec` call sites are

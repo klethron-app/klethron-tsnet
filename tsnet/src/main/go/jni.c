@@ -33,7 +33,7 @@ Java_com_klethron_tsnet_TailnetNode_nativeClose(JNIEnv *env, jclass type, jlong 
 }
 
 JNIEXPORT jstring JNICALL
-Java_com_klethron_tsnet_TailnetNode_tailscaleVersion(JNIEnv *env, jclass type) {
+Java_com_klethron_tsnet_TailnetNode_nativeTailscaleVersion(JNIEnv *env, jclass type) {
     return javaString(env, klethron_tailscale_version());
 }
 

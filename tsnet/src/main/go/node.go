@@ -345,10 +345,10 @@ func (n *node) failed(ctx context.Context, result int) int {
 	return result
 }
 
-// dial owns fd, a connected stream socket, and closes it on failure. Timeout includes waiting for
+// dial owns fd, a connected TCP socket, and closes it on failure. Timeout includes waiting for
 // Running. TailnetNode validates host and port.
 func (n *node) dial(host string, port uint16, fd int, timeout time.Duration) (result int) {
-	app := streamSocket(fd)
+	app := tcpSocket(fd)
 	if app == nil {
 		return resultInvalid
 	}
@@ -398,8 +398,8 @@ func (n *node) dial(host string, port uint16, fd int, timeout time.Duration) (re
 	return 0
 }
 
-// streamSocket consumes fd, returning a connected TCP/Unix stream or nil after closing it.
-func streamSocket(fd int) net.Conn {
+// tcpSocket consumes fd, returning a connected TCP socket or nil after closing it.
+func tcpSocket(fd int) *net.TCPConn {
 	file := os.NewFile(uintptr(fd), "socket")
 	if file == nil {
 		return nil
@@ -409,11 +409,12 @@ func streamSocket(fd int) net.Conn {
 	if err != nil {
 		return nil
 	}
-	if network := conn.LocalAddr().Network(); (network != "tcp" && network != "unix") || conn.RemoteAddr() == nil {
+	tcp, ok := conn.(*net.TCPConn)
+	if !ok || tcp.RemoteAddr() == nil {
 		_ = conn.Close()
 		return nil
 	}
-	return conn
+	return tcp
 }
 
 func (n *node) logout(timeout time.Duration) int {
@@ -455,15 +456,14 @@ func (n *node) login() int {
 	return 0
 }
 
-// relay copies between conn and the app's socket until either side or ctx ends; TailnetNode.relay
-// documents the stream semantics. Failures and the end of ctx reset a TCP socket; a Unix socket reads
-// end of stream, or a reset if data it wrote is unread.
-func relay(ctx context.Context, conn, app net.Conn) {
+// relay copies between conn and the app's socket until either side or ctx ends; TailnetNode.connect
+// documents the stream semantics. Failures and the end of ctx reset the app's socket.
+func relay(ctx context.Context, conn net.Conn, app *net.TCPConn) {
 	var once sync.Once
 	end := func(reset bool) {
 		once.Do(func() {
-			if tcp, ok := app.(*net.TCPConn); ok && reset {
-				_ = tcp.SetLinger(0)
+			if reset {
+				_ = app.SetLinger(0)
 			}
 			_ = conn.Close() // Also unblocks the other copy.
 			_ = app.Close()
@@ -472,7 +472,7 @@ func relay(ctx context.Context, conn, app net.Conn) {
 	// Closing conn alone cannot interrupt a copy blocked writing to the app's socket.
 	unwatch := context.AfterFunc(ctx, func() { end(true) })
 	go func() {
-		if _, err := io.Copy(app, conn); err != nil || app.(interface{ CloseWrite() error }).CloseWrite() != nil {
+		if _, err := io.Copy(app, conn); err != nil || app.CloseWrite() != nil {
 			end(true) // The other copy then ends and unwatches.
 		}
 	}()
@@ -483,10 +483,10 @@ func relay(ctx context.Context, conn, app net.Conn) {
 	}()
 }
 
-// Java enum names, in NodeStatus.State, other than NO_STATE. InUseOtherUser is Windows-only.
+// Java enum names, in NodeStatus.State, other than INITIALIZING. InUseOtherUser is Windows-only.
 var javaStates = map[ipn.State]string{
 	ipn.NeedsLogin:       "NEEDS_LOGIN",
-	ipn.NeedsMachineAuth: "NEEDS_MACHINE_AUTH",
+	ipn.NeedsMachineAuth: "NEEDS_APPROVAL",
 	ipn.Stopped:          "STOPPED",
 	ipn.Starting:         "STARTING",
 	ipn.Running:          "RUNNING",
@@ -495,7 +495,7 @@ var javaStates = map[ipn.State]string{
 // record is "version\nSTATE\nREVOCATION\nloginURL\naddresses\nerror\ndnsName\ntailnet\nloginName",
 // then "\nname\tOS\tonline\taddresses\tSSH host keys" per peer. Lists are comma-separated; fields are ASCII.
 func (s nodeStatus) record(version uint64) string {
-	return strconv.FormatUint(version, 10) + "\n" + cmp.Or(javaStates[s.state], "NO_STATE") + "\n" +
+	return strconv.FormatUint(version, 10) + "\n" + cmp.Or(javaStates[s.state], "INITIALIZING") + "\n" +
 		s.revocation + "\n" + s.loginURL + "\n" + addressList(s.addresses[:]...) + "\n" + s.err + "\n" +
 		s.dnsName + "\n" + s.tailnet + "\n" + s.loginName + s.peers
 }

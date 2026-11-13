@@ -11,13 +11,10 @@ import android.os.ParcelFileDescriptor;
 import android.system.Os;
 import android.system.StructPollfd;
 import com.google.errorprone.annotations.CanIgnoreReturnValue;
-import java.io.FileInputStream;
-import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.net.ConnectException;
 import java.net.InetAddress;
-import java.net.InetSocketAddress;
 import java.net.NoRouteToHostException;
 import java.net.SocketTimeoutException;
 import java.net.URI;
@@ -26,7 +23,6 @@ import java.nio.ByteBuffer;
 import java.nio.channels.Channels;
 import java.nio.channels.SelectionKey;
 import java.nio.channels.Selector;
-import java.nio.channels.ServerSocketChannel;
 import java.nio.channels.SocketChannel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
@@ -72,17 +68,30 @@ public final class DialTest {
             new Random().nextBytes(sent);
             NodeStatus status = LoginTest.await(node, s -> !s.peers().isEmpty());
             for (InetAddress address : status.peers().get(0).addresses()) {
-                try (ParcelFileDescriptor connection = node.dial(address.getHostAddress(), 7070, WAIT)) {
+                try (SocketChannel connection = node.connect(address.getHostAddress(), 7070, WAIT)) {
+                    assertTrue(connection.isConnected());
+                    assertTrue(connection.isBlocking());
+                    assertTrue(connection.socket().getTcpNoDelay());
+                    connection.socket().setSoTimeout(50);
+                    var input = connection.socket().getInputStream();
+                    assertThrows(SocketTimeoutException.class, input::read);
+                    connection.socket().setSoTimeout(30000);
+                    // Android's channel-backed streams share a lock: use them sequentially.
+                    connection.socket().getOutputStream().write(new byte[] {1, 2, 3});
+                    assertArrayEquals(new byte[] {1, 2, 3}, input.readNBytes(3));
+                    // Direct channel reads and writes can proceed concurrently.
                     CompletableFuture<Void> writer = CompletableFuture.runAsync(() -> {
                         try {
-                            new FileOutputStream(connection.getFileDescriptor()).write(sent);
+                            ByteBuffer data = ByteBuffer.wrap(sent);
+                            while (data.hasRemaining()) connection.write(data);
                         } catch (IOException e) {
                             throw new UncheckedIOException(e);
                         }
                     });
-                    byte[] received = new FileInputStream(connection.getFileDescriptor()).readNBytes(sent.length);
+                    ByteBuffer received = ByteBuffer.allocate(sent.length);
+                    while (received.hasRemaining()) assertTrue(connection.read(received) > 0);
                     writer.get(30, TimeUnit.SECONDS);
-                    assertArrayEquals(sent, received);
+                    assertArrayEquals(sent, received.array());
                 }
             }
         }
@@ -90,19 +99,19 @@ public final class DialTest {
 
     @Test(timeout = 90000)
     public void listsPeersAndTheirChanges() throws Exception {
-        try (TailnetNode node = startNode(); SocketChannel connection = dial(node, PEER_NAME, 7070, WAIT)) {
+        try (TailnetNode node = startNode(); SocketChannel connection = node.connect(PEER_NAME, 7070, WAIT)) {
             NodeStatus status = LoginTest.await(node, s -> s.state() == NodeStatus.State.RUNNING && !s.peers().isEmpty());
             assertEquals(1, status.peers().size());
             NodeStatus.Peer listed = status.peers().get(0);
             assertEquals(PEER_NAME, listed.dnsName());
-            assertEquals("android", listed.os());
+            assertEquals("android", listed.operatingSystem());
             assertFalse(listed.online());
             assertEquals(InetAddresses.parseNumericAddress(peer), listed.addresses().get(0));
             assertEquals(2, listed.addresses().size());
             assertEquals(List.of(), listed.sshHostKeys());
             // testcontrol's names; the peer registered first.
             assertEquals(List.of("klethron-dialer.tail-scale.ts.net", "fake-control.example.net", "user-2@fake-control.example.net"),
-                    Arrays.asList(status.dnsName(), status.tailnet(), status.loginName()));
+                    Arrays.asList(status.dnsName(), status.tailnetName(), status.loginName()));
             assertTrue(status.toString(), status.toString().endsWith(", peers=1}"));
             assertFalse(status.toString().contains("tail-scale") || status.toString().contains("example.net"));
             connection.write(ByteBuffer.wrap(new byte[] {1}));
@@ -126,7 +135,7 @@ public final class DialTest {
             node.logout(WAIT);
             // The peers and names clear after the state changes.
             status = LoginTest.await(node, s -> s.state() == NodeStatus.State.NEEDS_LOGIN && s.peers().isEmpty());
-            assertEquals(Arrays.asList(null, null, null), Arrays.asList(status.dnsName(), status.tailnet(), status.loginName()));
+            assertEquals(Arrays.asList(null, null, null), Arrays.asList(status.dnsName(), status.tailnetName(), status.loginName()));
             // Logging out reset the connection, and new dials wait for a login.
             assertReset(connection);
             assertDialThrows(SocketTimeoutException.class, node, peer, 7070, Duration.ofMillis(500));
@@ -135,7 +144,7 @@ public final class DialTest {
 
     @Test(timeout = 60000)
     public void resetsConnectionsWhenTheKeyExpires() throws Exception {
-        try (TailnetNode node = startNode(); SocketChannel connection = dial(node, peer, 7070, WAIT)) {
+        try (TailnetNode node = startNode(); SocketChannel connection = node.connect(peer, 7070, WAIT)) {
             assertEquals("2", Probe.call("expire"));
             assertReset(connection);
         }
@@ -164,7 +173,7 @@ public final class DialTest {
 
     @Test(timeout = 60000)
     public void deliversPeerEndOfStreamAndClosesWithSocket() throws Exception {
-        try (TailnetNode node = startNode(); SocketChannel connection = dial(node, peer, 7071, WAIT)) {
+        try (TailnetNode node = startNode(); SocketChannel connection = node.connect(peer, 7071, WAIT)) {
             // The peer greets and closes its side; this side remains writable.
             assertEquals("klethron\n", new String(Channels.newInputStream(connection).readAllBytes(), StandardCharsets.US_ASCII));
             connection.write(ByteBuffer.wrap("after".getBytes(StandardCharsets.US_ASCII)));
@@ -176,7 +185,7 @@ public final class DialTest {
 
     @Test(timeout = 60000)
     public void servesANonBlockingConsumer() throws Exception {
-        try (TailnetNode node = startNode(); SocketChannel connection = dial(node, peer, 7070, WAIT);
+        try (TailnetNode node = startNode(); SocketChannel connection = node.connect(peer, 7070, WAIT);
                 Selector selector = Selector.open()) {
             connection.configureBlocking(false).register(selector, SelectionKey.OP_READ);
             ByteBuffer one = ByteBuffer.allocate(1);
@@ -194,7 +203,7 @@ public final class DialTest {
 
     @Test(timeout = 120000)
     public void slowsAPeerWhileTheAppDoesNotRead() throws Exception {
-        try (TailnetNode node = startNode(); SocketChannel connection = dial(node, peer, 7073, WAIT)) {
+        try (TailnetNode node = startNode(); SocketChannel connection = node.connect(peer, 7073, WAIT)) {
             long flooded = awaitFloodStalled();
             assertTrue("Peer was not slowed: " + flooded, flooded < FLOOD);
             ByteBuffer buffer = ByteBuffer.allocate(64 << 10);
@@ -211,7 +220,7 @@ public final class DialTest {
 
     @Test(timeout = 120000)
     public void slowsTheAppWhileThePeerDoesNotRead() throws Exception {
-        try (TailnetNode node = startNode(); SocketChannel connection = dial(node, peer, 7074, WAIT);
+        try (TailnetNode node = startNode(); SocketChannel connection = node.connect(peer, 7074, WAIT);
                 Selector selector = Selector.open()) {
             connection.configureBlocking(false).register(selector, SelectionKey.OP_WRITE);
             byte[] chunk = new byte[64 << 10];
@@ -233,7 +242,7 @@ public final class DialTest {
 
     @Test(timeout = 60000)
     public void resetsAnUnreadConnectionWithNode() throws Exception {
-        try (TailnetNode node = startNode(); SocketChannel connection = dial(node, peer, 7073, WAIT);
+        try (TailnetNode node = startNode(); SocketChannel connection = node.connect(peer, 7073, WAIT);
                 ParcelFileDescriptor observed = ParcelFileDescriptor.fromSocket(connection.socket())) {
             assertTrue("Peer was not slowed", awaitFloodStalled() < FLOOD);
             node.close();
@@ -252,7 +261,7 @@ public final class DialTest {
     @Test(timeout = 60000)
     public void reachesOnlyTheTailnet() throws Exception {
         try (TailnetNode node = startNode()) {
-            dial(node, peer, 7070, WAIT).close(); // Joined.
+            node.connect(peer, 7070, WAIT).close(); // Joined.
             assertDialThrows(SocketTimeoutException.class, node, peer, 7070, Duration.ZERO);
             // Upstream would dial both through the device's network: the first is the control server.
             int controlPort = URI.create(controlUrl).getPort();
@@ -262,39 +271,15 @@ public final class DialTest {
             assertDialThrows(UnknownHostException.class, node, "localhost", controlPort, WAIT);
             assertDialThrows(UnknownHostException.class, node, "no-such-peer.tail-scale.ts.net", 22, WAIT);
             // A peer's short name still resolves from the network map.
-            dial(node, "klethron-peer", 7070, WAIT).close();
+            node.connect("klethron-peer", 7070, WAIT).close();
             assertDialThrows(ConnectException.class, node, peer, 7072, WAIT);
         }
     }
 
-    /// Dials onto one end of a loopback TCP pair, as for NIO selectors, and returns the other, blocking end.
-    static SocketChannel dial(TailnetNode node, String host, int port, Duration timeout) throws IOException {
-        try (ServerSocketChannel listener = ServerSocketChannel.open()) {
-            listener.bind(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 1);
-            SocketChannel connection = SocketChannel.open(listener.getLocalAddress());
-            try (SocketChannel accepted = listener.accept()) {
-                node.relay(host, port, ParcelFileDescriptor.fromSocket(accepted.socket()), timeout);
-                return connection;
-            } catch (IOException | RuntimeException e) {
-                connection.close();
-                throw e;
-            }
-        }
-    }
-
-    /// Dials onto one end of a Unix socket pair, requiring the dial to throw `expected` and close that end.
+    /// Requires the public connection operation to throw `expected`.
     @CanIgnoreReturnValue
     static <T extends Throwable> T assertDialThrows(Class<T> expected, TailnetNode node, String host, int port, Duration timeout) {
-        try {
-            ParcelFileDescriptor[] pair = ParcelFileDescriptor.createSocketPair();
-            try (ParcelFileDescriptor connection = pair[0]) {
-                T thrown = assertThrows(expected, () -> node.relay(host, port, pair[1], timeout));
-                assertEquals(-1, new FileInputStream(connection.getFileDescriptor()).read());
-                return thrown;
-            }
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        }
+        return assertThrows(expected, () -> node.connect(host, port, timeout).close());
     }
 
     /// Asserts that reading `connection` reports a reset, as when the node loses tailnet access.

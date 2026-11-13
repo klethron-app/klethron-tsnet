@@ -11,9 +11,10 @@ no Tailscale app or device-wide VPN is needed.
 Requires **Android 14 (API 34)** or later. The AAR supports **arm64-v8a**, **x86_64** and 16 KiB pages;
 consumers need no Go compiler or NDK.
 
-**Under development.** Login, saved identity, TCP dialing, logout and revocation have local and live
-tailnet tests. IPv6 dialing and peer listing have local coverage; Wi-Fi/cellular switches have live
-coverage only with Tailscale's VPN active. See [limitations](UPSTREAM.md#limits) and [Javadoc](https://javadoc.io/doc/com.klethron/tsnet/latest/).
+**Under development.** Login, saved identity, logout and revocation have local and live tailnet tests.
+The `SocketChannel` API, IPv6 connections and peer listing have local coverage. The underlying TCP
+transport and Wi-Fi/cellular switches also have live coverage, the latter only with Tailscale's VPN
+active. See [limitations](UPSTREAM.md#limits) and [Javadoc](https://javadoc.io/doc/com.klethron/tsnet/latest/).
 
 ## Install
 
@@ -45,8 +46,9 @@ try (TailnetNode node = TailnetNode.start(context, directory, "my-device")) {
         // Offer loginUrl() in the user's browser; never log it. Show error() if present.
     } while (status.state() != NodeStatus.State.RUNNING || status.loginUrl() != null);
 
-    try (ParcelFileDescriptor connection = node.dial("my-server", 443, Duration.ofSeconds(30))) {
-        // Read/write the connection using android.system.Os or file streams.
+    try (SocketChannel connection = node.connect("my-server", 443, Duration.ofSeconds(30))) {
+        // Use connection.socket() for sequential request/response streams and read timeouts,
+        // or connection.configureBlocking(false) with a Selector.
     }
 }
 ```
@@ -58,10 +60,12 @@ Restarting with the same directory resumes that identity.
 `NodeStatus` reports the device name, tailnet, user and peers (names, OS, online state, addresses and
 [Tailscale SSH](https://tailscale.com/kb/1193/tailscale-ssh) host keys).
 
-`dial` returns a caller-owned socket to a tailnet IP or MagicDNS name. For NIO selectors, `relay`
-takes ownership of one end of a loopback TCP pair. Only peers and subnet routes are reachable; names
-resolve only through the tailnet. `close` ends connections and keeps the identity. `logout`, key
-expiry and device removal end access and connections; `login` requests authorization again.
+`connect` returns a caller-owned, connected blocking `SocketChannel` to a tailnet IP or MagicDNS name.
+It handles the local socket bridge internally; socket addresses and options describe that bridge.
+For concurrent reads and writes, use the channel directly; Android's channel-backed streams share a lock.
+Only peers and subnet routes are reachable; names resolve only through the tailnet.
+`close` ends connections and keeps the identity. `logout`, key expiry and device removal end access
+and connections; `login` requests authorization again.
 The app controls node lifetime and services.
 
 ## Network

@@ -6,11 +6,7 @@ import android.content.ActivityNotFoundException;
 import android.content.Intent;
 import android.net.Uri;
 import android.os.Bundle;
-import android.os.ParcelFileDescriptor;
 import android.os.SystemClock;
-import android.system.Os;
-import android.system.OsConstants;
-import android.system.StructTimeval;
 import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.TextView;
@@ -20,10 +16,13 @@ import androidx.annotation.WorkerThread;
 import com.klethron.tsnet.TailnetNode;
 import com.klethron.tsnet.NodeStatus;
 import java.io.File;
-import java.io.FileDescriptor;
 import java.io.IOException;
 import java.net.SocketTimeoutException;
+import java.nio.ByteBuffer;
 import java.nio.channels.ClosedChannelException;
+import java.nio.channels.SelectionKey;
+import java.nio.channels.Selector;
+import java.nio.channels.SocketChannel;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Arrays;
@@ -41,7 +40,7 @@ public final class LiveActivity extends Activity {
     private volatile boolean destroyed;
     // Accessed only on WORKER; lint checks thread annotations on methods, not fields.
     private @Nullable TailnetNode node;
-    private @Nullable ParcelFileDescriptor held; // Kept-open connection.
+    private @Nullable SocketChannel held; // Kept-open connection.
     private @Nullable String heldTarget;
     // Accessed only on the UI thread.
     private @Nullable NodeStatus status; // Never saved in a Bundle.
@@ -128,7 +127,7 @@ public final class LiveActivity extends Activity {
         String[] labels = new String[peers.size()];
         for (int i = 0; i < labels.length; i++) {
             NodeStatus.Peer peer = peers.get(i);
-            labels[i] = getString(peer.online() ? R.string.peer_online : R.string.peer_offline, peer.dnsName(), peer.os())
+            labels[i] = getString(peer.online() ? R.string.peer_online : R.string.peer_offline, peer.dnsName(), peer.operatingSystem())
                     + (peer.sshHostKeys().isEmpty() ? "" : getString(R.string.peer_tailscale_ssh));
         }
         new AlertDialog.Builder(this).setTitle(R.string.pick_peer).setItems(labels, (dialog, which) ->
@@ -141,7 +140,7 @@ public final class LiveActivity extends Activity {
         String portText = ((EditText) findViewById(R.id.peer_port)).getText().toString();
         boolean keepOpen = ((CheckBox) findViewById(R.id.keep_open)).isChecked();
         runOperation(current -> {
-            int port = Integer.parseInt(portText); // dial validates the host and port range.
+            int port = Integer.parseInt(portText); // connect validates the host and port range.
             byte[] sent = ("klethron-tsnet:" + UUID.randomUUID() + "\n").getBytes(StandardCharsets.US_ASCII);
             long start = SystemClock.elapsedRealtime();
             // With Keep open, echoes reuse one stream, e.g. to test that it survives a network change.
@@ -150,7 +149,7 @@ public final class LiveActivity extends Activity {
             boolean opened = held == null;
             try {
                 if (held == null) {
-                    held = current.dial(host, port, TIMEOUT);
+                    held = current.connect(host, port, TIMEOUT);
                     heldTarget = target;
                 }
                 echo(held, sent, TIMEOUT);
@@ -166,21 +165,23 @@ public final class LiveActivity extends Activity {
 
     /// Sends `sent` and requires it back within `timeout`.
     @WorkerThread
-    static void echo(ParcelFileDescriptor connection, byte[] sent, Duration timeout) throws Exception {
-        FileDescriptor fd = connection.getFileDescriptor();
+    static void echo(SocketChannel connection, byte[] sent, Duration timeout) throws Exception {
         byte[] received = new byte[sent.length];
         long deadline = SystemClock.elapsedRealtime() + timeout.toMillis();
-        for (boolean writing : new boolean[] {true, false}) {
-            byte[] data = writing ? sent : received;
-            for (int offset = 0; offset < data.length;) {
-                long remaining = deadline - SystemClock.elapsedRealtime();
-                if (remaining <= 0) throw new SocketTimeoutException();
-                Os.setsockoptTimeval(fd, OsConstants.SOL_SOCKET,
-                        writing ? OsConstants.SO_SNDTIMEO : OsConstants.SO_RCVTIMEO, StructTimeval.fromMillis(remaining));
-                int count = writing ? Os.write(fd, data, offset, data.length - offset)
-                        : Os.read(fd, data, offset, data.length - offset);
-                if (count == 0) throw new IOException("Peer closed before echo");
-                offset += count;
+        connection.configureBlocking(false);
+        try (Selector selector = Selector.open()) {
+            SelectionKey key = connection.register(selector, SelectionKey.OP_WRITE);
+            for (boolean writing : new boolean[] {true, false}) {
+                key.interestOps(writing ? SelectionKey.OP_WRITE : SelectionKey.OP_READ);
+                ByteBuffer data = ByteBuffer.wrap(writing ? sent : received);
+                while (data.hasRemaining()) {
+                    long remaining = deadline - SystemClock.elapsedRealtime();
+                    if (remaining <= 0) throw new SocketTimeoutException();
+                    if (selector.select(remaining) == 0) continue;
+                    selector.selectedKeys().clear();
+                    int count = writing ? connection.write(data) : connection.read(data);
+                    if (count < 0) throw new IOException("Peer closed before echo");
+                }
             }
         }
         if (!Arrays.equals(sent, received)) throw new IOException("Echo mismatch");
@@ -193,7 +194,7 @@ public final class LiveActivity extends Activity {
         try {
             held.close();
         } catch (IOException ignored) {
-            // Closing a socket-pair end releases it even when close reports an error.
+            // The channel is closed even when close reports an error.
         }
         held = null;
     }

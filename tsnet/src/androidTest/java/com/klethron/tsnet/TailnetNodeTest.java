@@ -5,11 +5,8 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
-import android.os.ParcelFileDescriptor;
-import java.net.DatagramSocket;
 import java.net.SocketTimeoutException;
 import java.nio.channels.ClosedChannelException;
-import java.nio.channels.SocketChannel;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
@@ -50,12 +47,6 @@ public final class TailnetNodeTest {
             DialTest.assertDialThrows(IllegalArgumentException.class, node, "100.64.0.1", 0, Duration.ZERO);
             DialTest.assertDialThrows(IllegalArgumentException.class, node, "100.64.0.1", 65536, Duration.ZERO);
             DialTest.assertDialThrows(NullPointerException.class, node, "100.64.0.1", 22, null);
-            try (DatagramSocket datagram = new DatagramSocket(); SocketChannel unconnected = SocketChannel.open()) {
-                for (ParcelFileDescriptor socket : List.of(ParcelFileDescriptor.adoptFd(-1), ParcelFileDescriptor.fromDatagramSocket(datagram),
-                        ParcelFileDescriptor.fromSocket(unconnected.socket()))) {
-                    assertThrows(IllegalArgumentException.class, () -> node.relay("100.64.0.1", 22, socket, Duration.ZERO));
-                }
-            }
             // The node never runs.
             DialTest.assertDialThrows(SocketTimeoutException.class, node, "100.64.0.1", 22, Duration.ofSeconds(-1));
             // Longer than a long of nanoseconds: the waits saturate instead of overflowing.

@@ -12,12 +12,12 @@ public final class NodeStatus {
     /// Connection and authorization progress.
     public enum State {
         /// Starting up locally, also briefly after logout.
-        NO_STATE,
+        INITIALIZING,
         /// Browser authorization is needed. After logout or revocation, call [TailnetNode#login]
         /// to request a new [NodeStatus#loginUrl()].
         NEEDS_LOGIN,
         /// Logged in, waiting for a tailnet administrator to approve the device.
-        NEEDS_MACHINE_AUTH,
+        NEEDS_APPROVAL,
         /// Logged in, but not connecting, as after a failed [TailnetNode#logout].
         STOPPED,
         /// Logged in and connecting.
@@ -35,17 +35,17 @@ public final class NodeStatus {
         NODE_REMOVED,
     }
 
-    /// A tailnet device; pass its name or address to [TailnetNode#dial].
+    /// A tailnet device; pass its name or address to [TailnetNode#connect].
     ///
     /// @param dnsName the [MagicDNS](https://tailscale.com/kb/1081/magicdns) name, such as
     ///     `host.tailnet-name.ts.net`, without a trailing dot; the first label is the machine name
-    /// @param os the reported operating system, such as `linux` or `android`; empty if unknown
+    /// @param operatingSystem the reported operating system, such as `linux` or `android`; empty if unknown
     /// @param online whether Tailscale reports the device as connected; `false` if unknown
     /// @param addresses the device's Tailscale IP addresses, IPv4 first
     /// @param sshHostKeys [Tailscale SSH](https://tailscale.com/kb/1193/tailscale-ssh) host keys from
     ///     control, in OpenSSH format; empty without Tailscale SSH. Accept them for [#dnsName()] and
     ///     [#addresses()] without trust-on-first-use.
-    public record Peer(String dnsName, String os, boolean online, List<InetAddress> addresses, List<String> sshHostKeys) {
+    public record Peer(String dnsName, String operatingSystem, boolean online, List<InetAddress> addresses, List<String> sshHostKeys) {
         public Peer {
             addresses = List.copyOf(addresses);
             sshHostKeys = List.copyOf(sshHostKeys);
@@ -60,7 +60,7 @@ public final class NodeStatus {
     private final List<InetAddress> addresses;
     private final @Nullable String error;
     private final @Nullable String dnsName;
-    private final @Nullable String tailnet;
+    private final @Nullable String tailnetName;
     private final @Nullable String loginName;
     private final List<Peer> peers;
 
@@ -75,7 +75,7 @@ public final class NodeStatus {
         addresses = addresses(fields[4]);
         error = emptyToNull(fields[5]);
         dnsName = emptyToNull(fields[6]);
-        tailnet = emptyToNull(fields[7]);
+        tailnetName = emptyToNull(fields[7]);
         loginName = emptyToNull(fields[8]);
         peers = fields.length == 9 ? List.of() : Arrays.stream(fields, 9, fields.length).map(line -> {
             String[] peer = line.split("\t", -1);
@@ -128,15 +128,15 @@ public final class NodeStatus {
 
     /// This node's [MagicDNS](https://tailscale.com/kb/1081/magicdns) name without a trailing dot,
     /// e.g. `phone.tailnet-name.ts.net`; `null` before joining and after logout. Tailscale or an
-    /// administrator can rename it. Like [#tailnet()] and [#loginName()], it survives key expiry
+    /// administrator can rename it. Like [#tailnetName()] and [#loginName()], it survives key expiry
     /// and can change with the account or tailnet.
     public @Nullable String dnsName() {
         return dnsName;
     }
 
     /// This node's tailnet name, e.g. `example.com`; `null` before joining and after logout.
-    public @Nullable String tailnet() {
-        return tailnet;
+    public @Nullable String tailnetName() {
+        return tailnetName;
     }
 
     /// The user's login name, e.g. `alice@example.com`; `null` before joining and after logout.

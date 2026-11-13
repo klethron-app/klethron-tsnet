@@ -286,7 +286,7 @@ public final class LoginTest {
         Probe.call("requireMachineAuth");
         try (TailnetNode node = start()) {
             complete(await(node, s -> s.loginUrl() != null));
-            NodeStatus status = await(node, s -> s.state() == NodeStatus.State.NEEDS_MACHINE_AUTH);
+            NodeStatus status = await(node, s -> s.state() == NodeStatus.State.NEEDS_APPROVAL);
             assertNull(status.loginUrl());
             assertEquals("1", Probe.call("approveMachines"));
             status = await(node, s -> s.state() == NodeStatus.State.RUNNING);

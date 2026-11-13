@@ -17,10 +17,14 @@ import java.io.File;
 import java.io.IOException;
 import java.net.ConnectException;
 import java.net.Inet4Address;
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
 import java.net.NoRouteToHostException;
 import java.net.SocketTimeoutException;
 import java.net.UnknownHostException;
 import java.nio.channels.ClosedChannelException;
+import java.nio.channels.ServerSocketChannel;
+import java.nio.channels.SocketChannel;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.HashSet;
@@ -30,10 +34,10 @@ import org.jspecify.annotations.Nullable;
 
 /// An embedded [tailnet](https://tailscale.com/kb/1136/tailnet) device with caller-owned keys and
 /// outbound TCP. [Start][#start], [#awaitStatus] until [NodeStatus.State#RUNNING] without a
-/// [NodeStatus#loginUrl()], then [#dial]. Follows the best non-VPN network, even with another VPN active.
+/// [NodeStatus#loginUrl()], then [#connect]. Follows the best non-VPN network, even with another VPN active.
 /// Methods are thread-safe; `@WorkerThread` methods block. [#close] cancels blocked calls with
 /// [ClosedChannelException]. Non-positive timeouts return immediately from [#awaitStatus] and fail
-/// [#dial], [#relay] and [#logout]. First use loads the native library.
+/// [#connect] and [#logout]. First use loads the native library.
 public final class TailnetNode implements AutoCloseable {
     static {
         System.loadLibrary("klethron_tsnet");
@@ -161,19 +165,52 @@ public final class TailnetNode implements AutoCloseable {
         return record.isEmpty() ? Objects.requireNonNull(previous) : new NodeStatus(handle, record);
     }
 
-    /// Opens a tailnet TCP connection as a caller-owned blocking Unix stream socket for file streams
-    /// or [android.system.Os]. See [#relay] for routing, timeouts, shutdown and NIO selectors.
+    /// Opens a TCP connection to a tailnet IP or [MagicDNS](https://tailscale.com/kb/1081/magicdns) name.
+    /// Returns once connected; `timeout` covers local setup, waiting for [NodeStatus.State#RUNNING]
+    /// and connecting. Only peers and subnet routes are reachable; names resolve through the tailnet.
     ///
+    /// The caller owns and must close the returned blocking channel. Use [SocketChannel#socket()]
+    /// for sequential request/response streams and read timeouts, or
+    /// [SocketChannel#configureBlocking(boolean)] for selectors. For concurrent reads and writes,
+    /// use the channel directly: Android's channel-backed streams share a lock.
+    /// Its socket addresses describe a local bridge, not the tailnet peer; socket options apply only
+    /// to that bridge. Both ends use `TCP_NODELAY`.
+    ///
+    /// Peer end of stream leaves the connection writable. Closing the channel or shutting down its
+    /// output ends the connection after delivering written data; unread received data can cause a reset.
+    /// Failures reset the connection, as does closing the node or losing tailnet access (leaving
+    /// [NodeStatus.State#RUNNING] except for [NodeStatus.State#STARTING]).
+    ///
+    /// @param host a tailnet IP address or MagicDNS name, at most 255 UTF-8 bytes
+    /// @throws IllegalArgumentException if the host is invalid or the port is not 1–65535
+    /// @throws ClosedChannelException if the node is or becomes closed
+    /// @throws UnknownHostException if the tailnet's DNS cannot resolve `host`
+    /// @throws NoRouteToHostException if the address is outside the tailnet; it never falls back to a local connection
+    /// @throws SocketTimeoutException if the timeout elapses first
+    /// @throws ConnectException if the connection fails or tailnet access ends while connecting
     /// @throws IOException if the connection cannot be opened
     @WorkerThread
-    public ParcelFileDescriptor dial(String host, int port, Duration timeout) throws IOException {
-        ParcelFileDescriptor[] pair = ParcelFileDescriptor.createSocketPair();
+    public SocketChannel connect(String host, int port, Duration timeout) throws IOException {
+        long timeoutNanos = NANOSECONDS.convert(timeout);
+        byte[] name = host.getBytes(StandardCharsets.UTF_8);
+        if (name.length == 0 || name.length > 255 || host.indexOf(0) >= 0 || port < 1 || port > 65535) {
+            throw new IllegalArgumentException("Host must have 1–255 bytes without NUL and port must be 1–65535");
+        }
+        synchronized (this) {
+            if (closed) throw new ClosedChannelException();
+        }
+        if (timeoutNanos <= 0) throw new SocketTimeoutException("Timed out");
+        long started = System.nanoTime();
+        SocketChannel connection = SocketChannel.open();
         try {
-            relay(host, port, pair[1], timeout);
-            return pair[0];
+            try (ParcelFileDescriptor socket = localBridge(connection)) {
+                check(nativeDial(handle, name, port, socket.detachFd(),
+                        Math.max(0, timeoutNanos - (System.nanoTime() - started))));
+            }
+            return connection;
         } catch (IOException | RuntimeException | Error failure) {
             try {
-                pair[0].close();
+                connection.close();
             } catch (IOException closeFailure) {
                 failure.addSuppressed(closeFailure);
             }
@@ -181,37 +218,25 @@ public final class TailnetNode implements AutoCloseable {
         }
     }
 
-    /// Dials a tailnet IP or [MagicDNS](https://tailscale.com/kb/1081/magicdns) name and starts relaying
-    /// TCP to `socket`. Returns once connected; `timeout` covers waiting for [NodeStatus.State#RUNNING]
-    /// and connecting. Only peers and subnet routes are reachable; names resolve through the network
-    /// map or tailnet DNS settings.
-    ///
-    /// The node takes ownership of this connected TCP or Unix stream socket, even if dialing fails.
-    /// The caller uses the other end: a loopback TCP pair for [java.nio.channels.SocketChannel]
-    /// selectors, or [ParcelFileDescriptor#createSocketPair()] for file streams. Peer end of stream
-    /// leaves the connection writable. Closing the caller's end or shutting down its output ends
-    /// the connection after delivering written data; unread received data can cause a reset.
-    /// Failures reset the connection, as does closing the node or losing tailnet access (leaving
-    /// [NodeStatus.State#RUNNING] except for [NodeStatus.State#STARTING]). Unix sockets read resets
-    /// as end of stream unless data written by the caller is still unread by the relay.
-    ///
-    /// @param host a tailnet IP address or MagicDNS name, at most 255 UTF-8 bytes
-    /// @throws IllegalArgumentException if the host is invalid, the port is not 1–65535, or `socket` is
-    /// not a connected stream socket
-    /// @throws ClosedChannelException if the node is or becomes closed
-    /// @throws UnknownHostException if the tailnet's DNS cannot resolve `host`
-    /// @throws NoRouteToHostException if the address is outside the tailnet; it never falls back to a local connection
-    /// @throws SocketTimeoutException if the timeout elapses first
-    /// @throws ConnectException if the connection fails or tailnet access ends while connecting
-    @WorkerThread
-    public void relay(String host, int port, ParcelFileDescriptor socket, Duration timeout) throws IOException {
-        try (socket) { // Closes it unless passed on.
-            long timeoutNanos = NANOSECONDS.convert(timeout);
-            byte[] name = host.getBytes(StandardCharsets.UTF_8);
-            if (name.length == 0 || name.length > 255 || host.indexOf(0) >= 0 || port < 1 || port > 65535) {
-                throw new IllegalArgumentException("Host must have 1–255 bytes without NUL and port must be 1–65535");
+    /// Android cannot adopt a Unix socket into a SocketChannel. Keep the loopback pair private.
+    private static ParcelFileDescriptor localBridge(SocketChannel connection) throws IOException {
+        try (ServerSocketChannel listener = ServerSocketChannel.open()) {
+            listener.bind(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 1);
+            connection.socket().setTcpNoDelay(true);
+            // Fail instead of blocking if another app fills the listener's queue.
+            connection.configureBlocking(false);
+            connection.connect(listener.getLocalAddress());
+            listener.configureBlocking(false);
+            try (SocketChannel accepted = listener.accept()) {
+                // Another app can race the listener. Never give it a tailnet connection.
+                // The client does not use SO_REUSEADDR, so its local address is unique.
+                if (accepted == null || !accepted.getRemoteAddress().equals(connection.getLocalAddress())
+                        || !connection.finishConnect()) {
+                    throw new IOException("Local connection unavailable");
+                }
+                connection.configureBlocking(true);
+                return ParcelFileDescriptor.fromSocket(accepted.socket());
             }
-            check(nativeDial(handle, name, port, socket.detachFd(), timeoutNanos));
         }
     }
 
@@ -243,7 +268,9 @@ public final class TailnetNode implements AutoCloseable {
 
     /// Returns the bundled Tailscale version, including its source revision.
     @AnyThread
-    public static native String tailscaleVersion();
+    public static String tailscaleVersion() {
+        return nativeTailscaleVersion();
+    }
 
     /// Closes connections and waits for shutdown, keeping the identity for the next [#start].
     /// Pending calls throw [ClosedChannelException]. Repeated or concurrent calls are safe.
@@ -288,4 +315,6 @@ public final class TailnetNode implements AutoCloseable {
     private static native void nativeClose(long handle);
 
     private static native void nativeSetDefaultNetwork(byte[] network);
+
+    private static native String nativeTailscaleVersion();
 }
