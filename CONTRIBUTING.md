@@ -36,8 +36,8 @@ Device tests require SELinux Enforcing and internet access. The network-change t
 needs cellular fallback; use USB ADB on hardware. Debug builds include local control-server and peer
 fixtures. Demo tests exercise an R8-minified release consumer.
 
-The AAR is `tsnet/build/outputs/aar/tsnet-release.aar`. `verifyNativeAar` checks 16 KiB alignment and
-writes sizes to `tsnet/build/reports/native/sizes.tsv`.
+The AAR is `tsnet/build/outputs/aar/tsnet-release.aar`. `verifyNativeAar` checks for debug-only test code
+and writes sizes to `tsnet/build/reports/native/sizes.tsv`.
 
 For a live check, install and open the demo (`:demo:installRelease`). Authorize the node in your
 tailnet and wait for **RUNNING / Login saved**. Echo against a peer you control, such as one running

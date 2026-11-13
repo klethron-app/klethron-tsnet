@@ -195,7 +195,7 @@ abstract class BuildGoLibrary @Inject constructor(
         go(workspace, ".", env = target + ("GOFLAGS" to flags.joinToString(" ")),
             tool = go(workspace, "tool", "-n", "staticcheck").trim())
         go(workspace, "build", *flags, "-buildmode=c-shared",
-            "-ldflags=-s -buildid=", // The NDK aligns to 16 KiB; VerifyNativeAar checks it.
+            "-ldflags=-s -buildid=", // The NDK aligns to 16 KiB.
             "-o", outputDirectory.file("${abi.get()}/libklethron_tsnet.so").get().asFile.absolutePath, ".", env = target)
     }
 }
