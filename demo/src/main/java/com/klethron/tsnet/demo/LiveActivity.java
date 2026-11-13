@@ -6,8 +6,6 @@ import android.content.ActivityNotFoundException;
 import android.content.Intent;
 import android.net.Uri;
 import android.os.Bundle;
-import android.os.Handler;
-import android.os.Looper;
 import android.os.ParcelFileDescriptor;
 import android.os.SystemClock;
 import android.system.Os;
@@ -18,7 +16,6 @@ import android.widget.EditText;
 import android.widget.TextView;
 import androidx.annotation.AnyThread;
 import androidx.annotation.MainThread;
-import androidx.annotation.UiThread;
 import androidx.annotation.WorkerThread;
 import com.klethron.tsnet.TailnetNode;
 import com.klethron.tsnet.NodeStatus;
@@ -40,7 +37,6 @@ public final class LiveActivity extends Activity {
     // Serializes node calls across instances, including a finished instance's close.
     private static final ExecutorService WORKER = Executors.newSingleThreadExecutor();
     private static final Duration TIMEOUT = Duration.ofSeconds(10);
-    private final Handler ui = new Handler(Looper.getMainLooper());
     private volatile boolean destroyed;
     // Accessed only on WORKER; lint checks thread annotations on methods, not fields.
     private @Nullable TailnetNode node;
@@ -84,7 +80,7 @@ public final class LiveActivity extends Activity {
         });
     }
 
-    @UiThread
+    @MainThread
     private void startNode() {
         busy = true;
         render();
@@ -93,7 +89,7 @@ public final class LiveActivity extends Activity {
             try {
                 TailnetNode current = TailnetNode.start(this, new File(getNoBackupFilesDir(), "tailnet"), "klethron-tsnet-demo");
                 node = current;
-                ui.post(() -> {
+                runOnUiThread(() -> {
                     if (destroyed) return;
                     started = true;
                     busy = false;
@@ -112,7 +108,7 @@ public final class LiveActivity extends Activity {
         try {
             while (!destroyed) {
                 NodeStatus next = current.awaitStatus(previous, Duration.ofDays(1));
-                ui.post(() -> {
+                runOnUiThread(() -> {
                     if (destroyed) return;
                     status = next;
                     render();
@@ -124,7 +120,7 @@ public final class LiveActivity extends Activity {
         }
     }
 
-    @UiThread
+    @MainThread
     private void pickPeer() {
         if (status == null) return;
         List<NodeStatus.Peer> peers = status.peers();
@@ -138,7 +134,7 @@ public final class LiveActivity extends Activity {
                 ((EditText) findViewById(R.id.peer_host)).setText(peers.get(which).dnsName())).show();
     }
 
-    @UiThread
+    @MainThread
     private void exchange() {
         String host = ((EditText) findViewById(R.id.peer_host)).getText().toString().trim();
         String portText = ((EditText) findViewById(R.id.peer_port)).getText().toString();
@@ -203,7 +199,7 @@ public final class LiveActivity extends Activity {
         String run(TailnetNode current) throws Exception;
     }
 
-    @UiThread
+    @MainThread
     private void runOperation(Operation operation) {
         busy = true;
         render();
@@ -221,7 +217,7 @@ public final class LiveActivity extends Activity {
 
     @AnyThread
     private void complete(String message) {
-        ui.post(() -> {
+        runOnUiThread(() -> {
             if (destroyed) return;
             busy = false;
             result(message);
@@ -229,7 +225,7 @@ public final class LiveActivity extends Activity {
         });
     }
 
-    @UiThread
+    @MainThread
     private void render() {
         findViewById(R.id.start_node).setEnabled(!busy && !started);
         findViewById(R.id.login).setEnabled(!busy && started);
@@ -248,7 +244,7 @@ public final class LiveActivity extends Activity {
         }
     }
 
-    @UiThread
+    @MainThread
     private void result(String message) {
         ((TextView) findViewById(R.id.result)).setText(message);
     }

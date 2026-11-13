@@ -3,7 +3,6 @@ package main
 import (
 	"cmp"
 	"context"
-	"fmt"
 	"io"
 	"math"
 	"net"
@@ -25,8 +24,7 @@ import (
 	"tailscale.com/types/key"
 )
 
-// node publishes the latest backend status to waiting callers and dials through the tailnet.
-// Calls end when the node closes, so Close waits at most for local work.
+// node publishes status and dials through the tailnet. Closing cancels calls and connections.
 type node struct {
 	server *tsnet.Server
 	client *local.Client
@@ -68,14 +66,11 @@ func newNode(server *tsnet.Server) *node {
 	return &node{server: server, ctx: ctx, cancel: cancel, access: access, endAccess: endAccess, changed: make(chan struct{})}
 }
 
-// start sets every connection-relevant field, so the host process environment cannot redirect
-// control. config is "directory\x00hostname\x00controlURL", which TailnetNode validates; an empty
-// control URL selects Tailscale's. It runs before the node is published, so no call can race it.
+// start runs before publication. TailnetNode validates config: "directory\x00hostname\x00controlURL".
 func (n *node) start(config string) int {
 	directory, rest, _ := strings.Cut(config, "\x00")
 	hostname, controlURL, _ := strings.Cut(rest, "\x00")
-	// tsnet reads an auth key from the environment when none is configured. This library only
-	// supports interactive login, so refuse rather than silently use a host-process credential.
+	// tsnet must not use a host-process credential or control URL.
 	if os.Getenv("TS_AUTHKEY") != "" || os.Getenv("TS_AUTH_KEY") != "" {
 		return resultAuthEnvironment
 	}
@@ -100,12 +95,9 @@ func (n *node) close() {
 	_ = n.server.Close()
 }
 
-// watchStatus follows the IPN bus until the node closes. Each watch starts with the current state
-// and self node, so re-watching after a disconnect, as when falling behind, loses nothing needed.
-// Changes that can alter peer lines or this node's names signal refreshStatus rather than read the
-// status here, where slow reads in large tailnets could make the watch fall behind. Each new network
-// map brings a SelfChange, also when only tailnet or user names change. Peer patches let it skip
-// changes other than online status, which upstream otherwise sends as full nodes.
+// watchStatus resumes with current state after disconnects. Refresh names and peers separately:
+// large status reads can stall the watch. Every map sends SelfChange; among peer patches, only
+// online changes affect our records. Other peer changes arrive as full nodes.
 func (n *node) watchStatus(refresh chan<- struct{}) {
 	for n.ctx.Err() == nil {
 		if watcher, err := n.client.WatchIPNBus(n.ctx, ipn.NotifyInitialState|ipn.NotifyInitialStatus|ipn.NotifyPeerPatches); err == nil {
@@ -133,9 +125,7 @@ func (n *node) watchStatus(refresh chan<- struct{}) {
 	}
 }
 
-// refreshStatus publishes this node's names and peers after each signal on refresh until the node
-// closes. Upstream builds the status from its network map, which a logout clears, so rather than
-// apply the notified changes, it reads the status.
+// refreshStatus reads names and peers from the current map, which logout clears.
 func (n *node) refreshStatus(refresh <-chan struct{}) {
 	for {
 		select {
@@ -151,7 +141,7 @@ func (n *node) refreshStatus(refresh <-chan struct{}) {
 
 // readStatus returns this node's names and the record's peer lines.
 func readStatus(status *ipnstate.Status) *statusRead {
-	var lines []string
+	lines := make([]string, 0, len(status.Peer))
 	for _, peer := range status.Peer {
 		if line := peerLine(peer); line != "" {
 			lines = append(lines, line)
@@ -169,27 +159,24 @@ func readStatus(status *ipnstate.Status) *statusRead {
 	return read
 }
 
-// peerLine returns "\nname\tOS\tonline\taddresses\tSSH host keys", with comma-separated lists and
-// addresses IPv4 first, or "" for peers hidden as by "tailscale status": nodes that may only connect
-// to this one, and Mullvad exit nodes, which do not accept connections. It drops host keys that are
-// not printable ASCII or contain commas.
+// peerLine returns "\nname\tOS\tonline\taddresses\tSSH host keys", with comma-separated lists.
+// Like "tailscale status", it hides sharees and Mullvad exit nodes. Keys must be printable without commas.
 func peerLine(peer *ipnstate.PeerStatus) string {
 	name := strings.TrimSuffix(peer.DNSName, ".")
 	if peer.ShareeNode || name == "" || strings.HasSuffix(name, ".mullvad.ts.net") || len(peer.TailscaleIPs) == 0 {
 		return ""
 	}
-	var keys []string
+	keys := make([]string, 0, len(peer.SSH_HostKeys))
 	for _, key := range peer.SSH_HostKeys {
 		if key = strings.TrimSpace(key); key != "" && key == printable(key, 8192) && !strings.Contains(key, ",") {
 			keys = append(keys, key)
 		}
 	}
-	return "\n" + strings.Join([]string{printable(name, 255), printable(peer.OS, 32), strconv.FormatBool(peer.Online),
-		addressList(peer.TailscaleIPs...), strings.Join(keys, ",")}, "\t")
+	return "\n" + printable(name, 255) + "\t" + printable(peer.OS, 32) + "\t" + strconv.FormatBool(peer.Online) +
+		"\t" + addressList(peer.TailscaleIPs...) + "\t" + strings.Join(keys, ",")
 }
 
-// publish applies notify and, unless nil, a status read. Both status goroutines publish, so it reads
-// the backend under the lock: otherwise an earlier read could overwrite a later one.
+// publish applies notify and an optional status read. Lock backend reads against both publishers.
 func (n *node) publish(notify ipn.Notify, read *statusRead) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
@@ -233,9 +220,8 @@ func (n *node) publish(notify ipn.Notify, read *statusRead) {
 	if notify.SelfChange != nil {
 		self, expiry = notify.SelfChange.Key, notify.SelfChange.KeyExpiry
 	}
-	// Every interactive login creates a new node key, which upstream saves before announcing the
-	// first network map with it. Closing the node at LoginFinished, which comes first, would lose the
-	// login. A re-authenticating node stays Running, so the state does not tell either.
+	// A changed node key confirms the new login is saved. LoginFinished is too early, and state
+	// stays Running during re-authentication.
 	if self != n.selfKey {
 		status.loginURL = ""
 	}
@@ -258,12 +244,14 @@ func (n *node) publish(notify ipn.Notify, read *statusRead) {
 	}
 }
 
-// watchFellBehind is the final ErrMessage of a watch that upstream closes for falling behind
-// (ipnlocal.watchIPNBusFellBehindMessage). It is not a backend error, and watchStatus re-watches.
+// ipnlocal.watchIPNBusFellBehindMessage ends a watch; it is not a backend error.
 const watchFellBehind = "IPN bus consumer fell behind; closing watch"
 
 // printable returns at most limit bytes of s, replacing bytes other than printable ASCII with '?'.
 func printable(s string, limit int) string {
+	if len(s) <= limit && strings.IndexFunc(s, func(r rune) bool { return r < ' ' || r > '~' }) < 0 {
+		return s
+	}
 	b := []byte(s[:min(len(s), limit)])
 	for i, c := range b {
 		if c < ' ' || c > '~' {
@@ -331,8 +319,7 @@ const (
 	resultStartFailed
 )
 
-// whenOpen returns a context for a call, ending at the timeout or when the node closes, and a
-// function to call when done, or resultClosed if n is closed or nil. Close waits for the call.
+// whenOpen bounds a call by timeout and node lifetime. Close waits until the returned function runs.
 func (n *node) whenOpen(timeout time.Duration) (context.Context, func(), int) {
 	// Only close locks for writing, after cancelling: fail at once rather than wait for shutdown.
 	// A call racing close runs with a cancelled context.
@@ -357,9 +344,8 @@ func (n *node) failed(ctx context.Context, result int) int {
 	return result
 }
 
-// dial connects to host:port through the tailnet and relays the connection onto fd, a connected
-// stream socket that it owns from now on and closes on failure. It returns 0 or a dial result, and
-// waits up to timeout for the node to run. TailnetNode validates the host and port.
+// dial owns fd, a connected stream socket, and closes it on failure. Timeout includes waiting for
+// Running. TailnetNode validates host and port.
 func (n *node) dial(host string, port uint16, fd int, timeout time.Duration) (result int) {
 	app := streamSocket(fd)
 	if app == nil {
@@ -411,8 +397,7 @@ func (n *node) dial(host string, port uint16, fd int, timeout time.Duration) (re
 	return 0
 }
 
-// streamSocket takes ownership of fd and returns it as a connection, or nil, having closed it, if it
-// is not a connected TCP or Unix stream socket.
+// streamSocket consumes fd, returning a connected TCP/Unix stream or nil after closing it.
 func streamSocket(fd int) net.Conn {
 	file := os.NewFile(uintptr(fd), "socket")
 	conn, err := net.FileConn(file) // A duplicate descriptor.
@@ -441,8 +426,7 @@ func (n *node) logout(timeout time.Duration) int {
 	return 0
 }
 
-// login starts an interactive login, also after a logout or key expiry, and also when logged in, to
-// re-authenticate. The new login URL is published with the status. It returns 0 or a failure.
+// login starts or renews browser authorization; status carries the URL.
 func (n *node) login() int {
 	ctx, done, result := n.whenOpen(math.MaxInt64) // Neither call waits for the network.
 	if result != 0 {
@@ -453,12 +437,9 @@ func (n *node) login() int {
 	if err != nil {
 		return n.failed(ctx, resultLoginFailed)
 	}
-	// A logout, even a failed one, stops the node, and a successful one resets the prefs to
-	// defaults, including Tailscale's control URL and the device's hostname. Restore them as
-	// upstream Server.Start; the control client keeps the URL it started with. Start also restarts
-	// the control client, which would interrupt a running node, so skip it when renewing a login.
-	// LocalAPI's Start ignores cancellation, and run after Server.Close it would create a control
-	// client that retries forever, so wait for it even when the node closes: it is local work.
+	// Logout stops the node and, on success, resets prefs. Restore them as Server.Start does.
+	// Skip Start when renewing: it restarts control. Start ignores cancellation and must finish
+	// before Server.Close, or it leaves a control client retrying forever.
 	if current.LoggedOut || !current.WantRunning || current.ControlURL != n.server.ControlURL ||
 		current.Hostname != n.server.Hostname {
 		prefs := ipn.NewPrefs()
@@ -514,14 +495,17 @@ var javaStates = map[ipn.State]string{
 // with comma-separated address literals, followed by the peer lines. All printable ASCII apart from
 // the separators.
 func (s nodeStatus) record(version uint64) string {
-	return fmt.Sprintf("%d\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s%s", version, cmp.Or(javaStates[s.state], "NO_STATE"),
-		s.revocation, s.loginURL, s.addresses, s.err, s.dnsName, s.tailnet, s.loginName, s.peers)
+	return strconv.FormatUint(version, 10) + "\n" + cmp.Or(javaStates[s.state], "NO_STATE") + "\n" +
+		s.revocation + "\n" + s.loginURL + "\n" + s.addresses + "\n" + s.err + "\n" +
+		s.dnsName + "\n" + s.tailnet + "\n" + s.loginName + s.peers
 }
 
 // addressList returns the valid addresses, IPv4 first, comma-separated.
 func addressList(ips ...netip.Addr) string {
-	var list []string
-	for _, ip := range slices.SortedFunc(slices.Values(ips), netip.Addr.Compare) {
+	ips = slices.Clone(ips)
+	slices.SortFunc(ips, netip.Addr.Compare)
+	list := make([]string, 0, len(ips))
+	for _, ip := range ips {
 		if ip.IsValid() {
 			list = append(list, ip.String())
 		}
