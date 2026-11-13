@@ -1,5 +1,7 @@
 package com.klethron.tsnet.demo;
 
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
 import android.app.Activity;
@@ -7,12 +9,40 @@ import android.app.Instrumentation;
 import android.content.Intent;
 import android.content.pm.ActivityInfo;
 import android.content.res.Configuration;
+import android.os.ParcelFileDescriptor;
 import android.os.SystemClock;
+import android.system.ErrnoException;
+import android.system.Os;
+import android.system.OsConstants;
 import android.widget.TextView;
 import androidx.test.platform.app.InstrumentationRegistry;
+import java.net.SocketTimeoutException;
+import java.util.concurrent.Executors;
 import org.junit.Test;
 
 public final class MinifiedDemoTest {
+    @Test(timeout = 20000)
+    public void tricklingEchoCannotExtendTheDeadline() throws Exception {
+        ParcelFileDescriptor[] pair = ParcelFileDescriptor.createSocketPair();
+        var worker = Executors.newSingleThreadExecutor();
+        try (ParcelFileDescriptor client = pair[0]; ParcelFileDescriptor peer = pair[1]) {
+            byte[] sent = {1, 2, 3, 4, 5, 6};
+            var trickle = worker.submit(() -> {
+                for (byte value : sent) {
+                    Thread.sleep(2000);
+                    Os.write(peer.getFileDescriptor(), new byte[] {value}, 0, 1);
+                }
+                return null;
+            });
+            Exception failure = assertThrows(Exception.class, () -> LiveActivity.echo(client, sent));
+            assertTrue(failure instanceof SocketTimeoutException
+                    || (failure instanceof ErrnoException errno && errno.errno == OsConstants.EAGAIN));
+            assertFalse("Peer stopped before the deadline", trickle.isDone());
+        } finally {
+            worker.shutdownNow();
+        }
+    }
+
     @Test
     public void startsRotatesAndRestartsLiveNodeThroughMinifiedConsumer() {
         Instrumentation instrumentation = InstrumentationRegistry.getInstrumentation();

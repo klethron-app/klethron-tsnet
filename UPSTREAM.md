@@ -1,7 +1,7 @@
 # Upstream issues
 
 Pinned: Tailscale [`5b6c39b94d50`](https://github.com/tailscale/tailscale/commit/5b6c39b94d50beac39dd7302d6f75f14e281a01f)
-with Go 1.27.4. Entries are ordered by impact on this library; drop those upstream has fixed.
+with Go 1.27.4. Remove entries when fixed upstream.
 
 ## Patched
 
@@ -19,9 +19,8 @@ with Go 1.27.4. Entries are ordered by impact on this library; drop those upstre
 
 ## Worked around
 
-- **Logs can contain login URLs.** `tsnet.Server.logf` defaults to `log.Printf`, and netmon and others
-  use Go's standard logger directly. `main.go` sets `UserLogf` and `Logf` to `logger.Discard` and
-  calls `log.SetOutput(io.Discard)`.
+- **Logs can contain login URLs.** `main.go` discards `tsnet.Server.UserLogf`, `Logf` and Go's standard
+  log output, which netmon and others use directly.
 - **`tsnet.Server` reads empty fields from the process environment:** `TS_CONTROL_URL`,
   `TS_AUTHKEY`/`TS_AUTH_KEY`, and OAuth or ID-token variables when `oauthkey` or `identityfederation`
   is linked. `node.start` sets `Dir`, `Hostname` and `ControlURL` and refuses to start when an auth-key
@@ -36,9 +35,8 @@ with Go 1.27.4. Entries are ordered by impact on this library; drop those upstre
   [PR #19150](https://github.com/tailscale/tailscale/pull/19150)). `controlclient.Auto` saves `Persist`
   only with a network map, so closing right after `LoginFinished` can lose the login. `node.publish`
   clears the login URL only once the self node's key changes.
-- **The state directory is not locked.** Two servers on one directory save their state over each
-  other's. `TailnetNode.start` resolves the directory once and refuses to share it with another open
-  node in the process. Separate processes are not guarded.
+- **The state directory is not locked.** `TailnetNode.start` resolves it once and refuses to share it
+  with another open node in the process. Separate processes can still overwrite each other's state.
 - **`tsnet.Server.Dial` can leave the tailnet.** For addresses not in the network map, `tsdial.UserDial`
   falls back to the routing table, then a plain `net.Dialer`. `node.dial` resolves with `UserDialPlan`,
   requires `UseNetstackForIP` and connects with `NetstackDialTCP`.
@@ -63,9 +61,8 @@ with Go 1.27.4. Entries are ordered by impact on this library; drop those upstre
   URL, the device hostname). `login()` restores tsnet's prefs with LocalAPI `Start` when they differ or
   say logged out, then calls `StartLoginInteractive`. Upstream's private `beginLoginAs`
   ([PR #21857](https://github.com/tailscale/tailscale/pull/21857)) does the same but is not in LocalAPI.
-- **The IPN bus reports logout, key expiry and device removal alike as `NeedsLogin`.** `node.publish`
-  reports removal while the health tracker has the `node-removed` warning, otherwise expiry once the
-  latest key expiry has passed.
+- **The IPN bus reports logout, key expiry and removal as `NeedsLogin`.** `node.publish` distinguishes
+  removal by the `node-removed` health warning, otherwise expiry by the latest key expiry time.
 - **A watch that falls behind ends with an `ErrMessage`.** `node.publish` ignores that text
   (`watchFellBehind`, a copy of the unexported `watchIPNBusFellBehindMessage`).
 

@@ -6,9 +6,8 @@ import java.util.Arrays;
 import java.util.List;
 import org.jspecify.annotations.Nullable;
 
-/// A snapshot of a [TailnetNode]'s connection, login progress, account, assigned IP addresses and
-/// peers. Pass it to [TailnetNode#awaitStatus] to wait for a change. Snapshots are immutable.
-/// [#toString()] omits login URLs, error text, names and peers, which may contain private information.
+/// An immutable snapshot of a [TailnetNode]. Pass it to [TailnetNode#awaitStatus] to wait for changes.
+/// [#toString()] omits login URLs, error text, names and peers for privacy.
 public final class NodeStatus {
     /// Connection and authorization progress.
     public enum State {
@@ -36,18 +35,16 @@ public final class NodeStatus {
         NODE_REMOVED,
     }
 
-    /// Another device in this node's tailnet, to show for selection and pass to [TailnetNode#dial].
+    /// A tailnet device. Pass its name or address to [TailnetNode#dial].
     ///
     /// @param dnsName the [MagicDNS](https://tailscale.com/kb/1081/magicdns) name without a trailing
     ///     dot, such as `host.tailnet-name.ts.net`. Its first label is the device's machine name.
-    /// @param os the operating system the device reports, such as `linux`, `macOS`, `windows`, `iOS`
-    ///     or `android`, or empty if unknown
+    /// @param os the reported operating system, such as `linux` or `android`; empty if unknown
     /// @param online whether Tailscale reports the device as connected; `false` if unknown
     /// @param addresses the device's Tailscale IP addresses, IPv4 first
-    /// @param sshHostKeys the device's SSH host keys in OpenSSH public key format, such as
-    ///     `ssh-ed25519 AAAA…`, if it runs [Tailscale SSH](https://tailscale.com/kb/1193/tailscale-ssh);
-    ///     otherwise empty. Tailscale's control server distributes them: accept them for [#dnsName()]
-    ///     and [#addresses()] instead of asking the user to trust an unknown key, as `tailscale ssh` does.
+    /// @param sshHostKeys [Tailscale SSH](https://tailscale.com/kb/1193/tailscale-ssh) host keys from the
+    ///     control server, in OpenSSH format, such as `ssh-ed25519 AAAA…`; empty without Tailscale SSH.
+    ///     Accept them for [#dnsName()] and [#addresses()] without trust-on-first-use.
     public record Peer(String dnsName, String os, boolean online, List<InetAddress> addresses, List<String> sshHostKeys) {
         public Peer {
             addresses = List.copyOf(addresses);
@@ -80,7 +77,7 @@ public final class NodeStatus {
         dnsName = emptyToNull(fields[6]);
         tailnet = emptyToNull(fields[7]);
         loginName = emptyToNull(fields[8]);
-        peers = Arrays.stream(fields, 9, fields.length).map(line -> {
+        peers = fields.length == 9 ? List.of() : Arrays.stream(fields, 9, fields.length).map(line -> {
             String[] peer = line.split("\t", -1);
             return new Peer(peer[0], peer[1], Boolean.parseBoolean(peer[2]), addresses(peer[3]), list(peer[4]));
         }).toList();
@@ -95,7 +92,8 @@ public final class NodeStatus {
     }
 
     private static List<InetAddress> addresses(String commaSeparated) {
-        return list(commaSeparated).stream().map(InetAddresses::parseNumericAddress).toList();
+        return commaSeparated.isEmpty() ? List.of()
+                : Arrays.stream(commaSeparated.split(",")).map(InetAddresses::parseNumericAddress).toList();
     }
 
     /// The node's connection and authorization state.
@@ -110,10 +108,9 @@ public final class NodeStatus {
         return revocation;
     }
 
-    /// The browser authorization URL, or `null` when none is pending; it can also appear while
-    /// [State#RUNNING] when renewing a login. Whoever opens it can claim the node: send it only to
-    /// the user's browser, never log or share it. It clears once the new login is saved; closing
-    /// before then can lose that login.
+    /// Browser authorization URL, or `null` when none is pending. Also used while [State#RUNNING]
+    /// to renew a login. Whoever opens it can claim the node: send it only to the user's browser,
+    /// never log or share it. Wait for it to clear before closing, so the new login is saved.
     public @Nullable String loginUrl() {
         return loginUrl;
     }
@@ -131,12 +128,11 @@ public final class NodeStatus {
         return error;
     }
 
-    /// This node's [MagicDNS](https://tailscale.com/kb/1081/magicdns) name without a trailing dot,
-    /// such as `phone.tailnet-name.ts.net`; `null` before joining and after logout. Tailscale may adjust
-    /// the requested hostname, and administrators can rename the device. The part after the first
-    /// label is the tailnet's: a saved [Peer#dnsName()] with another suffix is in another tailnet.
-    /// Like [#tailnet()] and [#loginName()], it remains after key expiry and can change with the next
-    /// login, which may choose another account or tailnet.
+    /// This node's [MagicDNS](https://tailscale.com/kb/1081/magicdns) name, such as
+    /// `phone.tailnet-name.ts.net`, without a trailing dot; `null` before joining and after logout.
+    /// Tailscale may adjust the hostname; administrators can rename it. The suffix after the first
+    /// label identifies the tailnet. Like [#tailnet()] and [#loginName()], it remains after key expiry
+    /// and can change on login to another account or tailnet.
     public @Nullable String dnsName() {
         return dnsName;
     }
@@ -152,10 +148,9 @@ public final class NodeStatus {
         return loginName;
     }
 
-    /// The other devices in this node's network map, sorted by [Peer#dnsName()]; empty before joining
-    /// and after logout. Omits devices that may only connect to this node and Mullvad exit nodes.
-    /// Peers can remain listed while not [State#RUNNING], as after key expiry, but are unreachable.
-    /// Each change, including a peer going online or offline, is a status change.
+    /// Devices in the network map, sorted by [Peer#dnsName()]; empty before joining and after logout.
+    /// Omits devices that may only connect to this node and Mullvad exit nodes. Peers can remain
+    /// listed but unreachable outside [State#RUNNING]. Online/offline changes update the snapshot.
     public List<Peer> peers() {
         return peers;
     }

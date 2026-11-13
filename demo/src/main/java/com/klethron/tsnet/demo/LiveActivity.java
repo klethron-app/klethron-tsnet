@@ -22,6 +22,7 @@ import com.klethron.tsnet.NodeStatus;
 import java.io.File;
 import java.io.FileDescriptor;
 import java.io.IOException;
+import java.net.SocketTimeoutException;
 import java.nio.channels.ClosedChannelException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -163,21 +164,24 @@ public final class LiveActivity extends Activity {
         });
     }
 
-    /// Sends `sent` and requires it back, with each write and read limited to TIMEOUT.
+    /// Sends `sent` and requires it back within TIMEOUT.
     @WorkerThread
-    private static void echo(ParcelFileDescriptor connection, byte[] sent) throws Exception {
+    static void echo(ParcelFileDescriptor connection, byte[] sent) throws Exception {
         FileDescriptor fd = connection.getFileDescriptor();
-        StructTimeval timeout = StructTimeval.fromMillis(TIMEOUT.toMillis());
-        Os.setsockoptTimeval(fd, OsConstants.SOL_SOCKET, OsConstants.SO_SNDTIMEO, timeout);
-        Os.setsockoptTimeval(fd, OsConstants.SOL_SOCKET, OsConstants.SO_RCVTIMEO, timeout);
-        for (int offset = 0; offset < sent.length;) {
-            offset += Os.write(fd, sent, offset, sent.length - offset);
-        }
         byte[] received = new byte[sent.length];
-        for (int offset = 0; offset < received.length;) {
-            int count = Os.read(fd, received, offset, received.length - offset);
-            if (count == 0) throw new IOException("Peer closed before echo");
-            offset += count;
+        long deadline = SystemClock.elapsedRealtime() + TIMEOUT.toMillis();
+        for (boolean writing : new boolean[] {true, false}) {
+            byte[] data = writing ? sent : received;
+            for (int offset = 0; offset < data.length;) {
+                long remaining = deadline - SystemClock.elapsedRealtime();
+                if (remaining <= 0) throw new SocketTimeoutException();
+                Os.setsockoptTimeval(fd, OsConstants.SOL_SOCKET,
+                        writing ? OsConstants.SO_SNDTIMEO : OsConstants.SO_RCVTIMEO, StructTimeval.fromMillis(remaining));
+                int count = writing ? Os.write(fd, data, offset, data.length - offset)
+                        : Os.read(fd, data, offset, data.length - offset);
+                if (count == 0) throw new IOException("Peer closed before echo");
+                offset += count;
+            }
         }
         if (!Arrays.equals(sent, received)) throw new IOException("Echo mismatch");
     }

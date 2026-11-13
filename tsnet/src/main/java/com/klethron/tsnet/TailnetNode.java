@@ -28,15 +28,12 @@ import java.util.Objects;
 import java.util.Set;
 import org.jspecify.annotations.Nullable;
 
-/// A device in a [tailnet](https://tailscale.com/kb/1136/tailnet), with keys in a caller-owned
-/// directory. Opens outbound TCP connections without routing the Android device's traffic.
-///
-/// [Start][#start] a node, follow [#awaitStatus] until it is [NodeStatus.State#RUNNING] without a
-/// [NodeStatus#loginUrl()], then [#dial]. Nodes follow the best non-VPN internet network, including
-/// while another VPN is active. Methods are thread-safe; `@WorkerThread` methods block. Closing ends
-/// connections and cancels blocked calls with [ClosedChannelException]. With a zero or negative
-/// timeout, [#awaitStatus] returns immediately; [#dial] and [#logout] time out. First use loads the
-/// native library.
+/// A device in a [tailnet](https://tailscale.com/kb/1136/tailnet), with caller-owned keys and outbound
+/// TCP connections. [Start][#start], [#awaitStatus] until [NodeStatus.State#RUNNING] without a
+/// [NodeStatus#loginUrl()], then [#dial]. Follows the best non-VPN network, even with another VPN active.
+/// Methods are thread-safe; `@WorkerThread` methods block. Closing ends connections and cancels
+/// blocked calls with [ClosedChannelException]. Zero or negative timeouts return immediately from
+/// [#awaitStatus] and fail [#dial] and [#logout]. First use loads the native library.
 public final class TailnetNode implements AutoCloseable {
     static {
         System.loadLibrary("klethron_tsnet");
@@ -90,9 +87,8 @@ public final class TailnetNode implements AutoCloseable {
         this.directory = directory;
     }
 
-    /// Starts a node, restoring its saved login or requesting browser authorization. Returns after
-    /// local initialization; [#awaitStatus] reports progress and the login URL. `context` supplies
-    /// [ConnectivityManager].
+    /// Starts a node with its saved login or browser authorization. Returns after local initialization;
+    /// [#awaitStatus] reports progress and the login URL. `context` supplies [ConnectivityManager].
     ///
     /// The directory stores this node's private keys. Give each node its own directory under
     /// [Context#getNoBackupFilesDir()]; it is created if missing, with symlinks resolved before startup.
@@ -166,10 +162,9 @@ public final class TailnetNode implements AutoCloseable {
         return record.isEmpty() ? Objects.requireNonNull(previous) : new NodeStatus(handle, record);
     }
 
-    /// Opens a tailnet TCP connection. The caller owns the returned blocking Unix stream socket;
-    /// read and write it with file streams or [android.system.Os]. See
-    /// [#dial(String, int, ParcelFileDescriptor, Duration)] for routing, timeouts and shutdown,
-    /// or to use NIO selectors and distinguish connection resets from end of stream.
+    /// Opens a tailnet TCP connection as a caller-owned blocking Unix stream socket for file streams
+    /// or [android.system.Os]. See [#dial(String, int, ParcelFileDescriptor, Duration)] for routing,
+    /// timeouts, shutdown, NIO selectors and distinguishing resets from end of stream.
     ///
     /// @throws IOException if the connection cannot be opened
     @WorkerThread
@@ -188,20 +183,18 @@ public final class TailnetNode implements AutoCloseable {
         }
     }
 
-    /// Connects to a tailnet IP or [MagicDNS](https://tailscale.com/kb/1081/magicdns) name and relays
-    /// TCP onto `socket`. `timeout` covers waiting for [NodeStatus.State#RUNNING] and connecting.
-    /// Only peers and subnet routes in this node's network map are reachable. Names resolve through
-    /// that map or the tailnet's DNS settings, never through the device's resolver.
+    /// Relays TCP between `socket` and a tailnet IP or [MagicDNS](https://tailscale.com/kb/1081/magicdns)
+    /// name. `timeout` covers waiting for [NodeStatus.State#RUNNING] and connecting. Only network-map
+    /// peers and subnet routes are reachable; names resolve through the map or tailnet DNS settings.
     ///
     /// The node takes ownership of this connected TCP or Unix stream socket, even if dialing fails.
     /// The caller uses the other end: a loopback TCP pair for [java.nio.channels.SocketChannel]
     /// selectors, or [ParcelFileDescriptor#createSocketPair()] for file streams. Peer end of stream
     /// leaves the connection writable. Closing the caller's end or shutting down its output ends
     /// the connection after delivering written data; unread received data can cause a reset.
-    /// Failures reset the connection. All connections reset when the node closes or loses tailnet
-    /// access: leaving [NodeStatus.State#RUNNING] for any state except [NodeStatus.State#STARTING],
-    /// as on logout, key expiry or removal. Unix sockets read resets as end of stream unless data
-    /// written by the caller is still unread by the relay.
+    /// Failures reset the connection, as does closing the node or losing tailnet access (leaving
+    /// [NodeStatus.State#RUNNING] except for [NodeStatus.State#STARTING]). Unix sockets read resets
+    /// as end of stream unless data written by the caller is still unread by the relay.
     ///
     /// @param host a tailnet IP address or MagicDNS name, at most 255 UTF-8 bytes
     /// @throws IllegalArgumentException if the host is invalid, the port is not 1–65535, or `socket` is
@@ -223,9 +216,8 @@ public final class TailnetNode implements AutoCloseable {
         }
     }
 
-    /// Ends this node's tailnet access and connections, and deletes its saved login. The node stays
-    /// open, reports [NodeStatus.State#NEEDS_LOGIN] and can [#login] again. Does nothing if already
-    /// logged out.
+    /// Ends tailnet access and connections and deletes the saved login. The node stays open in
+    /// [NodeStatus.State#NEEDS_LOGIN] and can [#login] again. Does nothing if already logged out.
     ///
     /// If logout fails, the node stops connecting but keeps its saved login: retry the logout.
     /// Deleting its files instead leaves the device registered in the tailnet. After a successful

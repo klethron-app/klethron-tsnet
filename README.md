@@ -4,22 +4,20 @@
 
 # Klethron tsnet
 
-Connect an Android app to peers on a [Tailscale](https://tailscale.com/) network over TCP.
-Each embedded [tsnet](https://github.com/tailscale/tailscale/tree/main/tsnet) node has its own identity
-and runs in your app's process, without the Tailscale app or a device-wide VPN.
+Connect an Android app to a [Tailscale](https://tailscale.com/) network over TCP. Each embedded
+[tsnet](https://github.com/tailscale/tailscale/tree/main/tsnet) node runs in your process with its own
+identity, without the Tailscale app or a device-wide VPN.
 
 Requires **Android 14 (API 34)** or later. The AAR includes native libraries for **arm64-v8a** and
 **x86_64**, with 16 KiB page support. Consumers need no Go compiler or NDK.
 
-**Under development.** Login, saved identity, TCP dialing, logout and revocation are tested locally
-and on a real tailnet. Wi-Fi/cellular switches have live coverage only with the Tailscale app's VPN
-active; peer listing has local coverage. See [known limitations](UPSTREAM.md#limits) and the
-[Javadoc](https://javadoc.io/doc/com.klethron/tsnet/latest/).
+**Under development.** Login, saved identity, TCP dialing, logout and revocation have local and live
+tailnet tests. Wi-Fi/cellular switches have live coverage only with Tailscale's VPN active; peer
+listing has local coverage. See [limitations](UPSTREAM.md#limits) and [Javadoc](https://javadoc.io/doc/com.klethron/tsnet/latest/).
 
 ## Install
 
-Add `mavenCentral()` to your repositories and select a
-[release version](https://central.sonatype.com/artifact/com.klethron/tsnet):
+Add `mavenCentral()` and select a [release version](https://central.sonatype.com/artifact/com.klethron/tsnet):
 
 ```kotlin
 dependencies {
@@ -31,15 +29,13 @@ android {
 }
 ```
 
-The manifest adds `INTERNET`, `ACCESS_NETWORK_STATE` and `CHANGE_NETWORK_STATE`, granted without a
-prompt. `CHANGE_NETWORK_STATE` lets nodes follow Wi-Fi to cellular; keep it.
+The manifest adds `INTERNET`, `ACCESS_NETWORK_STATE` and `CHANGE_NETWORK_STATE` (for Wi-Fi/cellular
+switches). All are granted without a prompt.
 
 ## Connect
 
-A [`TailnetNode`](https://javadoc.io/doc/com.klethron/tsnet/latest/com/klethron/tsnet/TailnetNode.html)
-is a device on a tailnet. Run its operations on a worker thread. Keep its state in a dedicated
-directory under `Context.getNoBackupFilesDir()`; this holds private keys and must never be logged,
-backed up or shared.
+Run `TailnetNode` operations on a worker thread. Give each node a directory under
+`Context.getNoBackupFilesDir()`; it holds private keys and must never be logged, backed up or shared.
 
 ```java
 File directory = new File(context.getNoBackupFilesDir(), "tailscale");
@@ -61,26 +57,25 @@ try (TailnetNode node = TailnetNode.start(context, directory, "my-device")) {
 }
 ```
 
-`awaitStatus` waits for changes without polling; closing the node cancels it with
-`ClosedChannelException`. Whoever opens a login URL can claim the node. Wait for the URL to clear
-before closing so the login is saved. Starting with the same directory resumes that identity.
-Status snapshots also include the device name, tailnet and signed-in user.
+`awaitStatus` waits without polling; closing cancels it with `ClosedChannelException`. Whoever opens
+a login URL can claim the node. Wait for the URL to clear before closing so the login is saved.
+Starting with the same directory resumes that identity.
 
-`NodeStatus.peers()` lists visible devices with their MagicDNS name, OS, online state, addresses
-and [Tailscale SSH](https://tailscale.com/kb/1193/tailscale-ssh) host keys. Use it for a device picker or
-to verify Tailscale SSH servers without trust-on-first-use.
+`NodeStatus` reports the device name, tailnet and user. Its `peers()` list includes MagicDNS names,
+OS, online state, addresses and [Tailscale SSH](https://tailscale.com/kb/1193/tailscale-ssh) host keys
+for device selection and SSH verification without trust-on-first-use.
 
-`dial` accepts a tailnet IP address or MagicDNS name and returns a socket owned by the caller.
-For NIO selectors, pass one end of a loopback TCP pair to its socket overload. Dialing reaches only
-peers and subnet routes, and resolves names only through the tailnet. `close` ends connections but
-keeps the identity. `logout`, key expiry and device removal end access and connections; `login` starts
-authorization again. The app decides how long to keep the node alive and whether to run a service.
+`dial` returns a caller-owned socket to a tailnet IP or MagicDNS name. For NIO selectors, pass one end
+of a loopback TCP pair to its socket overload. Only peers and subnet routes are reachable; names
+resolve only through the tailnet. `close` ends connections and keeps the identity. `logout`, key
+expiry and device removal end access and connections; `login` requests authorization again.
+The app controls node lifetime and services.
 
 ## Network
 
-Running nodes follow the device's best non-VPN network across Wi-Fi and mobile changes, also while
-another VPN app, such as Tailscale's, is active. Native TLS uses Android's system CA store without
-user-disabled roots; user-added CAs and the app's network security configuration do not apply.
+Nodes follow the best non-VPN network across Wi-Fi and mobile changes, including while another VPN
+is active. TLS uses Android's system CA store minus user-disabled roots; user-added CAs and the app's
+network security configuration do not apply.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) to build, test or use a checkout. Original code is
 [Apache-2.0 licensed](LICENSE); dependencies' [own licences](THIRD-PARTY-NOTICES.md) ship in the AAR.

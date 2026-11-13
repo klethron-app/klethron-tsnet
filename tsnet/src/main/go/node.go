@@ -49,8 +49,8 @@ type nodeStatus struct {
 	state      ipn.State
 	revocation string // A NodeStatus.Revocation name while NeedsLogin, or "".
 	loginURL   string
-	addresses  string // This node's, as addressList.
-	err        string // The latest backend error since the node last ran, as printable ASCII.
+	addresses  [2]netip.Addr // This node's IPv4 and IPv6 addresses.
+	err        string        // The latest backend error since the node last ran, as printable ASCII.
 	statusRead
 }
 
@@ -181,7 +181,7 @@ func (n *node) publish(notify ipn.Notify, read *statusRead) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	status := n.status
-	status.addresses = addressList(n.server.TailscaleIPs())
+	status.addresses[0], status.addresses[1] = n.server.TailscaleIPs()
 	if read != nil {
 		status.statusRead = *read
 	}
@@ -496,7 +496,7 @@ var javaStates = map[ipn.State]string{
 // the separators.
 func (s nodeStatus) record(version uint64) string {
 	return strconv.FormatUint(version, 10) + "\n" + cmp.Or(javaStates[s.state], "NO_STATE") + "\n" +
-		s.revocation + "\n" + s.loginURL + "\n" + s.addresses + "\n" + s.err + "\n" +
+		s.revocation + "\n" + s.loginURL + "\n" + addressList(s.addresses[:]...) + "\n" + s.err + "\n" +
 		s.dnsName + "\n" + s.tailnet + "\n" + s.loginName + s.peers
 }
 
