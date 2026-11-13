@@ -52,11 +52,8 @@ repositories and depend on the version in [gradle.properties](gradle.properties)
 
 1. Complete the build, device tests and licence inventory. Commit `version=X.Y.Z` in
    `gradle.properties` and push tag `vX.Y.Z` on that commit.
-2. CI builds the publication and waits for approval in the protected `maven-central` environment.
-   Download the run's `maven-release` artifact (`gh run download <run> -n maven-release`) and compare it
-   with a local build of the tag using the pinned toolchains. POMs and native libraries must be
-   byte-identical, and archives must contain identical files. Compressed bytes can differ between
-   JDK distributions; use the pinned JDK patch version for reproducibility.
+2. CI builds and tests the tagged commit, then waits for approval in the protected `maven-central`
+   environment.
 3. Approve the release job. It signs and publishes the prebuilt files to Maven Central, which is
    irreversible, then creates the GitHub release. Commit the next `-SNAPSHOT` version afterwards.
 
