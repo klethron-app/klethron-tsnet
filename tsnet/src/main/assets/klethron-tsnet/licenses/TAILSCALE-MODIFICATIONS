@@ -93,9 +93,9 @@ UserDial's host-network fallback is never used.
 
 In ipn/ipnlocal/node_backend.go, store extraDNS as map[string][]netip.Addr,
 append each record's address, and return the slice from ExtraDNSByName. In
-ipn/ipnlocal/resolve.go, share addrForNetwork between peer and Service name
-lookups to preserve both families and select the requested one. Remove the
-unused addrFamilyMatch helper. This follows
+ipn/ipnlocal/resolve.go, iterate Service addresses using the existing
+addrFamilyMatch helper to select the requested family. Leave the ordinary
+peer lookup unchanged, without an intermediate address slice. This follows
 https://github.com/tailscale/tailscale/pull/22292; the prior map let the last
 record overwrite the other family of a Service VIP.
 
@@ -151,7 +151,12 @@ without leaving credentials whose pinned trust was lost if a deletion fails or c
 @@
  			DNSName:       dialedHost,
 +			Roots: SystemRoots,
+@@
+ 			DNSName:       certDNSName,
++			Roots: SystemRoots,
 
 Append an exported SystemRoots *x509.CertPool, initialized with AndroidCAStore's
-enabled system certificates before TLS use. Verification no longer discovers
-roots through Go's filesystem loader. Baked-in roots remain omitted by build tag.
+enabled system certificates before TLS use. Both Config and SetConfigExpectedCert
+use it; the latter verifies DERP relays with different TLS server and certificate
+names. Verification no longer discovers roots through Go's filesystem loader.
+Baked-in roots remain omitted by build tag.

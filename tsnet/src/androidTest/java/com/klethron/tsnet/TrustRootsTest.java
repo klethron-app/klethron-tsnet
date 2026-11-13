@@ -14,6 +14,11 @@ import org.junit.Test;
 
 public final class TrustRootsTest {
     @Test(timeout = 30000)
+    public void tlsAndDerpCertificateNamesUseTheSuppliedRoots() {
+        assertEquals("ok", Probe.call("tlsRoots"));
+    }
+
+    @Test(timeout = 30000)
     public void dnsOverHttpsUsesTheSuppliedRoots() {
         assertEquals("ok", Probe.call("dnsRoots"));
     }

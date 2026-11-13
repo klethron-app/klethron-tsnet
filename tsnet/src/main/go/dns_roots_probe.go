@@ -6,7 +6,9 @@ import (
 	"bytes"
 	"context"
 	"crypto/x509"
+	"errors"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
@@ -25,7 +27,7 @@ import (
 	"tailscale.com/util/eventbus"
 )
 
-// Exercise the upstream DoH transport, including TLS verification, without public DNS or disk roots.
+// Exercise DoH TLS verification and tailnet/system dial dispatch without public DNS or disk roots.
 func probeDNSRoots(string) string {
 	question := dnsmessage.Question{Name: dnsmessage.MustNewName("roots.test."),
 		Type: dnsmessage.TypeA, Class: dnsmessage.ClassINET}
@@ -58,39 +60,71 @@ func probeDNSRoots(string) string {
 	defer func() { tlsdial.SystemRoots = previous }()
 	bus := eventbus.New()
 	defer bus.Close()
-	dialer := tsdial.NewDialer(netmon.NewStatic())
-	dialer.SetBus(bus)
-	defer dialer.Close()
-	for _, trusted := range []bool{false, true} {
-		roots := x509.NewCertPool()
-		if trusted {
-			roots.AddCert(server.Certificate())
-		}
-		tlsdial.SystemRoots = roots
-		dns := resolver.New(logger.Discard, nil, dialer, health.NewTracker(bus), nil)
-		if err := dns.SetConfig(resolver.Config{Routes: map[dnsname.FQDN][]*dnstype.Resolver{
-			".": {{Addr: server.URL + "/dns-query"}},
-		}}); err != nil {
-			dns.Close()
-			return "resolver configuration failed"
-		}
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		response, err := dns.Query(ctx, query, "udp", netip.MustParseAddrPort("100.64.0.1:1234"))
-		cancel()
-		dns.Close()
-		if err != nil || response == nil {
-			return "DoH query failed"
-		}
-		var message dnsmessage.Message
-		if err := message.Unpack(response.Bs); err != nil {
-			return "invalid DoH response"
-		}
-		if trusted {
-			if !bytes.Equal(response.Bs, answer) || requests.Load() != 1 {
-				return "DoH ignored the supplied root"
+	for _, useNetstack := range []bool{false, true} {
+		for _, trusted := range []bool{false, true} {
+			roots := x509.NewCertPool()
+			if trusted {
+				roots.AddCert(server.Certificate())
 			}
-		} else if message.RCode != dnsmessage.RCodeServerFailure || requests.Load() != 0 {
-			return "DoH accepted an untrusted certificate"
+			tlsdial.SystemRoots = roots
+			upstream := &dnstype.Resolver{Addr: server.URL + "/dns-query"}
+			target := netip.MustParseAddrPort(server.Listener.Addr().String())
+			if useNetstack {
+				// Bootstrap to a synthetic tailnet IP while keeping the TLS name unchanged.
+				target = netip.AddrPortFrom(netip.MustParseAddr("100.64.0.53"), target.Port())
+				upstream.BootstrapResolution = []netip.Addr{target.Addr()}
+			}
+			var systemDials, netstackDials atomic.Int32
+			dial := func(ctx context.Context, network, address string) (net.Conn, error) {
+				if address != target.String() {
+					return nil, errors.New("unexpected DoH dial destination")
+				}
+				return (&net.Dialer{}).DialContext(ctx, network, server.Listener.Addr().String())
+			}
+			dialer := tsdial.NewDialer(netmon.NewStatic())
+			dialer.SetBus(bus)
+			defer dialer.Close()
+			dialer.UseNetstackForIP = func(ip netip.Addr) bool { return useNetstack && ip == target.Addr() }
+			dialer.NetstackDialTCP = func(ctx context.Context, address netip.AddrPort) (net.Conn, error) {
+				netstackDials.Add(1)
+				return dial(ctx, "tcp", address.String())
+			}
+			dialer.SetSystemDialer(func(ctx context.Context, network, address string) (net.Conn, error) {
+				systemDials.Add(1)
+				return dial(ctx, network, address)
+			})
+			dns := resolver.New(logger.Discard, nil, dialer, health.NewTracker(bus), nil)
+			if err := dns.SetConfig(resolver.Config{Routes: map[dnsname.FQDN][]*dnstype.Resolver{
+				".": {upstream},
+			}}); err != nil {
+				dns.Close()
+				return "resolver configuration failed"
+			}
+			before := requests.Load()
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			response, err := dns.Query(ctx, query, "udp", netip.MustParseAddrPort("100.64.0.1:1234"))
+			cancel()
+			dns.Close()
+			if err != nil || response == nil {
+				return "DoH query failed"
+			}
+			if useNetstack && (netstackDials.Load() == 0 || systemDials.Load() != 0) {
+				return "DoH bypassed netstack for a tailnet resolver"
+			}
+			if !useNetstack && (systemDials.Load() == 0 || netstackDials.Load() != 0) {
+				return "DoH ignored the system dialer for a host resolver"
+			}
+			var message dnsmessage.Message
+			if err := message.Unpack(response.Bs); err != nil {
+				return "invalid DoH response"
+			}
+			if trusted {
+				if !bytes.Equal(response.Bs, answer) || requests.Load() != before+1 {
+					return "DoH ignored the supplied root"
+				}
+			} else if message.RCode != dnsmessage.RCodeServerFailure || requests.Load() != before {
+				return "DoH accepted an untrusted certificate"
+			}
 		}
 	}
 	return "ok"

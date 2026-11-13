@@ -150,24 +150,10 @@ abstract class BuildGoLibrary @Inject constructor(
                 "// ExtraDNSByName returns all IPs for a DNS.ExtraRecords entry (e.g. service VIPs).",
             "func (nb *nodeBackend) ExtraDNSByName(hostname string) (_ netip.Addr, ok bool)" to
                 "func (nb *nodeBackend) ExtraDNSByName(hostname string) (_ []netip.Addr, ok bool)")
-        val resolveSource = upstream.resolve("ipn/ipnlocal/resolve.go").readText()
-        val familyMatch = "// addrFamilyMatch reports" + resolveSource.substringAfter("// addrFamilyMatch reports")
-            .substringBefore("// PeerForIP returns")
         patch("ipn/ipnlocal/resolve.go", "1a072fd225a45c548606bbad0f7188a1b124eb95f63de77be3e2e4a77e276814",
             "\tif ip, ok := nb.ExtraDNSByName(hostname); ok && addrFamilyMatch(ip, network) {\n\t\treturn ip, true" to
-                "\tif ips, ok := nb.ExtraDNSByName(hostname); ok {\n\t\treturn addrForNetwork(ips, network)",
-            "\twant4 := strings.HasSuffix(network, \"4\")" to """
-                    ips := make([]netip.Addr, 0, addrs.Len())
-                    for _, pfx := range addrs.All() { ips = append(ips, pfx.Addr()) }
-                    return addrForNetwork(ips, network)
-                }
-
-                // addrForNetwork applies the same family preference to peers and Service records.
-                func addrForNetwork(addrs []netip.Addr, network string) (_ netip.Addr, ok bool) {
-                    want4 := strings.HasSuffix(network, "4")
-            """.trimIndent(),
-            "\tfor _, pfx := range addrs.All() {\n\t\tip := pfx.Addr()" to "\tfor _, ip := range addrs {",
-            familyMatch to "")
+                "\tif ips, ok := nb.ExtraDNSByName(hostname); ok {\n\t\tfor _, ip := range ips {\n" +
+                    "\t\t\tif addrFamilyMatch(ip, network) { return ip, true }\n\t\t}")
         workspace.resolve("tailscale/ipn/ipnlocal/resolve.go").appendText("""
 
             // ResolveMagicDNSAll returns every address from the map, including short peer names
@@ -282,7 +268,8 @@ abstract class BuildGoLibrary @Inject constructor(
 
         """.trimIndent())
         patch("net/tlsdial/tlsdial.go", "49adc77dc68cf066fa695037cc41164509949dfa8a97e96a9c4fd334cd3b7e1e",
-            "\t\t\tDNSName:       dialedHost," to "\t\t\tDNSName:       dialedHost,\n\t\t\tRoots: SystemRoots,")
+            "\t\t\tDNSName:       dialedHost," to "\t\t\tDNSName:       dialedHost,\n\t\t\tRoots: SystemRoots,",
+            "\t\t\tDNSName:       certDNSName," to "\t\t\tDNSName:       certDNSName,\n\t\t\tRoots: SystemRoots,")
         workspace.resolve("tailscale/net/tlsdial/tlsdial.go").appendText(
             "\n// SystemRoots is supplied by Android before TLS is used.\nvar SystemRoots *x509.CertPool\n")
         workspace.resolve("go.mod").appendText("\nreplace tailscale.com => ./tailscale\n")

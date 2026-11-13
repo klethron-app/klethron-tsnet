@@ -34,7 +34,7 @@ It also already checks UDP DNS reply sources and transaction IDs, covering
   [TailSocks fix](https://github.com/bropines/tailsocks/blob/d7f1e574fe293adc2e81b8aa24085c53e9afa56c/appctr/patches/14-dns-forwarder-netstack.patch),
   patch `forwarder.getDialerType` to dial matching IP literals directly with `NetstackDialTCP`.
   Other destinations retain upstream's dialer selection. `DnsTest` exercises a tailnet resolver's
-  UDP answers and TCP retries after truncation or silence.
+  UDP answers and TCP retries after truncation or silence; `TrustRootsTest` checks DoH dialer selection.
 - **Mixed-case split-DNS routes do not match queries.** Route keys preserve case while queries are
   lowercased. Patch `dnsname.FQDN.Contains` to compare case-insensitively, retaining label boundaries
   ([PR #22380](https://github.com/tailscale/tailscale/pull/22380)). `DnsTest` covers an uppercase route,
@@ -52,7 +52,8 @@ It also already checks UDP DNS reply sources and transaction IDs, covering
 - **Service DNS records overwrite other addresses for the same name.** Preserve both IPv4 and IPv6
   Service VIPs in `nodeBackend.extraDNS` and select the requested family, following
   [PR #22292](https://github.com/tailscale/tailscale/pull/22292). This lets the multi-address dialer
-  try either family instead of inheriting whichever record arrived last.
+  try either family instead of inheriting whichever record arrived last. The single-address path
+  reuses upstream's family matcher without changing or allocating in ordinary peer lookups.
 - **Status reads serialize the whole peer list through HTTP and JSON.** A `Server.Status` accessor
   reads the backend directly. It also refreshes the self user's profile from the live incremental
   cache: upstream status reads otherwise use the profile frozen at the last full map. Called only
@@ -70,8 +71,10 @@ It also already checks UDP DNS reply sources and transaction IDs, covering
   required chain history; this is not a hard byte cap. Profile deletion and logout remove it entirely.
   Invalid saved history and callback errors stop the node. No authority directory is used.
 - **TLS discovers roots through filesystem reads.** Android supplies enabled system certificates via
-  `AndroidCAStore`; patch `tlsdial` and the DNS-over-HTTPS transport to use that explicit pool.
-  `TrustRootsTest` checks DoH rejection and acceptance with supplied pools. `bakedroots` is omitted.
+  `AndroidCAStore`; patch both `tlsdial` verification paths and the DNS-over-HTTPS transport to use
+  that explicit pool. This includes DERP relays whose `CertName` differs from their TLS server name.
+  `TrustRootsTest` checks acceptance, untrusted-root and wrong-name rejection, and DoH trust and routing.
+  `bakedroots` is omitted.
   This also fixes Go missing Android 14's updatable Conscrypt store and user-disabled roots
   ([golang/go#71258](https://github.com/golang/go/issues/71258)).
 

@@ -35,6 +35,18 @@ func probeDialCandidates(argument string) string {
 	if err != nil || len(addresses) != 2 || addresses[0].Is4() == addresses[1].Is4() {
 		return "missing an address family"
 	}
+	// The internal single-address path must also choose the requested family from the map.
+	for _, network := range []string{"tcp4", "tcp6"} {
+		conn, err := n.server.Sys().Dialer.Get().UserDial(ctx, network, net.JoinHostPort(host, "7070"))
+		if err != nil {
+			return "family-specific map dial failed"
+		}
+		remote, err := netip.ParseAddrPort(conn.RemoteAddr().String())
+		_ = conn.Close()
+		if err != nil || remote.Addr().Unmap().Is4() != (network == "tcp4") {
+			return "map dial used the wrong address family"
+		}
+	}
 	return "ok"
 }
 

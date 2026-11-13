@@ -59,6 +59,7 @@ var probes = map[string]func(string) string{
 	"tailnetLock":           probeTailnetLock,
 	"tailnetLockRestart":    func(string) string { lockExpectSaved.Store(true); return "ok" },
 	"tailnetStore":          probeTailnetStore,
+	"tlsRoots":              probeTLSRoots,
 	"watchDisconnect":       probeWatchDisconnect,
 	"dialDeadline": func(handle string) string {
 		id, _ := strconv.ParseInt(handle, 10, 64)
