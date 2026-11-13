@@ -26,10 +26,7 @@ import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 
-/**
- * Starts nodes through the public API against a loopback test control server that requires
- * interactive login. The test completes login in place of the user's browser.
- */
+/// Public-API login tests using loopback control in place of the browser.
 public final class LoginTest {
     static final Context CONTEXT = InstrumentationRegistry.getInstrumentation().getTargetContext();
     static final Duration WAIT = Duration.ofSeconds(30);

@@ -4,9 +4,9 @@
 
 # Klethron tsnet
 
-Connect an Android app to a [Tailscale](https://tailscale.com/) network over TCP. Each embedded
-[tsnet](https://github.com/tailscale/tailscale/tree/main/tsnet) node runs in your process with its own
-identity, without the Tailscale app or a device-wide VPN.
+Connect an Android app to a [Tailscale](https://tailscale.com/) network over TCP. An embedded
+[tsnet](https://github.com/tailscale/tailscale/tree/main/tsnet) node has its own identity and needs
+neither the Tailscale app nor a device-wide VPN.
 
 Requires **Android 14 (API 34)** or later. The AAR includes native libraries for **arm64-v8a** and
 **x86_64**, with 16 KiB page support. Consumers need no Go compiler or NDK.
@@ -29,8 +29,7 @@ android {
 }
 ```
 
-The manifest adds `INTERNET`, `ACCESS_NETWORK_STATE` and `CHANGE_NETWORK_STATE` (for Wi-Fi/cellular
-switches). All are granted without a prompt.
+The manifest adds `INTERNET`, `ACCESS_NETWORK_STATE` and `CHANGE_NETWORK_STATE`, all granted without a prompt.
 
 ## Connect
 
@@ -61,12 +60,11 @@ try (TailnetNode node = TailnetNode.start(context, directory, "my-device")) {
 a login URL can claim the node. Wait for the URL to clear before closing so the login is saved.
 Starting with the same directory resumes that identity.
 
-`NodeStatus` reports the device name, tailnet and user. Its `peers()` list includes MagicDNS names,
-OS, online state, addresses and [Tailscale SSH](https://tailscale.com/kb/1193/tailscale-ssh) host keys
-for device selection and SSH verification without trust-on-first-use.
+`NodeStatus` reports the device name, tailnet and user. Its `peers()` list includes names, OS, online
+state, addresses and [Tailscale SSH](https://tailscale.com/kb/1193/tailscale-ssh) host keys.
 
-`dial` returns a caller-owned socket to a tailnet IP or MagicDNS name. For NIO selectors, pass one end
-of a loopback TCP pair to its socket overload. Only peers and subnet routes are reachable; names
+`dial` returns a caller-owned socket to a tailnet IP or MagicDNS name. For NIO selectors, `relay`
+takes ownership of one end of a loopback TCP pair. Only peers and subnet routes are reachable; names
 resolve only through the tailnet. `close` ends connections and keeps the identity. `logout`, key
 expiry and device removal end access and connections; `login` requests authorization again.
 The app controls node lifetime and services.

@@ -51,9 +51,9 @@ public final class TailnetNodeTest {
             DialTest.assertDialThrows(IllegalArgumentException.class, node, "100.64.0.1", 65536, Duration.ZERO);
             DialTest.assertDialThrows(NullPointerException.class, node, "100.64.0.1", 22, null);
             try (DatagramSocket datagram = new DatagramSocket(); SocketChannel unconnected = SocketChannel.open()) {
-                for (ParcelFileDescriptor socket : List.of(ParcelFileDescriptor.fromDatagramSocket(datagram),
+                for (ParcelFileDescriptor socket : List.of(ParcelFileDescriptor.adoptFd(-1), ParcelFileDescriptor.fromDatagramSocket(datagram),
                         ParcelFileDescriptor.fromSocket(unconnected.socket()))) {
-                    assertThrows(IllegalArgumentException.class, () -> node.dial("100.64.0.1", 22, socket, Duration.ZERO));
+                    assertThrows(IllegalArgumentException.class, () -> node.relay("100.64.0.1", 22, socket, Duration.ZERO));
                 }
             }
             // The node never runs.

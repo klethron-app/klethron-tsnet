@@ -153,7 +153,7 @@ public final class LiveActivity extends Activity {
                     held = current.dial(host, port, TIMEOUT);
                     heldTarget = target;
                 }
-                echo(held, sent);
+                echo(held, sent, TIMEOUT);
             } catch (Exception failure) {
                 closeHeld();
                 throw failure;
@@ -164,12 +164,12 @@ public final class LiveActivity extends Activity {
         });
     }
 
-    /// Sends `sent` and requires it back within TIMEOUT.
+    /// Sends `sent` and requires it back within `timeout`.
     @WorkerThread
-    static void echo(ParcelFileDescriptor connection, byte[] sent) throws Exception {
+    static void echo(ParcelFileDescriptor connection, byte[] sent, Duration timeout) throws Exception {
         FileDescriptor fd = connection.getFileDescriptor();
         byte[] received = new byte[sent.length];
-        long deadline = SystemClock.elapsedRealtime() + TIMEOUT.toMillis();
+        long deadline = SystemClock.elapsedRealtime() + timeout.toMillis();
         for (boolean writing : new boolean[] {true, false}) {
             byte[] data = writing ? sent : received;
             for (int offset = 0; offset < data.length;) {

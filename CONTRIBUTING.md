@@ -4,10 +4,10 @@ See [AGENTS.md](AGENTS.md) for conventions and [UPSTREAM.md](UPSTREAM.md) for pa
 
 ## Build and test
 
-Use the JDK, Go and Android SDK/NDK versions pinned in
-[libs.versions.toml](gradle/libs.versions.toml) and [go.mod](tsnet/src/main/go/go.mod). Any JDK 25 or
-newer also builds; releases need the pinned one. Set `ANDROID_HOME` or `sdk.dir` in `local.properties`.
-Native builds support Linux x86_64 and macOS; only Linux has been verified.
+Use the toolchains pinned in [libs.versions.toml](gradle/libs.versions.toml) and
+[go.mod](tsnet/src/main/go/go.mod). JDK 25+ also works; releases need the pinned version.
+Set `ANDROID_HOME` or `sdk.dir` in `local.properties`. Native builds support Linux x86_64 and macOS;
+only Linux has been verified.
 
 ```sh
 ./gradlew build
@@ -15,16 +15,15 @@ ANDROID_SERIAL=<serial> ./gradlew :tsnet:connectedDebugAndroidTest
 ANDROID_SERIAL=<serial> ./gradlew :demo:connectedReleaseAndroidTest
 ```
 
-CI runs both device suites on x86_64 emulators with API 34/4 KiB pages and API 37.2/16 KiB pages for
-main, pull requests and release tags. Its `reports` artifact includes per-device results.
+CI tests main, pull requests and release tags on x86_64 emulators with API 34/4 KiB and API 37.2/16 KiB
+pages. Results are in its `reports` artifact.
 
-Device tests require SELinux Enforcing and internet access. The network-change test requires Wi-Fi
-with a cellular fallback and toggles Wi-Fi; use USB ADB on hardware. Debug builds include local
-control-server and peer fixtures; release builds exclude them. The demo tests exercise an R8-minified
-consumer.
+Device tests require SELinux Enforcing and internet access. The network-change test toggles Wi-Fi and
+needs cellular fallback; use USB ADB on hardware. Debug builds include local control-server and peer
+fixtures. Demo tests exercise an R8-minified release consumer.
 
-The AAR is `tsnet/build/outputs/aar/tsnet-release.aar`; native sizes are in
-`tsnet/build/reports/native/sizes.tsv`, and `verifyNativeAar` checks their 16 KiB alignment.
+The AAR is `tsnet/build/outputs/aar/tsnet-release.aar`. `verifyNativeAar` checks 16 KiB alignment and
+writes sizes to `tsnet/build/reports/native/sizes.tsv`.
 
 For a live check, install and open the demo (`:demo:installRelease`). Authorize the node in your
 tailnet and wait for **RUNNING / Login saved**. Echo against a peer you control, such as one running
@@ -42,9 +41,8 @@ Add this to the app's `settings.gradle.kts`:
 providers.gradleProperty("tsnet.checkout").orNull?.let { includeBuild(it) }
 ```
 
-Build with `-Ptsnet.checkout=../klethron-tsnet`. Gradle substitutes the checkout for `com.klethron:tsnet`
-and selects the matching variant. Both projects need the same Android Gradle plugin version, plus the
-native toolchains above.
+Build with `-Ptsnet.checkout=../klethron-tsnet` to substitute the matching variant for `com.klethron:tsnet`.
+Both projects need the same Android Gradle plugin version, plus the native toolchains above.
 
 To test the release AAR instead, run `./gradlew :tsnet:publishReleasePublicationToLocalBuildRepository`.
 Add `maven("../klethron-tsnet/build/maven") { content { includeGroup("com.klethron") } }` to the app's
@@ -62,10 +60,10 @@ repositories and depend on the version in [gradle.properties](gradle.properties)
 3. Approve the release job. It signs and publishes the prebuilt files to Maven Central, which is
    irreversible, then creates the GitHub release. Commit the next `-SNAPSHOT` version afterwards.
 
-The environment requires a reviewer, `v*` tags only, and secrets `SIGNING_KEY` (the signing subkey from
+The environment requires a reviewer, `v*` tags only, and secrets `SIGNING_KEY` (from
 `gpg --export-secret-subkeys`), `SIGNING_PASSPHRASE`, `CENTRAL_USERNAME` and `CENTRAL_PASSWORD` (a Central
-Portal token). The build job receives no secrets. [central-bundle.sh](.github/central-bundle.sh) verifies
-all signatures against [release-signing-key.asc](release-signing-key.asc).
+Portal token). The build job receives no secrets. [central-bundle.sh](.github/central-bundle.sh)
+verifies signatures against [release-signing-key.asc](release-signing-key.asc).
 
 The release key fingerprint is `361C CF78 F83A DAED D8DC 6DA8 A32D AC0A CDC6 D35B`; the signing subkey is
 `2F78 F885 F811 292A 6199 2A11 8C31 C50B B472 B529` (expires 2028-11-08). Keep the primary key offline.

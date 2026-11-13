@@ -13,25 +13,19 @@ android {
     publishing { singleVariant("release") { withSourcesJar() } }
 }
 
-// Upstream features this client never uses.
 val omittedFeatures = listOf(
-    // Out of scope: embedded SSH server, web UI, Taildrive, app connectors, self-update.
+    // Servers, UI, file sharing and self-update.
     "ssh", "webclient", "drive", "appconnectors", "clientupdate",
-    // The node only connects out: no PeerAPI server, Serve/Funnel, advertised routes or exit node, nor exit node use.
     "peerapiserver", "serve", "advertiseroutes", "advertiseexitnode", "useexitnode", "exitnodehealth",
-    // No peer relay server, port listing or admin-driven remote configuration.
     "relayserver", "portlist", "remoteconfig",
-    // No log upload/buffering, debug hooks (including SSLKEYLOGFILE), packet capture, flow logs,
-    // rejection diagnostics, metrics or on-disk netmap and DNS caches.
+    // Logging, diagnostics (including SSLKEYLOGFILE), metrics and disk caches.
     "logtail", "debug", "capture", "netlog", "connreject", "usermetrics", "clientmetrics", "cachenetmap",
     "dnsresolvecache",
-    // Ignore host-process environment and policy: proxy variables, OAuth secrets, MDM settings.
+    // Host-process proxy variables, OAuth secrets and MDM settings.
     "useproxy", "oauthkey", "syspolicy",
-    // Not applicable: Linux GRO, TPMs, cloud metadata, captive-portal probes, Unix-socket LocalAPI users.
     "gro", "tpm", "cloud", "captiveportal", "unixsocketidentity",
-    // No TLS certificates for this node's own listeners.
     "acme",
-    // TLS trusts only Android's system CA store, not Tailscale's baked-in Let's Encrypt roots.
+    // Use Android's system CA store.
     "bakedroots",
 ).map { "ts_omit_$it" }
 

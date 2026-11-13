@@ -43,10 +43,7 @@ import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 
-/**
- * Dials an in-memory peer through the public API. A loopback test control server admits nodes
- * without login and serves MagicDNS; no real tailnet is involved.
- */
+/// Dials a local peer through the public API; loopback control admits nodes and serves MagicDNS.
 public final class DialTest {
     private static final Duration WAIT = LoginTest.WAIT;
     private static final String PEER_NAME = "klethron-peer.tail-scale.ts.net";
@@ -272,7 +269,7 @@ public final class DialTest {
             listener.bind(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 1);
             SocketChannel connection = SocketChannel.open(listener.getLocalAddress());
             try (SocketChannel accepted = listener.accept()) {
-                node.dial(host, port, ParcelFileDescriptor.fromSocket(accepted.socket()), timeout);
+                node.relay(host, port, ParcelFileDescriptor.fromSocket(accepted.socket()), timeout);
                 return connection;
             } catch (IOException | RuntimeException e) {
                 connection.close();
@@ -287,7 +284,7 @@ public final class DialTest {
         try {
             ParcelFileDescriptor[] pair = ParcelFileDescriptor.createSocketPair();
             try (ParcelFileDescriptor connection = pair[0]) {
-                T thrown = assertThrows(expected, () -> node.dial(host, port, pair[1], timeout));
+                T thrown = assertThrows(expected, () -> node.relay(host, port, pair[1], timeout));
                 assertEquals(-1, new FileInputStream(connection.getFileDescriptor()).read());
                 return thrown;
             }

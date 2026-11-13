@@ -28,12 +28,12 @@ import java.util.Objects;
 import java.util.Set;
 import org.jspecify.annotations.Nullable;
 
-/// A device in a [tailnet](https://tailscale.com/kb/1136/tailnet), with caller-owned keys and outbound
-/// TCP connections. [Start][#start], [#awaitStatus] until [NodeStatus.State#RUNNING] without a
+/// An embedded [tailnet](https://tailscale.com/kb/1136/tailnet) device with caller-owned keys and
+/// outbound TCP. [Start][#start], [#awaitStatus] until [NodeStatus.State#RUNNING] without a
 /// [NodeStatus#loginUrl()], then [#dial]. Follows the best non-VPN network, even with another VPN active.
-/// Methods are thread-safe; `@WorkerThread` methods block. Closing ends connections and cancels
-/// blocked calls with [ClosedChannelException]. Zero or negative timeouts return immediately from
-/// [#awaitStatus] and fail [#dial] and [#logout]. First use loads the native library.
+/// Methods are thread-safe; `@WorkerThread` methods block. [#close] cancels blocked calls with
+/// [ClosedChannelException]. Non-positive timeouts return immediately from [#awaitStatus] and fail
+/// [#dial], [#relay] and [#logout]. First use loads the native library.
 public final class TailnetNode implements AutoCloseable {
     static {
         System.loadLibrary("klethron_tsnet");
@@ -87,13 +87,12 @@ public final class TailnetNode implements AutoCloseable {
         this.directory = directory;
     }
 
-    /// Starts a node with its saved login or browser authorization. Returns after local initialization;
+    /// Starts with the saved login or browser authorization. Returns after local initialization;
     /// [#awaitStatus] reports progress and the login URL. `context` supplies [ConnectivityManager].
     ///
-    /// The directory stores this node's private keys. Give each node its own directory under
-    /// [Context#getNoBackupFilesDir()]; it is created if missing, with symlinks resolved before startup.
-    /// Starting again with it after [#close] restores the same identity. Never back up or share its
-    /// contents, and never use it from two processes at once.
+    /// Give each node its own directory under [Context#getNoBackupFilesDir()]. It stores private keys:
+    /// never back it up, share it or use it from two processes at once. Symlinks are resolved before
+    /// startup; a missing directory is created. Reusing it after [#close] restores the identity.
     ///
     /// @param hostname the requested device name; Tailscale may adjust it
     /// @throws IllegalArgumentException if the directory is relative or the hostname is empty or contains NUL
@@ -163,15 +162,14 @@ public final class TailnetNode implements AutoCloseable {
     }
 
     /// Opens a tailnet TCP connection as a caller-owned blocking Unix stream socket for file streams
-    /// or [android.system.Os]. See [#dial(String, int, ParcelFileDescriptor, Duration)] for routing,
-    /// timeouts, shutdown, NIO selectors and distinguishing resets from end of stream.
+    /// or [android.system.Os]. See [#relay] for routing, timeouts, shutdown and NIO selectors.
     ///
     /// @throws IOException if the connection cannot be opened
     @WorkerThread
     public ParcelFileDescriptor dial(String host, int port, Duration timeout) throws IOException {
         ParcelFileDescriptor[] pair = ParcelFileDescriptor.createSocketPair();
         try {
-            dial(host, port, pair[1], timeout);
+            relay(host, port, pair[1], timeout);
             return pair[0];
         } catch (IOException | RuntimeException | Error failure) {
             try {
@@ -183,9 +181,10 @@ public final class TailnetNode implements AutoCloseable {
         }
     }
 
-    /// Relays TCP between `socket` and a tailnet IP or [MagicDNS](https://tailscale.com/kb/1081/magicdns)
-    /// name. `timeout` covers waiting for [NodeStatus.State#RUNNING] and connecting. Only network-map
-    /// peers and subnet routes are reachable; names resolve through the map or tailnet DNS settings.
+    /// Dials a tailnet IP or [MagicDNS](https://tailscale.com/kb/1081/magicdns) name and starts relaying
+    /// TCP to `socket`. Returns once connected; `timeout` covers waiting for [NodeStatus.State#RUNNING]
+    /// and connecting. Only peers and subnet routes are reachable; names resolve through the network
+    /// map or tailnet DNS settings.
     ///
     /// The node takes ownership of this connected TCP or Unix stream socket, even if dialing fails.
     /// The caller uses the other end: a loopback TCP pair for [java.nio.channels.SocketChannel]
@@ -205,7 +204,7 @@ public final class TailnetNode implements AutoCloseable {
     /// @throws SocketTimeoutException if the timeout elapses first
     /// @throws ConnectException if the connection fails or tailnet access ends while connecting
     @WorkerThread
-    public void dial(String host, int port, ParcelFileDescriptor socket, Duration timeout) throws IOException {
+    public void relay(String host, int port, ParcelFileDescriptor socket, Duration timeout) throws IOException {
         try (socket) { // Closes it unless passed on.
             long timeoutNanos = NANOSECONDS.convert(timeout);
             byte[] name = host.getBytes(StandardCharsets.UTF_8);
@@ -216,7 +215,7 @@ public final class TailnetNode implements AutoCloseable {
         }
     }
 
-    /// Ends tailnet access and connections and deletes the saved login. The node stays open in
+    /// Ends access and connections and deletes the saved login. The node stays open in
     /// [NodeStatus.State#NEEDS_LOGIN] and can [#login] again. Does nothing if already logged out.
     ///
     /// If logout fails, the node stops connecting but keeps its saved login: retry the logout.
@@ -231,9 +230,9 @@ public final class TailnetNode implements AutoCloseable {
         check(nativeLogout(handle, NANOSECONDS.convert(timeout)));
     }
 
-    /// Requests browser authorization after logout or key expiry, or to renew a login. Returns
-    /// before authorization; [#awaitStatus] supplies the [NodeStatus#loginUrl()]. Logged-in nodes keep
-    /// working during authorization. [#start] requests the initial login automatically.
+    /// Requests browser authorization after logout or expiry, or to renew a login. Returns before
+    /// authorization; [#awaitStatus] supplies the [NodeStatus#loginUrl()]. Logged-in nodes keep working.
+    /// [#start] requests the initial login automatically.
     ///
     /// @throws ClosedChannelException if the node is or becomes closed
     /// @throws IOException if the login cannot be started
@@ -246,9 +245,8 @@ public final class TailnetNode implements AutoCloseable {
     @AnyThread
     public static native String tailscaleVersion();
 
-    /// Disconnects this node and closes its connections, keeping its saved identity for the next
-    /// [#start]. Waits for shutdown; pending calls throw [ClosedChannelException]. Repeated or
-    /// concurrent calls are safe.
+    /// Closes connections and waits for shutdown, keeping the identity for the next [#start].
+    /// Pending calls throw [ClosedChannelException]. Repeated or concurrent calls are safe.
     @WorkerThread
     @Override
     public synchronized void close() {

@@ -90,5 +90,3 @@ For an intentional native dependency change:
    review its notices and nested directories, and copy notice bytes unedited. Update the inventory.
 3. Repeat the [per-file review](#per-file-review) and update `FILE-NOTICES`.
 4. Recheck Go notices when updating Go, and the CRT notices when updating the NDK.
-
-This is an engineering review of what the binaries contain, not legal advice.

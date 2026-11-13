@@ -400,6 +400,9 @@ func (n *node) dial(host string, port uint16, fd int, timeout time.Duration) (re
 // streamSocket consumes fd, returning a connected TCP/Unix stream or nil after closing it.
 func streamSocket(fd int) net.Conn {
 	file := os.NewFile(uintptr(fd), "socket")
+	if file == nil {
+		return nil
+	}
 	conn, err := net.FileConn(file) // A duplicate descriptor.
 	_ = file.Close()
 	if err != nil {
@@ -454,7 +457,7 @@ func (n *node) login() int {
 	return 0
 }
 
-// relay copies between conn and the app's socket until either side or ctx ends; TailnetNode.dial
+// relay copies between conn and the app's socket until either side or ctx ends; TailnetNode.relay
 // documents the stream semantics. Failures and the end of ctx reset a TCP socket; a Unix socket reads
 // end of stream, or a reset if data it wrote is unread.
 func relay(ctx context.Context, conn, app net.Conn) {

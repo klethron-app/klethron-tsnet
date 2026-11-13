@@ -17,6 +17,7 @@ import android.system.OsConstants;
 import android.widget.TextView;
 import androidx.test.platform.app.InstrumentationRegistry;
 import java.net.SocketTimeoutException;
+import java.time.Duration;
 import java.util.concurrent.Executors;
 import org.junit.Test;
 
@@ -29,12 +30,12 @@ public final class MinifiedDemoTest {
             byte[] sent = {1, 2, 3, 4, 5, 6};
             var trickle = worker.submit(() -> {
                 for (byte value : sent) {
-                    Thread.sleep(2000);
+                    Thread.sleep(300);
                     Os.write(peer.getFileDescriptor(), new byte[] {value}, 0, 1);
                 }
                 return null;
             });
-            Exception failure = assertThrows(Exception.class, () -> LiveActivity.echo(client, sent));
+            Exception failure = assertThrows(Exception.class, () -> LiveActivity.echo(client, sent, Duration.ofSeconds(1)));
             assertTrue(failure instanceof SocketTimeoutException
                     || (failure instanceof ErrnoException errno && errno.errno == OsConstants.EAGAIN));
             assertFalse("Peer stopped before the deadline", trickle.isDone());
@@ -75,7 +76,7 @@ public final class MinifiedDemoTest {
                         assertTrue("Live demo did not rotate", SystemClock.uptimeMillis() < deadline);
                     }
                     instrumentation.waitForIdleSync();
-                    assertTrue("Rotation recreated the live demo", !activity.isDestroyed());
+                    assertFalse("Rotation recreated the live demo", activity.isDestroyed());
                 }
             } finally {
                 instrumentation.runOnMainSync(activity::finish);
