@@ -27,9 +27,7 @@ import java.nio.channels.ServerSocketChannel;
 import java.nio.channels.SocketChannel;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
-import java.util.HashSet;
 import java.util.Objects;
-import java.util.Set;
 import org.jspecify.annotations.Nullable;
 
 /// An embedded [tailnet](https://tailscale.com/kb/1136/tailnet) device with caller-owned keys and
@@ -59,48 +57,43 @@ public final class TailnetNode implements AutoCloseable {
                     .filter(route -> route.isDefaultRoute() && route.hasGateway() && route.getGateway() instanceof Inet4Address)
                     .map(route -> route.getGateway().getHostAddress()).findFirst().orElse("");
             String name = Objects.toString(properties.getInterfaceName(), "");
-            report((name + '\0' + gateway).getBytes(StandardCharsets.UTF_8));
+            report(this, (name + '\0' + gateway).getBytes(StandardCharsets.UTF_8));
         }
 
         @Override
         public void onLost(Network network) {
-            report(new byte[0]);
+            report(this, new byte[0]);
         }
+    }
 
-        private void report(byte[] value) {
-            synchronized (directories) {
-                // Unregistering cannot cancel a callback already dispatched on the main thread.
-                if (network == this) nativeSetDefaultNetwork(value);
-            }
-        }
+    private static synchronized void report(NetworkMonitor monitor, byte[] value) {
+        // Unregistering cannot cancel a callback already dispatched on the main thread.
+        if (network == monitor) nativeSetDefaultNetwork(value);
     }
     /// Following a VPN would hide changes to the underlying network.
     static final NetworkRequest PHYSICAL_NETWORK = new NetworkRequest.Builder()
             .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
             .addCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN).build();
-    /// Canonical state directories of running nodes. Also guards the active network registration.
-    private static final Set<String> directories = new HashSet<>();
+    private static int users; // Guarded with network by TailnetNode.class.
     private static @Nullable NetworkMonitor network;
 
     private final long handle;
-    private final String directory;
     private volatile boolean closed;
 
-    private TailnetNode(long handle, String directory) {
+    private TailnetNode(long handle) {
         this.handle = handle;
-        this.directory = directory;
     }
 
     /// Starts with the saved login or browser authorization. Returns after local initialization;
     /// [#awaitStatus] reports progress and the login URL. `context` supplies [ConnectivityManager].
     ///
     /// Give each node its own directory under [Context#getNoBackupFilesDir()]. It stores private keys:
-    /// never back it up, share it or use it from two processes at once. Symlinks are resolved before
-    /// startup; a missing directory is created. Reusing it after [#close] restores the identity.
+    /// never back it up or share it. The directory is locked until [#close] or process death;
+    /// do not move or delete it while open. Reusing it after [#close] restores the identity.
     ///
     /// @param hostname the requested device name; Tailscale may adjust it
     /// @throws IllegalArgumentException if the directory is relative or the hostname is empty or contains NUL
-    /// @throws IllegalStateException if an unclosed node in this process uses the directory
+    /// @throws IllegalStateException if another node uses the directory, including in another process
     /// @throws IOException if initialization fails
     @WorkerThread
     public static TailnetNode start(Context context, File stateDirectory, String hostname) throws IOException {
@@ -112,37 +105,31 @@ public final class TailnetNode implements AutoCloseable {
         if (!stateDirectory.isAbsolute() || hostname.isEmpty() || hostname.indexOf(0) >= 0) {
             throw new IllegalArgumentException("State directory must be absolute and hostname non-empty without NUL");
         }
-        String directory = stateDirectory.getCanonicalPath();
-        String config = directory + '\0' + hostname + '\0' + controlUrl;
-        synchronized (directories) {
-            if (directories.isEmpty()) {
+        String config = stateDirectory.getCanonicalPath() + '\0' + hostname + '\0' + controlUrl;
+        synchronized (TailnetNode.class) {
+            if (users == 0) {
                 network = new NetworkMonitor(context);
             }
-            if (!directories.add(directory)) {
-                throw new IllegalStateException("Another node in this process uses " + stateDirectory);
-            }
+            users++;
         }
         long handle = -1;
         try {
             handle = nativeStart(config.getBytes(StandardCharsets.UTF_8));
         } finally {
-            if (handle < 0) release(directory);
+            if (handle < 0) release();
         }
         check(handle);
-        return new TailnetNode(handle, directory);
+        return new TailnetNode(handle);
     }
 
-    private static void release(String directory) {
-        synchronized (directories) {
-            directories.remove(directory);
-            if (directories.isEmpty() && network != null) {
-                NetworkMonitor previous = network;
-                network = null;
-                try {
-                    previous.connectivity.unregisterNetworkCallback(previous);
-                } finally {
-                    nativeSetDefaultNetwork(new byte[0]); // Unknown until the next start reports it.
-                }
+    private static synchronized void release() {
+        if (--users == 0 && network != null) {
+            NetworkMonitor previous = network;
+            network = null;
+            try {
+                previous.connectivity.unregisterNetworkCallback(previous);
+            } finally {
+                nativeSetDefaultNetwork(new byte[0]); // Unknown until the next start reports it.
             }
         }
     }
@@ -279,7 +266,7 @@ public final class TailnetNode implements AutoCloseable {
         if (closed) return;
         closed = true;
         nativeClose(handle);
-        release(directory);
+        release();
     }
 
     /// Maps node.go's negative results to exceptions.
@@ -296,6 +283,7 @@ public final class TailnetNode implements AutoCloseable {
             case -8 -> throw new IOException("Login failed");
             case -9 -> throw new IOException("TS_AUTHKEY or TS_AUTH_KEY is set in the process environment");
             case -10 -> throw new IOException("Node failed to start");
+            case -11 -> throw new IllegalStateException("Another node uses the state directory");
             default -> throw new IOException("Native failure " + result);
         }
     }

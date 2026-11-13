@@ -48,8 +48,12 @@ func addNode(n *node) C.longlong {
 //
 //export klethron_node_start
 func klethron_node_start(config *C.char, length C.int) C.longlong {
+	return startNode(C.GoStringN(config, length))
+}
+
+func startNode(config string) C.longlong {
 	n := newNode(newServer())
-	if result := n.start(C.GoStringN(config, length)); result != 0 {
+	if result := n.start(config); result != 0 {
 		n.close()
 		return C.longlong(result)
 	}

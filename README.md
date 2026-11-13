@@ -36,6 +36,7 @@ The manifest adds `INTERNET`, `ACCESS_NETWORK_STATE` and `CHANGE_NETWORK_STATE`,
 
 Run `TailnetNode` operations on a worker thread. Give each node a directory under
 `Context.getNoBackupFilesDir()`; it holds private keys and must never be logged, backed up or shared.
+The directory is locked until the node closes or its process dies; do not move or delete it while open.
 
 ```java
 File directory = new File(context.getNoBackupFilesDir(), "tailscale");

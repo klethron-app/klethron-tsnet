@@ -64,15 +64,13 @@ public final class LoginTest {
             assertNull(status.loginUrl());
             addresses = status.addresses();
             assertTrue(addresses.get(0).getHostAddress().startsWith("100."));
-            // Without MagicDNS, testcontrol names the device as requested. A rename is a status
-            // change, also without peers.
+            // testcontrol uses the hostname when MagicDNS is disabled.
             assertEquals(HOSTNAME, status.dnsName());
             Probe.call("rename", "klethron-renamed");
             await(node, s -> "klethron-renamed".equals(s.dnsName()));
         }
         assertOnlyStateFile();
 
-        // The persisted identity resumes without another login.
         try (TailnetNode node = start()) {
             awaitResumed(node, addresses);
         }
@@ -91,16 +89,13 @@ public final class LoginTest {
 
             assertThrows(SocketTimeoutException.class, () -> node.logout(Duration.ZERO));
             node.logout(WAIT);
-            // The names clear after the state changes.
             status = await(node, s -> s.state() == NodeStatus.State.NEEDS_LOGIN && s.dnsName() == null);
             assertNull(status.loginUrl());
             assertNull("A logout is not a revocation", status.revocation());
             assertTrue(status.addresses().isEmpty());
             node.logout(WAIT); // Already logged out.
-            NodeStatus unchanged = node.awaitStatus(status, Duration.ofMillis(500));
-            assertSame(status, unchanged);
+            assertSame(status, node.awaitStatus(status, Duration.ofMillis(500)));
 
-            // The same node can log in again, with a new login URL.
             node.login();
             status = await(node, s -> s.loginUrl() != null);
             assertEquals(NodeStatus.State.NEEDS_LOGIN, status.state());
@@ -108,7 +103,6 @@ public final class LoginTest {
             // Logout reset the prefs, including control URL and hostname; login restores both.
             complete(status);
             assertFalse(await(node, s -> s.state() == NodeStatus.State.RUNNING).addresses().isEmpty());
-            // The re-login's registration uses tsnet's hostname again.
             assertEquals(HOSTNAME, Probe.call("hostnames"));
             // Logout discards a pending re-authentication URL with the key it would authorize.
             node.login();
@@ -120,7 +114,6 @@ public final class LoginTest {
         }
         assertOnlyStateFile();
 
-        // The logout persists: the directory no longer resumes, and a new login is offered.
         try (TailnetNode node = start()) {
             NodeStatus status = await(node, s -> {
                 assertTrue("Logged-out node resumed", s.state() != NodeStatus.State.RUNNING);
@@ -167,9 +160,7 @@ public final class LoginTest {
         }
         assertOnlyStateFile();
 
-        // The login persisted: a new node resumes it. Once control accepts, the same node that
-        // failed to log out retries successfully. Unpatched upstream (#22248) forgets the in-memory
-        // node key at the first failure, so the retry fails.
+        // Unpatched upstream (#22248) forgets the key on failure, preventing a retry.
         Probe.call("rejectRegistrations", false);
         try (TailnetNode node = start()) {
             awaitResumed(node, addresses);
@@ -196,7 +187,6 @@ public final class LoginTest {
             assertEquals(NodeStatus.Revocation.KEY_EXPIRED, status.revocation());
             assertTrue(status.toString().contains("KEY_EXPIRED"));
             assertEquals(HOSTNAME, status.dnsName());
-            // No login URL arrives by itself, and the tailnet is unreachable.
             assertNull(node.awaitStatus(status, Duration.ofSeconds(2)).loginUrl());
             DialTest.assertDialThrows(SocketTimeoutException.class, node, addresses.get(0).getHostAddress(), 7070, Duration.ofMillis(500));
 
@@ -228,7 +218,6 @@ public final class LoginTest {
         }
         assertOnlyStateFile();
 
-        // The new key persisted.
         try (TailnetNode node = start()) {
             awaitResumed(node, addresses);
         }
@@ -270,7 +259,6 @@ public final class LoginTest {
             assertNull(status.revocation());
             assertFalse(status.toString().contains("authkey"));
 
-            // Upstream retries; the error remains while the user logs in.
             Probe.call("rejectRegistrations", false);
             status = await(node, s -> s.loginUrl() != null);
             assertEquals("invalid authkey", status.error());
@@ -329,7 +317,6 @@ public final class LoginTest {
         return TailnetNode.start(CONTEXT, directory.toFile(), HOSTNAME, controlUrl);
     }
 
-    /// Waits until a node started from saved state runs with `addresses`, without asking to log in again.
     private static void awaitResumed(TailnetNode node, List<InetAddress> addresses) throws IOException {
         assertEquals(addresses, await(node, s -> {
             assertNull("Node asked to log in again", s.loginUrl());

@@ -79,7 +79,6 @@ public final class DialTest {
                     // Android's channel-backed streams share a lock: use them sequentially.
                     connection.socket().getOutputStream().write(new byte[] {1, 2, 3});
                     assertArrayEquals(new byte[] {1, 2, 3}, input.readNBytes(3));
-                    // Direct channel reads and writes can proceed concurrently.
                     CompletableFuture<Void> writer = CompletableFuture.runAsync(() -> {
                         try {
                             ByteBuffer data = ByteBuffer.wrap(sent);
@@ -131,7 +130,6 @@ public final class DialTest {
             // The peers and names clear after the state changes.
             status = LoginTest.await(node, s -> s.state() == NodeStatus.State.NEEDS_LOGIN && s.peers().isEmpty());
             assertEquals(Arrays.asList(null, null, null), Arrays.asList(status.dnsName(), status.tailnetName(), status.loginName()));
-            // Logging out reset the connection, and new dials wait for a login.
             assertReset(connection);
             assertDialThrows(SocketTimeoutException.class, node, peer, 7070, Duration.ofMillis(500));
         }
@@ -169,11 +167,9 @@ public final class DialTest {
     @Test(timeout = 60000)
     public void deliversPeerEndOfStreamAndClosesWithSocket() throws Exception {
         try (TailnetNode node = startNode(); SocketChannel connection = node.connect(peer, 7071, WAIT)) {
-            // The peer greets and closes its side; this side remains writable.
             assertEquals("klethron\n", new String(Channels.newInputStream(connection).readAllBytes(), StandardCharsets.US_ASCII));
             connection.write(ByteBuffer.wrap("after".getBytes(StandardCharsets.US_ASCII)));
             connection.close();
-            // Closing the socket ends the peer's connection after delivering what was written.
             assertEquals("5", Probe.call("awaitReceived"));
         }
     }
@@ -185,7 +181,6 @@ public final class DialTest {
             connection.configureBlocking(false).register(selector, SelectionKey.OP_READ);
             ByteBuffer one = ByteBuffer.allocate(1);
             assertEquals(0, connection.read(one));
-            // Interactive round trips of one byte each.
             for (int i = 0; i < 200; i++) {
                 assertEquals(1, connection.write(ByteBuffer.wrap(new byte[] {(byte) i})));
                 assertTrue("Not readable within 10 s", ready(selector, 10000));
@@ -220,7 +215,6 @@ public final class DialTest {
             connection.configureBlocking(false).register(selector, SelectionKey.OP_WRITE);
             byte[] chunk = new byte[64 << 10];
             long written = 0;
-            // Until the socket stays unwritable for a second.
             while (written < FLOOD && ready(selector, 1000)) {
                 written += connection.write(ByteBuffer.wrap(pattern(written, chunk), 0, (int) Math.min(chunk.length, FLOOD - written)));
             }
@@ -265,7 +259,6 @@ public final class DialTest {
             // The device resolves this name, but the tailnet's DNS does not; upstream would ask the device.
             assertDialThrows(UnknownHostException.class, node, "localhost", controlPort, WAIT);
             assertDialThrows(UnknownHostException.class, node, "no-such-peer.tail-scale.ts.net", 22, WAIT);
-            // A peer's short name still resolves from the network map.
             node.connect("klethron-peer", 7070, WAIT).close();
             assertDialThrows(ConnectException.class, node, peer, 7072, WAIT);
         }

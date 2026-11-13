@@ -6,6 +6,7 @@ import static org.junit.Assert.assertTrue;
 
 import java.net.SocketTimeoutException;
 import java.nio.channels.ClosedChannelException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
@@ -15,13 +16,9 @@ import org.junit.Test;
 
 public final class TailnetNodeTest {
     @Test
-    public void reportsLinkedTailscaleVersion() {
+    public void nodesKeepTheirStatusAndDirectory() throws Exception {
         String version = TailnetNode.tailscaleVersion();
         assertTrue(version, version.startsWith("v1.") && version.endsWith("-59064619a0f4"));
-    }
-
-    @Test
-    public void nodesKeepTheirStatusAndDirectory() throws Exception {
         Path directory = LoginTest.temporaryDirectory("status-");
         String control = "http://127.0.0.1:1"; // Unreachable: the nodes stay local.
         try (TailnetNode first = TailnetNode.start(LoginTest.CONTEXT, directory.resolve("first").toFile(), "first", control);
@@ -30,6 +27,8 @@ public final class TailnetNodeTest {
             assertThrows(IllegalArgumentException.class, () -> second.awaitStatus(status, Duration.ZERO));
             assertThrows(IllegalStateException.class, () ->
                     TailnetNode.start(LoginTest.CONTEXT, directory.resolve("second/../first").toFile(), "third", control));
+            Path alias = Files.createSymbolicLink(directory.resolve("alias"), directory.resolve("first"));
+            assertThrows(IllegalStateException.class, () -> TailnetNode.start(LoginTest.CONTEXT, alias.toFile(), "alias", control));
         } finally {
             LoginTest.deleteDirectory(directory);
         }

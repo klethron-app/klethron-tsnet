@@ -37,8 +37,8 @@ with Go 1.27.4. All entries rechecked 2026-11-13; none fixed upstream. Remove en
   [PR #19150](https://github.com/tailscale/tailscale/pull/19150)). `controlclient.Auto` saves `Persist`
   only with a network map, so closing right after `LoginFinished` can lose the login. `node.publish`
   clears the login URL only once the self node's key changes.
-- **The state directory is not locked.** `TailnetNode.start` canonicalizes it and rejects sharing
-  within the process. Separate processes can still overwrite each other's state.
+- **The state directory is not locked.** `node.start` holds an exclusive directory `flock` until
+  shutdown or process death, rejecting concurrent use across processes without an extra state file.
 - **`tsnet.Server.Dial` can leave the tailnet.** For addresses not in the network map, `tsdial.UserDial`
   falls back to the routing table, then a plain `net.Dialer`. `node.dial` resolves with `UserDialPlan`,
   requires `UseNetstackForIP` and connects with `NetstackDialTCP`.

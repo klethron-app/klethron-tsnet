@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/sys/unix"
 	"tailscale.com/client/local"
 	"tailscale.com/ipn"
 	"tailscale.com/ipn/ipnstate"
@@ -25,8 +26,9 @@ import (
 )
 
 type node struct {
-	server *tsnet.Server
-	client *local.Client
+	server   *tsnet.Server
+	client   *local.Client
+	stateDir *os.File // Locked until shutdown; process death also releases it.
 
 	lifecycle sync.RWMutex   // Held for reading by calls, and for writing by close.
 	watchers  sync.WaitGroup // Status goroutines, which use the server until ctx ends.
@@ -74,7 +76,19 @@ func (n *node) start(config string) int {
 		return resultAuthEnvironment
 	}
 	n.server.Dir, n.server.Hostname, n.server.ControlURL = directory, hostname, cmp.Or(controlURL, ipn.DefaultControlURL)
+	if err := os.MkdirAll(directory, 0700); err != nil {
+		return resultStartFailed
+	}
 	var err error
+	if n.stateDir, err = os.Open(directory); err != nil {
+		return resultStartFailed
+	}
+	if err := unix.Flock(int(n.stateDir.Fd()), unix.LOCK_EX|unix.LOCK_NB); err != nil {
+		if err == unix.EWOULDBLOCK {
+			return resultDirectoryInUse
+		}
+		return resultStartFailed
+	}
 	if n.client, err = n.server.LocalClient(); err != nil { // Starts the server.
 		return resultStartFailed
 	}
@@ -90,6 +104,7 @@ func (n *node) close() {
 	defer n.lifecycle.Unlock()
 	n.watchers.Wait()
 	_ = n.server.Close()
+	_ = n.stateDir.Close()
 }
 
 // watchStatus resumes with current state after disconnects. Refresh names and peers separately:
@@ -315,6 +330,7 @@ const (
 	resultLoginFailed
 	resultAuthEnvironment
 	resultStartFailed
+	resultDirectoryInUse
 )
 
 // whenOpen bounds a call by timeout and node lifetime. Close waits until the returned function runs.

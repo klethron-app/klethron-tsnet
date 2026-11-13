@@ -4,7 +4,10 @@ package main
 
 import "C"
 
-import "strings"
+import (
+	"strconv"
+	"strings"
+)
 
 // Debug-only test bridges, which instrumentation tests call by name through Probe.call with one
 // UTF-8 argument. They return fixed ASCII diagnostics, counts, addresses, URLs of loopback test
@@ -38,6 +41,9 @@ var probes = map[string]func(string) string{
 	"stopControl":           stopControl,
 	"tailnet":               func(dir string) string { return probeTailnet(dir, false) },
 	"tailnetDerp":           func(dir string) string { return probeTailnet(dir, true) },
+	"holdDirectory": func(dir string) string {
+		return strconv.FormatInt(int64(startNode(dir+"\x00crash\x00http://127.0.0.1:1")), 10)
+	},
 }
 
 // klethron_probe calls the probe named before the first NUL in call with the rest as argument.
