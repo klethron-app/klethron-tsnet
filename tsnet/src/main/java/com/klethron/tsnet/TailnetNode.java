@@ -40,7 +40,8 @@ import org.jspecify.annotations.Nullable;
 /// [NodeStatus#loginUrl()], then [#connect]. Follows the best non-VPN network, even with another VPN active.
 /// Methods are thread-safe; `@WorkerThread` methods block. [#close] cancels blocked calls with
 /// [ClosedChannelException]. Non-positive timeouts return immediately from [#awaitStatus] and fail
-/// [#connect] and [#logout]. First use loads the native library.
+/// [#connect] and [#logout]. Operations from a [StateStore] callback throw [IllegalStateException].
+/// First use loads the native library.
 public final class TailnetNode implements AutoCloseable {
     static {
         System.loadLibrary("klethron_tsnet");
@@ -119,6 +120,7 @@ public final class TailnetNode implements AutoCloseable {
     }
 
     static TailnetNode start(Context context, StateStore store, String hostname, String controlUrl) throws IOException {
+        Store.checkNotInCallback();
         Objects.requireNonNull(store);
         if (hostname.isEmpty() || hostname.indexOf(0) >= 0) {
             throw new IllegalArgumentException("Hostname must be non-empty without NUL");
@@ -140,16 +142,33 @@ public final class TailnetNode implements AutoCloseable {
 
     // Byte arrays preserve standard UTF-8 keys across JNI; only these callback names are kept by R8.
     private static final class Store {
+        private static final ThreadLocal<Boolean> inCallback = new ThreadLocal<>();
         final StateStore delegate;
 
         Store(StateStore delegate) { this.delegate = delegate; }
 
+        static void checkNotInCallback() {
+            if (Boolean.TRUE.equals(inCallback.get())) {
+                throw new IllegalStateException("Node operations are not allowed in state callbacks");
+            }
+        }
+
         private byte @Nullable [] read(byte[] key) throws IOException {
-            return delegate.read(new String(key, StandardCharsets.UTF_8));
+            inCallback.set(true);
+            try {
+                return delegate.read(new String(key, StandardCharsets.UTF_8));
+            } finally {
+                inCallback.remove();
+            }
         }
 
         private void write(byte[] key, byte @Nullable [] value) throws IOException {
-            delegate.write(new String(key, StandardCharsets.UTF_8), value);
+            inCallback.set(true);
+            try {
+                delegate.write(new String(key, StandardCharsets.UTF_8), value);
+            } finally {
+                inCallback.remove();
+            }
         }
     }
 
@@ -175,6 +194,7 @@ public final class TailnetNode implements AutoCloseable {
     /// @throws ClosedChannelException if the node is or becomes closed
     @WorkerThread
     public NodeStatus awaitStatus(@Nullable NodeStatus previous, Duration timeout) throws IOException {
+        Store.checkNotInCallback();
         if (previous != null && previous.owner != handle) {
             throw new IllegalArgumentException("Status belongs to another node");
         }
@@ -202,6 +222,7 @@ public final class TailnetNode implements AutoCloseable {
     /// Failures reset the connection, as does closing the node or losing tailnet access (leaving
     /// [NodeStatus.State#RUNNING] except for [NodeStatus.State#STARTING]). A gap in status notifications
     /// also ends existing connections because it can hide revocation or a change of login.
+    /// A new login that changes the node key ends connections opened under the previous key.
     ///
     /// @param host a tailnet IP address or MagicDNS name, at most 255 UTF-8 bytes
     /// @throws IllegalArgumentException if the host is invalid or the port is not 1–65535
@@ -213,6 +234,7 @@ public final class TailnetNode implements AutoCloseable {
     /// @throws IOException if the connection cannot be opened
     @WorkerThread
     public SocketChannel connect(String host, int port, Duration timeout) throws IOException {
+        Store.checkNotInCallback();
         long timeoutNanos = NANOSECONDS.convert(timeout);
         byte[] name = host.getBytes(StandardCharsets.UTF_8);
         if (name.length == 0 || name.length > 255 || host.indexOf(0) >= 0 || port < 1 || port > 65535) {
@@ -266,23 +288,28 @@ public final class TailnetNode implements AutoCloseable {
     /// If logout fails, the node stops connecting but keeps its saved login: retry the logout.
     /// Clearing the store instead leaves the device registered in the tailnet. After a successful
     /// logout, [#close] and clear the store to also forget the remaining device key.
+    /// The timeout covers queued authentication and network requests. Storage callbacks must finish
+    /// before this method returns, even after the timeout.
     ///
     /// @throws ClosedChannelException if the node is or becomes closed
     /// @throws SocketTimeoutException if Tailscale does not confirm within `timeout`
     /// @throws IOException if the logout fails
     @WorkerThread
     public void logout(Duration timeout) throws IOException {
+        Store.checkNotInCallback();
         check(nativeLogout(handle, NANOSECONDS.convert(timeout)));
     }
 
     /// Requests browser authorization after logout or expiry, or to renew a login. Returns before
     /// authorization; [#awaitStatus] supplies the [NodeStatus#loginUrl()]. Logged-in nodes keep working.
     /// [#start] requests the initial login automatically.
+    /// Login and logout are serialized; this call waits for an earlier logout to finish.
     ///
     /// @throws ClosedChannelException if the node is or becomes closed
     /// @throws IOException if the login cannot be started
     @WorkerThread
     public void login() throws IOException {
+        Store.checkNotInCallback();
         check(nativeLogin(handle));
     }
 
@@ -296,12 +323,15 @@ public final class TailnetNode implements AutoCloseable {
     /// Pending calls throw [ClosedChannelException]. Repeated or concurrent calls are safe.
     @WorkerThread
     @Override
-    public synchronized void close() {
-        // Serialized, so no call returns before the store is free.
-        if (closed) return;
-        closed = true;
-        nativeClose(handle);
-        release(store);
+    public void close() {
+        // Check before taking the lock: another close may already be waiting for this callback.
+        Store.checkNotInCallback();
+        synchronized (this) {
+            if (closed) return;
+            closed = true;
+            nativeClose(handle);
+            release(store);
+        }
     }
 
     /// Maps node.go's negative results to exceptions.

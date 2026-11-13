@@ -49,6 +49,12 @@ Append a direct status accessor to avoid LocalAPI's HTTP/JSON round trip:
 // Status reads directly from the backend; call only between Start and Close.
 func (s *Server) Status() *ipnstate.Status { return s.lb.Status() }
 
+Append a direct logout accessor so cancellation waits for backend completion;
+an HTTP client can return while its handler is still changing authentication state:
+
+// Logout waits for backend completion even when ctx is cancelled.
+func (s *Server) Logout(ctx context.Context) error { return s.lb.Logout(ctx, ipnauth.Self) }
+
 In tsnet/tsnet.go startup, use the caller's Hostname directly, remove executable
 and state-directory discovery/creation, keep rootPath empty, require Store,
 and remove the fallback FileStore setup and unused runtime/ipn/store imports.

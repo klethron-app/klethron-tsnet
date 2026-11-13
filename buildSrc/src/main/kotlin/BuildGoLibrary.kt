@@ -125,7 +125,9 @@ abstract class BuildGoLibrary @Inject constructor(
             "\t\"runtime\"\n" to "")
         workspace.resolve("tailscale/tsnet/tsnet.go").appendText(
             "\n// Status reads directly from the backend; call only between Start and Close.\n" +
-            "func (s *Server) Status() *ipnstate.Status { return s.lb.Status() }\n")
+            "func (s *Server) Status() *ipnstate.Status { return s.lb.Status() }\n" +
+            "\n// Logout waits for backend completion even when ctx is cancelled.\n" +
+            "func (s *Server) Logout(ctx context.Context) error { return s.lb.Logout(ctx, ipnauth.Self) }\n")
         val tailnetSource = upstream.resolve("ipn/ipnlocal/tailnet-lock.go").readText()
         val loadTailnet = "\troot := b.TailscaleVarRoot()" + tailnetSource.substringAfter("\troot := b.TailscaleVarRoot()")
             .substringBefore("\n\treturn nil\n}")

@@ -15,6 +15,7 @@ var probes = map[string]func(string) string{
 	"accessLifetime":        probeAccessLifetime,
 	"addPeers":              withControl(addPeers),
 	"approveMachines":       withControl(approveMachines),
+	"authentication":        probeAuthentication,
 	"awaitReceived":         awaitReceived,
 	"complete":              withControl(completeLogin),
 	"control":               probeControl,

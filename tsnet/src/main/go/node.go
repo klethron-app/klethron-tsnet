@@ -31,6 +31,7 @@ type node struct {
 
 	lifecycle sync.RWMutex   // Held for reading by calls, and for writing by close.
 	watchers  sync.WaitGroup // Status goroutines, which use the server until ctx ends.
+	auth      chan struct{}  // Serializes login/logout, including their reads and network requests.
 
 	ctx    context.Context // Cancelled when the node closes.
 	cancel context.CancelFunc
@@ -63,7 +64,8 @@ type statusRead struct {
 func newNode(server *tsnet.Server) *node {
 	ctx, cancel := context.WithCancel(context.Background())
 	access, endAccess := context.WithCancel(ctx)
-	return &node{server: server, ctx: ctx, cancel: cancel, access: access, endAccess: endAccess, changed: make(chan struct{})}
+	return &node{server: server, ctx: ctx, cancel: cancel, access: access, endAccess: endAccess,
+		changed: make(chan struct{}), auth: make(chan struct{}, 1)}
 }
 
 // start runs before publication. TailnetNode validates config: "hostname\x00controlURL".
@@ -222,6 +224,14 @@ func (n *node) publish(notify ipn.Notify, read *statusRead) {
 	// stays Running during re-authentication.
 	if self != n.selfKey {
 		status.loginURL = ""
+		// Re-authentication can switch accounts without leaving Running. Connections opened
+		// under the old key must not survive into the new identity.
+		if !n.selfKey.IsZero() {
+			n.endAccess()
+		}
+		if status.state == ipn.Running && !self.IsZero() && n.access.Err() != nil {
+			n.access, n.endAccess = context.WithCancel(n.ctx)
+		}
 	}
 	n.selfKey, n.keyExpiry = self, expiry
 	// Upstream reports logout, key expiry and removal alike as NeedsLogin.
@@ -452,19 +462,20 @@ func tcpSocket(fd int) *net.TCPConn {
 }
 
 func (n *node) logout(timeout time.Duration) int {
-	ctx, done, result := n.whenOpen(timeout)
+	ctx, done, result := n.whenAuthenticating(timeout)
 	if result != 0 {
 		return result
 	}
 	defer done()
-	if err := n.client.Logout(ctx); err != nil {
+	// HTTP cancellation can return before its handler stops mutating the backend.
+	if err := n.server.Logout(ctx); err != nil {
 		return n.failed(ctx, resultLogoutFailed)
 	}
 	return n.failed(ctx, 0)
 }
 
 func (n *node) login() int {
-	ctx, done, result := n.whenOpen(math.MaxInt64) // Neither call waits for the network.
+	ctx, done, result := n.whenAuthenticating(math.MaxInt64)
 	if result != 0 {
 		return result
 	}
@@ -484,10 +495,33 @@ func (n *node) login() int {
 			return n.failed(ctx, resultLoginFailed)
 		}
 	}
-	if err := n.client.StartLoginInteractive(ctx); err != nil {
+	if err := n.client.StartLoginInteractive(context.WithoutCancel(ctx)); err != nil {
 		return n.failed(ctx, resultLoginFailed)
 	}
 	return n.failed(ctx, 0)
+}
+
+// Authentication changes span multiple backend calls. Waiting for a prior change still obeys
+// the caller's timeout and node shutdown; an expired waiter must not start a new operation.
+func (n *node) whenAuthenticating(timeout time.Duration) (context.Context, func(), int) {
+	ctx, done, result := n.whenOpen(timeout)
+	if result != 0 {
+		return nil, nil, result
+	}
+	select {
+	case n.auth <- struct{}{}:
+		if ctx.Err() == nil {
+			return ctx, func() {
+				<-n.auth
+				done()
+			}, 0
+		}
+		<-n.auth
+	case <-ctx.Done():
+	}
+	result = n.failed(ctx, resultTimeout)
+	done()
+	return nil, nil, result
 }
 
 // relay copies between conn and the app's socket until either side or ctx ends; TailnetNode.connect

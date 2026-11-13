@@ -31,4 +31,15 @@ public final class SecurityTest {
         assertEquals("ok", Probe.call("watchDisconnect", "eof"));
         assertEquals("ok", Probe.call("watchDisconnect", "lag"));
     }
+
+    @Test(timeout = 30000)
+    public void authenticationChangesCannotInterleave() {
+        assertEquals("ok", Probe.call("authentication", "finish"));
+        assertEquals("ok", Probe.call("authentication", "cancel"));
+    }
+
+    @Test(timeout = 30000)
+    public void aNewLoginEndsAccessGrantedToThePreviousKey() {
+        assertEquals("ok", Probe.call("watchDisconnect", "key"));
+    }
 }

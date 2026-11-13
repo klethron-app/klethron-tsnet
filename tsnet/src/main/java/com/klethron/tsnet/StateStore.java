@@ -8,8 +8,9 @@ import org.jspecify.annotations.Nullable;
 /// Keep it out of backups, exports and sync. Each running node needs exclusive access to its
 /// logical store, including across processes; separate wrappers must not share the same records.
 ///
-/// Calls are synchronous and serialized, on worker threads. Do not call node methods from these
-/// callbacks. A successful write must be visible to subsequent reads. The caller chooses durability
+/// Calls are synchronous and serialized, on worker threads. Node operations on the callback thread
+/// throw [IllegalStateException]; callbacks must not wait for node operations on other threads either.
+/// A successful write must be visible to subsequent reads. The caller chooses durability
 /// and may handle persistence failures with an in-memory fallback; throwing aborts the node with
 /// [IOException].
 /// [TailnetNode#close] waits for callbacks to finish; it does not close or erase the store.

@@ -13,6 +13,8 @@ import (
 	"tailscale.com/client/local"
 	"tailscale.com/ipn"
 	"tailscale.com/ipn/store/mem"
+	"tailscale.com/tailcfg"
+	"tailscale.com/types/key"
 )
 
 func probeLoginURL(argument string) string {
@@ -32,8 +34,7 @@ func (t watchProbeTransport) RoundTrip(*http.Request) (*http.Response, error) {
 	return &http.Response{StatusCode: http.StatusOK, Body: t.body, Header: make(http.Header)}, nil
 }
 
-// Drive the real watch loop through EOF and a lag notification, without needing to flood
-// the backend. A missed logout/login must cancel the old access even if the next state is Running.
+// A watch gap or a changed node key must end the old access even if the next state is Running.
 func probeWatchDisconnect(reason string) string {
 	n := newNode(newServer())
 	n.server.Hostname, n.server.ControlURL = "watch-test", "http://127.0.0.1:1"
@@ -52,31 +53,42 @@ func probeWatchDisconnect(reason string) string {
 	unblock := context.AfterFunc(ctx, func() { _ = writer.Close() })
 	defer unblock()
 	encoder := json.NewEncoder(writer)
-	if err := encoder.Encode(ipn.Notify{State: new(ipn.Running)}); err != nil {
+	self := &tailcfg.Node{Key: key.NewNode().Public()}
+	if err := encoder.Encode(ipn.Notify{State: new(ipn.Running), SelfChange: self}); err != nil {
 		return "initial notification failed"
 	}
 	_, _, access := n.wait(ctx, func(status nodeStatus, _ uint64) bool { return status.state == ipn.Running })
 	if access.Err() != nil || ctx.Err() != nil {
 		return "initial access unavailable"
 	}
-	if reason == "lag" {
+	if reason == "key" {
+		n.publish(ipn.Notify{SelfChange: self}, nil)
+		if access.Err() != nil {
+			return "unchanged key ended access"
+		}
+		n.publish(ipn.Notify{SelfChange: &tailcfg.Node{Key: key.NewNode().Public()}}, nil)
+	} else if reason == "lag" {
 		if err := encoder.Encode(ipn.Notify{ErrMessage: new(watchFellBehind)}); err != nil {
 			return "lag notification failed"
 		}
 	}
-	_ = writer.Close()
+	if reason != "key" {
+		_ = writer.Close()
+	}
 	select {
 	case <-access.Done():
 	case <-ctx.Done():
-		return "watch gap retained access"
+		return "previous access remained live"
 	}
 	// Simulate the reconnect snapshot before callers using the old context have returned.
-	n.publish(ipn.Notify{State: new(ipn.Running)}, nil)
+	if reason != "key" {
+		n.publish(ipn.Notify{State: new(ipn.Running)}, nil)
+	}
 	n.mu.Lock()
 	renewed := n.access
 	n.mu.Unlock()
 	if renewed == access || renewed.Err() != nil || access.Err() == nil {
-		return "reconnect reused old access"
+		return "new login reused old access"
 	}
 	return "ok"
 }

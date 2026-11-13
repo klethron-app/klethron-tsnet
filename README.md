@@ -61,7 +61,8 @@ try (TailnetNode node = TailnetNode.start(context, store, "my-device")) {
 Whoever opens a login URL can claim the node. Wait for it to clear before closing so the login reaches
 the store. Restarting with those values resumes that identity.
 
-Callbacks are serialized; do not call node methods from them. A returned write must be visible to later
+Callbacks are serialized. Node operations on a callback thread throw `IllegalStateException`;
+callbacks must not wait for node operations on other threads. A returned write must be visible to later
 reads. The caller chooses durability: it can handle a disk failure, retain state in memory and return
 normally. An exception escaping a callback stops the node and makes node operations throw `IOException`.
 Close the node before closing or reusing its store. The library creates no state files or directories;
@@ -79,7 +80,8 @@ For concurrent reads and writes, use the channel directly; Android's channel-bac
 Only peers and subnet routes are reachable; names resolve only through the tailnet.
 `close` ends connections and keeps the identity. `logout`, key expiry and device removal end access
 and connections; `login` requests authorization again. A status notification gap also ends existing
-connections, since it could hide revocation or a change of login.
+connections, since it could hide revocation or a change of login. Completing a new login closes
+connections opened under the previous node key. Login and logout calls are serialized.
 The app controls node lifetime and services.
 
 ## Network
