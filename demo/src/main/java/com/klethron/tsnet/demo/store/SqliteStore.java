@@ -1,14 +1,17 @@
-package com.klethron.tsnet;
+package com.klethron.tsnet.demo.store;
 
 import android.database.sqlite.SQLiteDatabase;
+import com.klethron.tsnet.StateStore;
 import java.io.File;
+import org.jspecify.annotations.NullMarked;
 import org.jspecify.annotations.Nullable;
 
-/// A consumer-owned SQLite store, reopened between node lifetimes.
-final class SqliteStore implements StateStore, AutoCloseable {
+/// Demo-owned persistence; the library has no SQLite or filesystem dependency.
+@NullMarked
+public final class SqliteStore implements StateStore, AutoCloseable {
     private final SQLiteDatabase database;
 
-    SqliteStore(File file) {
+    public SqliteStore(File file) {
         database = SQLiteDatabase.openOrCreateDatabase(file, null);
         database.execSQL("CREATE TABLE IF NOT EXISTS state (key TEXT PRIMARY KEY, value BLOB NOT NULL) WITHOUT ROWID");
     }

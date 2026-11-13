@@ -255,6 +255,8 @@ public final class DialTest {
             assertDialThrows(UnknownHostException.class, node, "no-such-peer.tail-scale.ts.net", 22, WAIT);
             node.connect("klethron-peer", 7070, WAIT).close();
             assertDialThrows(ConnectException.class, node, peer, 7072, WAIT);
+            assertEquals("ok", Probe.call("dialDeadline", StateStoreTest.handle(node)));
+            assertDialThrows(SocketTimeoutException.class, node, peer, 7070, Duration.ofSeconds(2));
         }
     }
 

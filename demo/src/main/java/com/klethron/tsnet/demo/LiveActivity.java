@@ -15,6 +15,7 @@ import androidx.annotation.MainThread;
 import androidx.annotation.WorkerThread;
 import com.klethron.tsnet.TailnetNode;
 import com.klethron.tsnet.NodeStatus;
+import com.klethron.tsnet.demo.store.SqliteStore;
 import java.io.File;
 import java.io.IOException;
 import java.net.SocketTimeoutException;

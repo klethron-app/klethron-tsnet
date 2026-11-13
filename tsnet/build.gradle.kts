@@ -9,6 +9,7 @@ group = "com.klethron"
 
 android {
     namespace = "com.klethron.tsnet"
+    sourceSets.named("androidTest") { java.srcDir("../demo/src/main/java/com/klethron/tsnet/demo/store") }
     defaultConfig.consumerProguardFiles("consumer-rules.pro")
     publishing { singleVariant("release") { withSourcesJar() } }
 }

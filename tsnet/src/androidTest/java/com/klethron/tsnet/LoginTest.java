@@ -10,6 +10,7 @@ import static org.junit.Assert.assertTrue;
 import android.content.Context;
 import androidx.test.platform.app.InstrumentationRegistry;
 import com.google.errorprone.annotations.CanIgnoreReturnValue;
+import com.klethron.tsnet.demo.store.SqliteStore;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.SocketTimeoutException;

@@ -6,6 +6,7 @@ import android.content.Intent;
 import android.os.Binder;
 import android.os.IBinder;
 import android.os.Parcel;
+import com.klethron.tsnet.demo.store.SqliteStore;
 import java.util.Objects;
 import java.io.File;
 import java.io.IOException;

@@ -5,6 +5,7 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
+import com.klethron.tsnet.demo.store.SqliteStore;
 import java.io.IOException;
 import java.net.SocketTimeoutException;
 import java.time.Duration;
@@ -243,7 +244,7 @@ public final class StateStoreTest {
         return TailnetNode.start(LoginTest.CONTEXT, store, "store-test", control);
     }
 
-    private static long handle(TailnetNode node) throws Exception {
+    static long handle(TailnetNode node) throws Exception {
         var field = TailnetNode.class.getDeclaredField("handle");
         field.setAccessible(true);
         return field.getLong(node);

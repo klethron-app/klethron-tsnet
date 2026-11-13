@@ -40,7 +40,7 @@ Run `TailnetNode` operations on a worker thread. Supply a `StateStore` with sync
 and `write(String, byte[])` callbacks; `null` means absent on read and delete on write. It holds private
 keys: exclude it from backups, exports and sync. Give each live node exclusive access to its records,
 including across processes. See the demo
-[SQLite store](demo/src/main/java/com/klethron/tsnet/demo/SqliteStore.java) for an implementation.
+[SQLite store](demo/src/main/java/com/klethron/tsnet/demo/store/SqliteStore.java) for the tested implementation.
 
 ```java
 try (TailnetNode node = TailnetNode.start(context, store, "my-device")) {

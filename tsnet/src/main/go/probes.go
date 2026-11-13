@@ -5,6 +5,10 @@ package main
 import "C"
 
 import (
+	"context"
+	"net"
+	"net/netip"
+	"strconv"
 	"strings"
 )
 
@@ -47,6 +51,19 @@ var probes = map[string]func(string) string{
 	"tailnetLockRestart":    func(string) string { lockExpectSaved.Store(true); return "ok" },
 	"tailnetStore":          probeTailnetStore,
 	"watchDisconnect":       probeWatchDisconnect,
+	"dialDeadline": func(handle string) string {
+		id, _ := strconv.ParseInt(handle, 10, 64)
+		dialer := lookupNode(C.longlong(id)).server.Sys().Dialer.Get()
+		dial := dialer.NetstackDialTCP
+		dialer.NetstackDialTCP = func(ctx context.Context, target netip.AddrPort) (net.Conn, error) {
+			conn, err := dial(ctx, target)
+			if err == nil {
+				<-ctx.Done() // A successful connection can race its deadline.
+			}
+			return conn, err
+		}
+		return "ok"
+	},
 }
 
 // klethron_probe calls the probe named before the first NUL in call with the rest as argument.

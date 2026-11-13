@@ -435,7 +435,7 @@ func (n *node) dial(host string, port uint16, fd int, timeout time.Duration) (re
 	if err != nil {
 		return n.failed(ctx, resultDialFailed)
 	}
-	if access.Err() != nil {
+	if access.Err() != nil || ctx.Err() != nil {
 		_ = conn.Close()
 		return n.failed(ctx, resultDialFailed)
 	}
