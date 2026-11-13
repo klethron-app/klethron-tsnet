@@ -5,6 +5,7 @@ package main
 import (
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -12,25 +13,10 @@ import (
 	"tailscale.com/ipn/store/mem"
 )
 
-type authProbeTransport struct {
-	entered chan struct{}
-	release chan struct{}
-	calls   chan string
-}
+type authProbeTransport func(*http.Request) (*http.Response, error)
 
 func (t authProbeTransport) RoundTrip(request *http.Request) (*http.Response, error) {
-	t.calls <- strings.TrimPrefix(request.URL.Path, "/localapi/v0/")
-	status := http.StatusNoContent
-	if request.URL.Path == "/localapi/v0/prefs" {
-		close(t.entered)
-		select {
-		case <-t.release:
-		case <-request.Context().Done():
-			return nil, request.Context().Err()
-		}
-		status = http.StatusOK
-	}
-	return &http.Response{StatusCode: status, Body: io.NopCloser(strings.NewReader("{}")), Header: make(http.Header)}, nil
+	return t(request)
 }
 
 // Pause login after reading prefs. Logout must neither change those prefs underneath login
@@ -43,12 +29,30 @@ func probeAuthentication(mode string) string {
 	if err := n.server.Start(); err != nil {
 		return "start failed"
 	}
-	transport := authProbeTransport{make(chan struct{}), make(chan struct{}), make(chan string, 16)}
-	n.client = &local.Client{Transport: transport}
+	entered, release := make(chan struct{}), make(chan struct{})
+	var calls []string // Written by login, read after it returns.
+	n.client = &local.Client{Transport: authProbeTransport(func(request *http.Request) (*http.Response, error) {
+		path := strings.TrimPrefix(request.URL.Path, "/localapi/v0/")
+		calls = append(calls, path)
+		status := http.StatusNoContent
+		if path == "prefs" {
+			close(entered)
+			select {
+			case <-release:
+			case <-request.Context().Done():
+				return nil, request.Context().Err()
+			}
+			status = http.StatusOK
+		}
+		if mode == path {
+			n.cancel() // A successful response can race shutdown or a storage failure.
+		}
+		return &http.Response{StatusCode: status, Body: io.NopCloser(strings.NewReader("{}")), Header: make(http.Header)}, nil
+	})}
 	login := make(chan int, 1)
 	go func() { login <- n.login() }()
 	select {
-	case <-transport.entered:
+	case <-entered:
 	case <-time.After(5 * time.Second):
 		return "login did not start"
 	}
@@ -57,12 +61,14 @@ func probeAuthentication(mode string) string {
 	}
 	logout := make(chan int, 1)
 	go func() { logout <- n.logout(5 * time.Second) }()
-	expected := 0
+	expected := resultClosed
+	if mode == "finish" {
+		expected = 0
+	}
 	if mode == "cancel" {
 		n.cancel()
-		expected = resultClosed
 	} else {
-		close(transport.release)
+		close(release)
 	}
 	for _, result := range []chan int{login, logout} {
 		select {
@@ -75,21 +81,14 @@ func probeAuthentication(mode string) string {
 		}
 	}
 	want := []string{"prefs"}
-	if mode != "cancel" {
-		want = append(want, "start", "login-interactive")
+	if mode == "start" || mode == "finish" {
+		want = append(want, "start")
 	}
-	for _, path := range want {
-		select {
-		case got := <-transport.calls:
-			if got != path {
-				return "authentication calls reordered"
-			}
-		default:
-			return "authentication call missing"
-		}
+	if mode == "finish" {
+		want = append(want, "login-interactive")
 	}
-	if len(transport.calls) != 0 {
-		return "cancelled authentication reached the backend"
+	if !slices.Equal(calls, want) {
+		return "authentication calls reordered or continued after cancellation"
 	}
 	return "ok"
 }

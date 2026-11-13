@@ -87,11 +87,10 @@ with Go 1.27.4. All entries rechecked 2026-11-13; none fixed upstream. Remove en
   the control URL and hostname. `login()` restores tsnet's prefs with LocalAPI `Start` if needed,
   then calls `StartLoginInteractive`. Upstream's private `beginLoginAs`
   ([PR #21857](https://github.com/tailscale/tailscale/pull/21857)) does the same but is not in LocalAPI.
-- **Authentication operations are not atomic across LocalAPI calls.** Serialize login and logout,
-  including preference reads; queued calls honor shutdown and logout deadlines. HTTP cancellation can
-  return before its handler finishes, so logout calls the backend directly and local login mutations
-  wait for completion. Re-authentication can change the node key while still Running; that ends access
-  granted to the previous key.
+- **Authentication operations are not atomic across LocalAPI calls.** Serialize login and logout;
+  check cancellation while queued and between login steps. HTTP handlers can outlive cancellation,
+  so logout calls the backend directly and each login mutation waits for completion. A changed node
+  key ends access granted to the previous key, even while Running.
 - **The IPN bus reports logout, key expiry and removal as `NeedsLogin`.** `node.publish` distinguishes
   removal by the `node-removed` health warning, otherwise expiry by the latest key expiry time.
 - **A watch that falls behind ends with an `ErrMessage`.** `watchStatus` treats `watchFellBehind`

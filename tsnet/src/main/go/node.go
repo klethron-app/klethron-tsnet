@@ -482,17 +482,16 @@ func (n *node) login() int {
 	}
 	defer done()
 	current, err := n.client.GetPrefs(ctx)
-	if err != nil {
+	if err != nil || ctx.Err() != nil {
 		return n.failed(ctx, resultLoginFailed)
 	}
-	// Logout stops the node and, on success, resets prefs. Restore them as Server.Start does.
-	// Skip Start when renewing: it restarts control. Start ignores cancellation and must finish
-	// before Server.Close, or it leaves a control client retrying forever.
+	// Restore prefs after logout; skip Start when renewing because it restarts control.
+	// Let each mutation finish, but check cancellation before starting the next one.
 	if current.LoggedOut || !current.WantRunning || current.ControlURL != n.server.ControlURL ||
 		current.Hostname != n.server.Hostname {
 		prefs := ipn.NewPrefs()
 		prefs.Hostname, prefs.ControlURL, prefs.WantRunning = n.server.Hostname, n.server.ControlURL, true
-		if err := n.client.Start(context.WithoutCancel(ctx), ipn.Options{UpdatePrefs: prefs}); err != nil {
+		if err := n.client.Start(context.WithoutCancel(ctx), ipn.Options{UpdatePrefs: prefs}); err != nil || ctx.Err() != nil {
 			return n.failed(ctx, resultLoginFailed)
 		}
 	}

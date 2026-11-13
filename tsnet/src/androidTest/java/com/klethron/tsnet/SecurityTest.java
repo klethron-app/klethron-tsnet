@@ -27,20 +27,17 @@ public final class SecurityTest {
     }
 
     @Test(timeout = 30000)
-    public void missedStatusUpdatesEndExistingAccess() {
-        assertEquals("ok", Probe.call("watchDisconnect", "eof"));
-        assertEquals("ok", Probe.call("watchDisconnect", "lag"));
+    public void missedStatusUpdatesAndNewKeysEndExistingAccess() {
+        for (String reason : new String[] {"eof", "lag", "key"}) {
+            assertEquals(reason, "ok", Probe.call("watchDisconnect", reason));
+        }
     }
 
     @Test(timeout = 30000)
     public void authenticationChangesCannotInterleave() {
-        assertEquals("ok", Probe.call("authentication", "finish"));
-        assertEquals("ok", Probe.call("authentication", "cancel"));
-    }
-
-    @Test(timeout = 30000)
-    public void aNewLoginEndsAccessGrantedToThePreviousKey() {
-        assertEquals("ok", Probe.call("watchDisconnect", "key"));
+        for (String mode : new String[] {"finish", "cancel", "prefs", "start"}) {
+            assertEquals(mode, "ok", Probe.call("authentication", mode));
+        }
     }
 
     @Test(timeout = 30000)
