@@ -44,7 +44,7 @@ for module in ('tsnet', 'demo'):
     counts = [sum(int(s.get(k, '0')) for s in suites) for k in ('tests', 'failures', 'errors', 'skipped')]
     complete &= counts[0] > 0 and not any(counts[1:])
     lines.append(f'| {module} | ' + ' | '.join(map(str, counts)) + ' |')
-lines += ['', 'HTML reports and JUnit XML are in the `reports` artifact.', '']
+lines += ['', "HTML reports and JUnit XML are in this job's reports artifact.", '']
 summary = '\n'.join(lines)
 print(summary)
 if path := os.environ.get('GITHUB_STEP_SUMMARY'):

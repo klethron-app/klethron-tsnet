@@ -38,9 +38,22 @@ jobs:
           annotations: true
 
   build:
+    name: Build and test (API ${{ matrix.api }})
     needs: validate
     runs-on: ubuntu-26.04
     timeout-minutes: 50
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - api: '34'
+            sdk: 34
+            pages: 4096
+            target: google_apis
+          - api: '37.2'
+            sdk: 37
+            pages: 16384
+            target: google_apis_ps16k
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -92,7 +105,6 @@ jobs:
       - name: Build and verify local publication
         run: ./gradlew build :tsnet:publishReleasePublicationToLocalBuildRepository
       - name: Verify incremental build and configuration cache
-        id: incremental
         run: |
           set -o pipefail
           log=$RUNNER_TEMP/gradle-repeat.log
@@ -104,35 +116,21 @@ jobs:
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
-      - name: Test Android 14 (API 34, 4 KiB pages)
+      - name: Test API ${{ matrix.api }} (${{ matrix.pages }}-byte pages)
         uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
         env:
           CURL_HOME: ${{ github.workspace }}/.github
         with:
-          api-level: 34
-          target: google_apis
+          api-level: ${{ matrix.api }}
+          target: ${{ matrix.target }}
           arch: x86_64
           profile: pixel_6
-          avd-name: api34
+          avd-name: ci
           ram-size: 2048M
           emulator-build: 16740729 # 37.2.13
-          script: .github/android-tests.sh 34 4096
-      - name: Test Android 17 (API 37.2, 16 KiB pages)
-        if: ${{ !cancelled() && steps.incremental.outcome == 'success' }}
-        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
-        env:
-          CURL_HOME: ${{ github.workspace }}/.github
-        with:
-          api-level: '37.2'
-          target: google_apis_ps16k
-          arch: x86_64
-          profile: pixel_6
-          avd-name: api37_2_16k
-          ram-size: 2048M
-          emulator-build: 16740729 # 37.2.13
-          script: .github/android-tests.sh 37 16384
+          script: .github/android-tests.sh ${{ matrix.sdk }} ${{ matrix.pages }}
       - name: Save the release publication
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/v') && matrix.api == '34'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: maven-release
@@ -142,14 +140,14 @@ jobs:
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: reports
+          name: reports-api-${{ matrix.api }}
           if-no-files-found: ignore
           path: |
             tsnet/build/reports/
             demo/build/reports/
             build/emulator-tests/
 
-  # Signing and publishing need approval in the maven-central environment.
+  # Both matrix jobs must pass before signing and publishing can be approved.
   release:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: build

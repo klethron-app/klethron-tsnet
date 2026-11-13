@@ -14,8 +14,9 @@ approval**, there is nothing you need to configure in your fork. Further pushes 
 and cancel its older CI run.
 
 Open a failed check's **Details** to find the failing step. The run summary shows Android test counts;
-download its `reports` artifact for HTML reports and JUnit XML. CI checks whitespace, shell scripts,
-workflows and Go formatting, then builds and tests API 34/4 KiB and API 37.2/16 KiB x86_64 emulators.
+download its `reports-api-*` artifact for HTML reports and JUnit XML. CI checks whitespace, shell scripts,
+workflows and Go formatting, then builds and tests API 34/4 KiB and API 37.2/16 KiB x86_64 emulators
+on separate runners. Each job builds independently, and both must pass before a release can proceed.
 For Go changes, run `gofmt -w tsnet/src/main/go`; `git diff --check` catches whitespace errors.
 
 ## Build and test
