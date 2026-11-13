@@ -109,7 +109,7 @@ func (n *node) watchStatus(refresh chan<- struct{}) {
 		if watcher, err := n.client.WatchIPNBus(n.ctx, ipn.NotifyInitialState|ipn.NotifyInitialStatus|ipn.NotifyPeerPatches); err == nil {
 			for {
 				notify, err := watcher.Next()
-				if err != nil {
+				if err != nil || (notify.ErrMessage != nil && *notify.ErrMessage == watchFellBehind) {
 					break
 				}
 				n.publish(notify, nil)
@@ -203,11 +203,8 @@ func (n *node) publish(notify ipn.Notify, read *statusRead) {
 			n.endAccess()
 		}
 	}
-	if notify.ErrMessage != nil && *notify.ErrMessage != watchFellBehind {
+	if notify.ErrMessage != nil {
 		status.err = printable(*notify.ErrMessage, 256)
-	}
-	if notify.BrowseToURL != nil {
-		status.loginURL = n.loginURL(*notify.BrowseToURL)
 	}
 	// A watch has no initial SelfChange. Self has a key only with a network map.
 	self, expiry := n.selfKey, n.keyExpiry
@@ -234,6 +231,10 @@ func (n *node) publish(notify ipn.Notify, read *statusRead) {
 		}
 	}
 	n.selfKey, n.keyExpiry = self, expiry
+	// An initial snapshot can contain an old key and a pending renewal URL.
+	if notify.BrowseToURL != nil {
+		status.loginURL = n.loginURL(*notify.BrowseToURL)
+	}
 	// Upstream reports logout, key expiry and removal alike as NeedsLogin.
 	status.revocation = ""
 	if status.state == ipn.NeedsLogin {

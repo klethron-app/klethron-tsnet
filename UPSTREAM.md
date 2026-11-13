@@ -51,8 +51,8 @@ with Go 1.27.4. All entries rechecked 2026-11-13; none fixed upstream. Remove en
   ([#19149](https://github.com/tailscale/tailscale/issues/19149); draft fix
   [PR #19150](https://github.com/tailscale/tailscale/pull/19150)). `controlclient.Auto` saves `Persist`
   only with a network map, so closing right after `LoginFinished` can lose the login. `node.publish`
-  clears the login URL only once the self node's key changes. Storage callback exceptions cancel
-  the node, including failures upstream only logs; callers may handle persistence errors themselves.
+  clears old URLs when the node key changes, then applies any pending URL in that notification.
+  Storage callback exceptions stop the node, including failures upstream only logs.
 - **`tsnet.Server.Dial` can leave the tailnet.** For addresses not in the network map, `tsdial.UserDial`
   falls back to the routing table, then a plain `net.Dialer`. `node.dial` resolves with `UserDialPlan`,
   requires `UseNetstackForIP` and connects with `NetstackDialTCP`.
@@ -94,9 +94,9 @@ with Go 1.27.4. All entries rechecked 2026-11-13; none fixed upstream. Remove en
   granted to the previous key.
 - **The IPN bus reports logout, key expiry and removal as `NeedsLogin`.** `node.publish` distinguishes
   removal by the `node-removed` health warning, otherwise expiry by the latest key expiry time.
-- **A watch that falls behind ends with an `ErrMessage`.** `node.publish` ignores that text
-  (`watchFellBehind`, a copy of the unexported `watchIPNBusFellBehindMessage`) and `watchStatus`
-  reconnects. Any watch interruption ends previously granted access for dials and relays: missed
+- **A watch that falls behind ends with an `ErrMessage`.** `watchStatus` treats `watchFellBehind`
+  (upstream's unexported `watchIPNBusFellBehindMessage`) as terminal without waiting for EOF.
+  Any watch interruption ends previously granted access for dials and relays: missed
   events can include logout, expiry or a different login. A new Running snapshot cannot revive that access.
 
 ## Limits

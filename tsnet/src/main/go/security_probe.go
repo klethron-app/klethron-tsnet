@@ -12,6 +12,7 @@ import (
 
 	"tailscale.com/client/local"
 	"tailscale.com/ipn"
+	"tailscale.com/ipn/ipnstate"
 	"tailscale.com/ipn/store/mem"
 	"tailscale.com/tailcfg"
 	"tailscale.com/types/key"
@@ -54,8 +55,17 @@ func probeWatchDisconnect(reason string) string {
 	defer unblock()
 	encoder := json.NewEncoder(writer)
 	self := &tailcfg.Node{Key: key.NewNode().Public()}
-	if err := encoder.Encode(ipn.Notify{State: new(ipn.Running), SelfChange: self}); err != nil {
+	url := n.server.ControlURL + "/auth/test"
+	if err := encoder.Encode(ipn.Notify{State: new(ipn.NeedsLogin), BrowseToURL: &url,
+		InitialStatus: &ipnstate.Status{Self: &ipnstate.PeerStatus{PublicKey: self.Key}}}); err != nil {
 		return "initial notification failed"
+	}
+	status, _, _ := n.wait(ctx, func(s nodeStatus, _ uint64) bool { return s.state == ipn.NeedsLogin })
+	if status.loginURL != url {
+		return "initial node key hid the pending login URL"
+	}
+	if err := encoder.Encode(ipn.Notify{State: new(ipn.Running), SelfChange: self}); err != nil {
+		return "running notification failed"
 	}
 	_, _, access := n.wait(ctx, func(status nodeStatus, _ uint64) bool { return status.state == ipn.Running })
 	if access.Err() != nil || ctx.Err() != nil {
@@ -66,13 +76,17 @@ func probeWatchDisconnect(reason string) string {
 		if access.Err() != nil {
 			return "unchanged key ended access"
 		}
-		n.publish(ipn.Notify{SelfChange: &tailcfg.Node{Key: key.NewNode().Public()}}, nil)
+		// Rotate after wait takes its snapshot; it must return the old access lifetime.
+		_, _, access = n.wait(ctx, func(nodeStatus, uint64) bool {
+			n.publish(ipn.Notify{SelfChange: &tailcfg.Node{Key: key.NewNode().Public()}}, nil)
+			return true
+		})
 	} else if reason == "lag" {
 		if err := encoder.Encode(ipn.Notify{ErrMessage: new(watchFellBehind)}); err != nil {
 			return "lag notification failed"
 		}
 	}
-	if reason != "key" {
+	if reason == "eof" {
 		_ = writer.Close()
 	}
 	select {
