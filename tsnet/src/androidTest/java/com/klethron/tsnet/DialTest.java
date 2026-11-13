@@ -1,5 +1,9 @@
 package com.klethron.tsnet;
 
+import static com.klethron.tsnet.TestSupport.CONTEXT;
+import static com.klethron.tsnet.TestSupport.WAIT;
+import static com.klethron.tsnet.TestSupport.assertDialThrows;
+import static com.klethron.tsnet.TestSupport.await;
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -10,7 +14,6 @@ import android.net.InetAddresses;
 import android.os.ParcelFileDescriptor;
 import android.system.Os;
 import android.system.StructPollfd;
-import com.google.errorprone.annotations.CanIgnoreReturnValue;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.net.ConnectException;
@@ -38,7 +41,6 @@ import org.junit.Test;
 
 /// Dials a local peer through the public API; loopback control admits nodes and serves MagicDNS.
 public final class DialTest {
-    private static final Duration WAIT = LoginTest.WAIT;
     private static final String PEER_NAME = "klethron-peer.tail-scale.ts.net";
 
     private String controlUrl;
@@ -62,7 +64,7 @@ public final class DialTest {
         try (TailnetNode node = startNode()) {
             byte[] sent = new byte[1 << 20];
             new Random().nextBytes(sent);
-            NodeStatus status = LoginTest.await(node, s -> !s.peers().isEmpty());
+            NodeStatus status = await(node, s -> !s.peers().isEmpty());
             for (InetAddress address : status.peers().get(0).addresses()) {
                 try (SocketChannel connection = node.connect(address.getHostAddress(), 7070, WAIT)) {
                     assertTrue(connection.isConnected());
@@ -95,7 +97,7 @@ public final class DialTest {
     @Test(timeout = 90000)
     public void listsPeersAndTheirChanges() throws Exception {
         try (TailnetNode node = startNode(); SocketChannel connection = node.connect(PEER_NAME, 7070, WAIT)) {
-            NodeStatus status = LoginTest.await(node, s -> s.state() == NodeStatus.State.RUNNING && s.peers().size() == 1);
+            NodeStatus status = await(node, s -> s.state() == NodeStatus.State.RUNNING && s.peers().size() == 1);
             NodeStatus.Peer listed = status.peers().get(0);
             assertEquals(PEER_NAME, listed.dnsName());
             assertEquals("android", listed.operatingSystem());
@@ -114,16 +116,16 @@ public final class DialTest {
             NodeStatus.Peer other = new NodeStatus.Peer("klethron-other.tail-scale.ts.net", "linux", false, List.of(
                     InetAddresses.parseNumericAddress("100.101.0.1"), InetAddresses.parseNumericAddress("fd7a:115c:a1e0::101:1")),
                     List.of("ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl"));
-            assertEquals(List.of(other, listed), LoginTest.await(node, s -> s.peers().size() > 1).peers());
+            assertEquals(List.of(other, listed), await(node, s -> s.peers().size() > 1).peers());
             assertEquals("true", Probe.call("setPeerOnline"));
             NodeStatus.Peer online = new NodeStatus.Peer(PEER_NAME, "android", true, listed.addresses(), List.of());
-            assertEquals(List.of(other, online), LoginTest.await(node, s -> !s.peers().contains(listed)).peers());
+            assertEquals(List.of(other, online), await(node, s -> !s.peers().contains(listed)).peers());
             // The other peer has no endpoints: connecting, not waiting to run, times out.
             assertDialThrows(SocketTimeoutException.class, node, "100.101.0.1", 22, Duration.ofSeconds(1));
 
             node.logout(WAIT);
             // The peers and names clear after the state changes.
-            status = LoginTest.await(node, s -> s.state() == NodeStatus.State.NEEDS_LOGIN && s.peers().isEmpty());
+            status = await(node, s -> s.state() == NodeStatus.State.NEEDS_LOGIN && s.peers().isEmpty());
             assertEquals(Arrays.asList(null, null, null), Arrays.asList(status.dnsName(), status.tailnetName(), status.loginName()));
             assertReset(connection);
             assertDialThrows(SocketTimeoutException.class, node, peer, 7070, Duration.ofMillis(500));
@@ -142,7 +144,7 @@ public final class DialTest {
     public void logoutCancelsPendingConnections() throws Exception {
         try (TailnetNode node = startNode()) {
             Probe.call("addPeers");
-            LoginTest.await(node, status -> status.state() == NodeStatus.State.RUNNING
+            await(node, status -> status.state() == NodeStatus.State.RUNNING
                     && status.peers().stream().anyMatch(device -> device.dnsName().startsWith("klethron-other.")));
             // This peer is in the network map but never answers, so connecting would take all of WAIT.
             CountDownLatch dialing = new CountDownLatch(1);
@@ -257,14 +259,9 @@ public final class DialTest {
             assertDialThrows(UnknownHostException.class, node, "no-such-peer.tail-scale.ts.net", 22, WAIT);
             node.connect("klethron-peer", 7070, WAIT).close();
             assertDialThrows(ConnectException.class, node, peer, 7072, WAIT);
-            assertEquals("ok", Probe.call("dialDeadline", StateStoreTest.handle(node)));
+            assertEquals("ok", Probe.call("dialDeadline", Probe.handle(node)));
             assertDialThrows(SocketTimeoutException.class, node, peer, 7070, Duration.ofSeconds(2));
         }
-    }
-
-    @CanIgnoreReturnValue
-    static <T extends Throwable> T assertDialThrows(Class<T> expected, TailnetNode node, String host, int port, Duration timeout) {
-        return assertThrows(expected, () -> node.connect(host, port, timeout).close());
     }
 
     private static void assertReset(SocketChannel connection) {
@@ -273,7 +270,7 @@ public final class DialTest {
     }
 
     private TailnetNode startNode() throws IOException {
-        return TailnetNode.start(LoginTest.CONTEXT, new MemoryStore(), "klethron-dialer", controlUrl);
+        return TailnetNode.start(CONTEXT, new MemoryStore(), "klethron-dialer", controlUrl);
     }
 
     /// Waits until the peer on port 7073 has written and then made no progress for a second.

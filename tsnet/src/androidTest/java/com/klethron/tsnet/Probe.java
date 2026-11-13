@@ -21,5 +21,11 @@ final class Probe {
         return result;
     }
 
+    static long handle(TailnetNode node) throws ReflectiveOperationException {
+        var field = TailnetNode.class.getDeclaredField("handle");
+        field.setAccessible(true);
+        return field.getLong(node);
+    }
+
     private static native String nativeCall(byte[] call);
 }

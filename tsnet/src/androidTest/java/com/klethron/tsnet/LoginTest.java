@@ -1,5 +1,11 @@
 package com.klethron.tsnet;
 
+import static com.klethron.tsnet.TestSupport.CONTEXT;
+import static com.klethron.tsnet.TestSupport.WAIT;
+import static com.klethron.tsnet.TestSupport.assertDialThrows;
+import static com.klethron.tsnet.TestSupport.await;
+import static com.klethron.tsnet.TestSupport.deleteDirectory;
+import static com.klethron.tsnet.TestSupport.temporaryDirectory;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNull;
@@ -7,28 +13,20 @@ import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
-import android.content.Context;
-import androidx.test.platform.app.InstrumentationRegistry;
-import com.google.errorprone.annotations.CanIgnoreReturnValue;
 import com.klethron.tsnet.demo.store.SqliteStore;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.SocketTimeoutException;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
-import java.util.function.Predicate;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 
 /// Public-API login tests using loopback control in place of the browser.
 public final class LoginTest {
-    static final Context CONTEXT = InstrumentationRegistry.getInstrumentation().getTargetContext();
-    static final Duration WAIT = Duration.ofSeconds(30);
     private static final String HOSTNAME = "klethron-login-test";
 
     private String controlUrl;
@@ -164,7 +162,7 @@ public final class LoginTest {
             assertTrue(status.toString().contains("KEY_EXPIRED"));
             assertEquals(HOSTNAME, status.dnsName());
             assertNull(node.awaitStatus(status, Duration.ofSeconds(2)).loginUrl());
-            DialTest.assertDialThrows(SocketTimeoutException.class, node, addresses.get(0).getHostAddress(), 7070, Duration.ofMillis(500));
+            assertDialThrows(SocketTimeoutException.class, node, addresses.get(0).getHostAddress(), 7070, Duration.ofMillis(500));
 
             node.login();
             status = await(node, s -> s.loginUrl() != null);
@@ -270,17 +268,6 @@ public final class LoginTest {
         TailnetNode.start(CONTEXT, state, "host", controlUrl).close();
     }
 
-    @CanIgnoreReturnValue
-    static NodeStatus await(TailnetNode node, Predicate<NodeStatus> condition) throws IOException {
-        long deadline = System.nanoTime() + WAIT.toNanos();
-        NodeStatus status = null;
-        do {
-            status = node.awaitStatus(status, Duration.ofNanos(deadline - System.nanoTime()));
-            if (condition.test(status)) return status;
-        } while (System.nanoTime() < deadline);
-        throw new AssertionError("Timed out at " + status);
-    }
-
     private TailnetNode start() throws IOException {
         store.close();
         store = new SqliteStore(directory.resolve("state.db").toFile());
@@ -299,17 +286,5 @@ public final class LoginTest {
         String url = Objects.requireNonNull(status.loginUrl());
         assertTrue("Unexpected login URL", url.startsWith(controlUrl + "/auth/"));
         assertEquals("ok", Probe.call("complete", url));
-    }
-
-    static Path temporaryDirectory(String prefix) throws Exception {
-        return Files.createTempDirectory(CONTEXT.getNoBackupFilesDir().toPath(), prefix);
-    }
-
-    static void deleteDirectory(Path directory) throws Exception {
-        try (var paths = Files.walk(directory)) {
-            for (Path path : paths.sorted(Comparator.reverseOrder()).toList()) {
-                Files.delete(path);
-            }
-        }
     }
 }

@@ -1,5 +1,7 @@
 package com.klethron.tsnet;
 
+import static com.klethron.tsnet.TestSupport.CONTEXT;
+import static com.klethron.tsnet.TestSupport.shell;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
@@ -10,11 +12,6 @@ import android.net.Network;
 import android.net.NetworkCapabilities;
 import android.os.Handler;
 import android.os.Looper;
-import android.os.ParcelFileDescriptor;
-import androidx.test.platform.app.InstrumentationRegistry;
-import com.google.errorprone.annotations.CanIgnoreReturnValue;
-import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import org.junit.Test;
@@ -28,7 +25,7 @@ import org.junit.Test;
 public final class NetworkChangeTest {
     @Test(timeout = 180000)
     public void rebindsWhenDefaultNetworkChanges() throws Exception {
-        ConnectivityManager connectivity = LoginTest.CONTEXT.getSystemService(ConnectivityManager.class);
+        ConnectivityManager connectivity = CONTEXT.getSystemService(ConnectivityManager.class);
         assertTrue("The default network must be Wi-Fi", awaitWifiDefault(connectivity));
 
         // Learns the interface names of the network the library follows; only it reports them to the nodes.
@@ -46,7 +43,7 @@ public final class NetworkChangeTest {
             String wifi = nextName(names);
             // Checks that, with no node running, Android netmon has no default route.
             assertEquals("ok", Probe.call("netchangeStart"));
-            try (TailnetNode node = TailnetNode.start(LoginTest.CONTEXT, new MemoryStore(), "klethron-netchange",
+            try (TailnetNode node = TailnetNode.start(CONTEXT, new MemoryStore(), "klethron-netchange",
                     "http://127.0.0.1:1")) { // Unreachable: the node only follows the default network.
                 assertEquals("ok", Probe.call("netchangeAwait", wifi));
                 shell("svc wifi disable");
@@ -81,14 +78,5 @@ public final class NetworkChangeTest {
         String name = names.poll(60, TimeUnit.SECONDS);
         assertNotNull("No default network report", name);
         return name;
-    }
-
-    /// Returns the output of `command`, run as the shell user, once it completes.
-    @CanIgnoreReturnValue
-    static String shell(String command) throws IOException {
-        ParcelFileDescriptor output = InstrumentationRegistry.getInstrumentation().getUiAutomation().executeShellCommand(command);
-        try (var in = new ParcelFileDescriptor.AutoCloseInputStream(output)) {
-            return new String(in.readAllBytes(), StandardCharsets.UTF_8);
-        }
     }
 }

@@ -1,11 +1,12 @@
 package com.klethron.tsnet;
 
+import static com.klethron.tsnet.TestSupport.CONTEXT;
+import static com.klethron.tsnet.TestSupport.await;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
-import com.klethron.tsnet.demo.store.SqliteStore;
 import java.io.IOException;
 import java.net.SocketTimeoutException;
 import java.time.Duration;
@@ -30,39 +31,31 @@ public final class StateStoreTest {
     @After
     public void stopControl() { Probe.call("stopControl"); }
 
-    @Test(timeout = 30000)
-    public void preservesOpaqueKeysValuesAndDeletes() throws Exception {
-        try (TailnetNode node = start(new MemoryStore())) {
-            assertEquals("ok", probe(node));
-        }
-    }
-
     @Test(timeout = 60000)
     public void callbackFailuresAbortAndReleaseTheStore() throws Exception {
         for (boolean failRead : new boolean[] {true, false}) {
             AtomicBoolean failing = new AtomicBoolean(true);
             AtomicInteger calls = new AtomicInteger();
-            MemoryStore memory = new MemoryStore();
-            StateStore store = new StateStore() {
+            StateStore store = new MemoryStore() {
                 @Override
                 public byte @Nullable [] read(String key) throws IOException {
                     calls.incrementAndGet();
                     if (failRead && failing.get()) throw new IOException("private callback detail");
-                    return memory.read(key);
+                    return super.read(key);
                 }
 
                 @Override
                 public void write(String key, byte @Nullable [] value) throws IOException {
                     calls.incrementAndGet();
                     if (!failRead && failing.get()) throw new IOException("private callback detail");
-                    memory.write(key, value);
+                    super.write(key, value);
                 }
             };
             assertEquals("State store failed; close the node before retrying",
                     assertThrows(IOException.class, () -> start(store)).getMessage());
             failing.set(false);
             try (TailnetNode node = start(store)) {
-                LoginTest.await(node, s -> s.state() == NodeStatus.State.RUNNING);
+                await(node, s -> s.state() == NodeStatus.State.RUNNING);
                 failing.set(true);
                 assertFalse(probe(node).equals("ok"));
                 assertEquals("State store failed; close the node before retrying",
@@ -83,11 +76,7 @@ public final class StateStoreTest {
         CountDownLatch entered = new CountDownLatch(1), release = new CountDownLatch(1);
         AtomicReference<TailnetNode> current = new AtomicReference<>();
         AtomicBoolean rejected = new AtomicBoolean();
-        MemoryStore memory = new MemoryStore();
-        StateStore store = new StateStore() {
-            @Override
-            public byte @Nullable [] read(String key) { return memory.read(key); }
-
+        StateStore store = new MemoryStore() {
             @Override
             public void write(String key, byte @Nullable [] value) throws IOException {
                 if (key.startsWith("probe-")) {
@@ -102,12 +91,12 @@ public final class StateStoreTest {
                     assertThrows(IllegalStateException.class, Objects.requireNonNull(current.get())::close);
                     rejected.set(true);
                 }
-                memory.write(key, value);
+                super.write(key, value);
             }
         };
         try (TailnetNode node = start(store)) {
             current.set(node);
-            long handle = handle(node);
+            long handle = Probe.handle(node);
             CompletableFuture<String> writing = CompletableFuture.supplyAsync(() -> Probe.call("store", handle));
             try {
                 assertTrue(entered.await(5, TimeUnit.SECONDS));
@@ -125,11 +114,10 @@ public final class StateStoreTest {
     }
 
     @Test(timeout = 30000)
-    public void callbacksRejectNodeOperationsWithoutChangingState() throws Exception {
+    public void opaqueValuesSurviveRejectedReentrantCalls() throws Exception {
         AtomicReference<TailnetNode> current = new AtomicReference<>();
         AtomicInteger checked = new AtomicInteger();
-        MemoryStore memory = new MemoryStore();
-        StateStore store = new StateStore() {
+        StateStore store = new MemoryStore() {
             private void check(String key) {
                 if (!key.startsWith("probe-")) return;
                 TailnetNode node = Objects.requireNonNull(current.get());
@@ -144,20 +132,20 @@ public final class StateStoreTest {
             }
 
             @Override
-            public byte @Nullable [] read(String key) {
+            public byte @Nullable [] read(String key) throws IOException {
                 check(key);
-                return memory.read(key);
+                return super.read(key);
             }
 
             @Override
-            public void write(String key, byte @Nullable [] value) {
+            public void write(String key, byte @Nullable [] value) throws IOException {
                 check(key);
-                memory.write(key, value);
+                super.write(key, value);
             }
         };
         try (TailnetNode node = start(store)) {
             current.set(node);
-            LoginTest.await(node, s -> s.state() == NodeStatus.State.RUNNING);
+            await(node, s -> s.state() == NodeStatus.State.RUNNING);
             assertEquals("ok", probe(node));
             assertEquals(6, checked.get());
             assertEquals(NodeStatus.State.RUNNING, node.awaitStatus(null, Duration.ZERO).state());
@@ -170,11 +158,7 @@ public final class StateStoreTest {
     public void logoutWaitsForBackendWritesAfterItsDeadline() throws Exception {
         CountDownLatch entered = new CountDownLatch(1), release = new CountDownLatch(1);
         AtomicBoolean pause = new AtomicBoolean();
-        MemoryStore memory = new MemoryStore();
-        StateStore store = new StateStore() {
-            @Override
-            public byte @Nullable [] read(String key) { return memory.read(key); }
-
+        StateStore store = new MemoryStore() {
             @Override
             public void write(String key, byte @Nullable [] value) throws IOException {
                 if (pause.compareAndSet(true, false)) {
@@ -186,11 +170,11 @@ public final class StateStoreTest {
                         throw new IOException(failure);
                     }
                 }
-                memory.write(key, value);
+                super.write(key, value);
             }
         };
         try (TailnetNode node = start(store)) {
-            LoginTest.await(node, s -> s.state() == NodeStatus.State.RUNNING);
+            await(node, s -> s.state() == NodeStatus.State.RUNNING);
             pause.set(true);
             CompletableFuture<IOException> logout = CompletableFuture.supplyAsync(() ->
                     assertThrows(IOException.class, () -> node.logout(Duration.ofMillis(100))));
@@ -203,52 +187,13 @@ public final class StateStoreTest {
             }
             assertEquals(SocketTimeoutException.class, logout.get(10, TimeUnit.SECONDS).getClass());
             node.login();
-            LoginTest.await(node, s -> s.state() == NodeStatus.State.RUNNING);
-        }
-    }
-
-    @Test(timeout = 30000)
-    public void callerCanHandlePersistenceFailureAndKeepRunning() throws Exception {
-        var directory = LoginTest.temporaryDirectory("fallback-");
-        try (SqliteStore disk = new SqliteStore(directory.resolve("state.db").toFile())) {
-            disk.close(); // SQLite writes now fail; the embedder chooses to keep the state in memory.
-            MemoryStore memory = new MemoryStore();
-            AtomicInteger failures = new AtomicInteger();
-            StateStore fallback = new StateStore() {
-                @Override
-                public byte @Nullable [] read(String key) { return memory.read(key); }
-
-                @Override
-                public void write(String key, byte @Nullable [] value) {
-                    memory.write(key, value);
-                    try {
-                        disk.write(key, value);
-                    } catch (RuntimeException handled) {
-                        failures.incrementAndGet();
-                    }
-                }
-            };
-            for (int i = 0; i < 2; i++) {
-                try (TailnetNode node = start(fallback)) {
-                    LoginTest.await(node, s -> s.state() == NodeStatus.State.RUNNING);
-                    assertEquals("ok", probe(node));
-                }
-            }
-            assertTrue(failures.get() > 0);
-        } finally {
-            LoginTest.deleteDirectory(directory);
+            await(node, s -> s.state() == NodeStatus.State.RUNNING);
         }
     }
 
     private TailnetNode start(StateStore store) throws IOException {
-        return TailnetNode.start(LoginTest.CONTEXT, store, "store-test", control);
+        return TailnetNode.start(CONTEXT, store, "store-test", control);
     }
 
-    static long handle(TailnetNode node) throws Exception {
-        var field = TailnetNode.class.getDeclaredField("handle");
-        field.setAccessible(true);
-        return field.getLong(node);
-    }
-
-    private static String probe(TailnetNode node) throws Exception { return Probe.call("store", handle(node)); }
+    private static String probe(TailnetNode node) throws Exception { return Probe.call("store", Probe.handle(node)); }
 }

@@ -1,5 +1,9 @@
 package com.klethron.tsnet;
 
+import static com.klethron.tsnet.TestSupport.CONTEXT;
+import static com.klethron.tsnet.TestSupport.deleteDirectory;
+import static com.klethron.tsnet.TestSupport.shell;
+import static com.klethron.tsnet.TestSupport.temporaryDirectory;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
@@ -44,7 +48,7 @@ public final class CrashTest {
     }
 
     private static ApplicationExitInfo crash(int mode, int reason) throws Exception {
-        Context context = LoginTest.CONTEXT;
+        Context context = CONTEXT;
         CompletableFuture<IBinder> service = new CompletableFuture<>();
         ServiceConnection connection = new ServiceConnection() {
             @Override
@@ -56,7 +60,7 @@ public final class CrashTest {
             public void onServiceDisconnected(ComponentName name) {}
         };
         assertTrue(context.bindService(new Intent(context, CrashService.class), connection, Context.BIND_AUTO_CREATE));
-        Path directory = LoginTest.temporaryDirectory("crash-");
+        Path directory = temporaryDirectory("crash-");
         byte[] machineKey;
         try {
             IBinder binder = service.get(10, TimeUnit.SECONDS);
@@ -96,12 +100,12 @@ public final class CrashTest {
             throw new AssertionError("No exit reason " + reason + ": " + exits);
         } finally {
             context.unbindService(connection);
-            LoginTest.deleteDirectory(directory);
+            deleteDirectory(directory);
         }
     }
 
     private static List<String> goLog(ApplicationExitInfo exit) throws Exception {
-        return NetworkChangeTest.shell("logcat -d -b main -v raw -s Go --pid=" + exit.getPid()).lines()
+        return shell("logcat -d -b main -v raw -s Go --pid=" + exit.getPid()).lines()
                 .filter(line -> !line.startsWith("--------- beginning of ")).toList();
     }
 }

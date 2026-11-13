@@ -1,5 +1,6 @@
 package com.klethron.tsnet;
 
+import static com.klethron.tsnet.TestSupport.CONTEXT;
 import static org.junit.Assert.assertEquals;
 
 import android.net.ConnectivityManager;
@@ -40,7 +41,7 @@ public final class NetworkCallbackTest {
     }
 
     private static TailnetNode start() throws Exception {
-        return TailnetNode.start(LoginTest.CONTEXT, new MemoryStore(), "callback", "http://127.0.0.1:1");
+        return TailnetNode.start(CONTEXT, new MemoryStore(), "callback", "http://127.0.0.1:1");
     }
 
     private static ConnectivityManager.NetworkCallback currentCallback() throws Exception {
