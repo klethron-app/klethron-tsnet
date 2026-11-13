@@ -245,10 +245,12 @@ public final class DialTest {
     public void reachesOnlyTheTailnet() throws Exception {
         try (TailnetNode node = startNode()) {
             node.connect(peer, 7070, WAIT).close(); // Joined.
+            node.connect("::ffff:" + peer, 7070, WAIT).close();
             assertDialThrows(SocketTimeoutException.class, node, peer, 7070, Duration.ZERO);
             // Upstream would dial both through the device's network: the first is the control server.
             int controlPort = URI.create(controlUrl).getPort();
             assertDialThrows(NoRouteToHostException.class, node, "127.0.0.1", controlPort, WAIT);
+            assertDialThrows(NoRouteToHostException.class, node, "::ffff:127.0.0.1", controlPort, WAIT);
             assertDialThrows(NoRouteToHostException.class, node, "100.64.0.99", 22, WAIT);
             // The device resolves this name, but the tailnet's DNS does not; upstream would ask the device.
             assertDialThrows(UnknownHostException.class, node, "localhost", controlPort, WAIT);

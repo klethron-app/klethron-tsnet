@@ -256,24 +256,17 @@ func (n *node) publish(notify ipn.Notify, read *statusRead) {
 // ipnlocal.watchIPNBusFellBehindMessage ends a watch; it is not a backend error.
 const watchFellBehind = "IPN bus consumer fell behind; closing watch"
 
-// printable returns at most limit bytes of s, replacing bytes other than printable ASCII with '?'.
+// printable limits the record field to printable ASCII and at most limit bytes.
 func printable(s string, limit int) string {
-	i := 0
-	if len(s) <= limit {
-		for i < len(s) && s[i] >= ' ' && s[i] <= '~' {
-			i++
-		}
-		if i == len(s) {
-			return s
-		}
+	if len(s) > limit {
+		s = strings.Clone(s[:limit])
 	}
-	b := []byte(s[:min(len(s), limit)])
-	for j, c := range b[i:] {
-		if c < ' ' || c > '~' {
-			b[i+j] = '?'
+	return strings.Map(func(r rune) rune {
+		if r < ' ' || r > '~' {
+			return '?'
 		}
-	}
-	return string(b)
+		return r
+	}, s)
 }
 
 // loginURL validates here as well as upstream: initial watch snapshots bypass upstream's
@@ -426,6 +419,7 @@ func (n *node) dial(host string, port uint16, fd int, timeout time.Duration) (re
 		}
 		return n.failed(ctx, resultUnknownHost)
 	}
+	target = netip.AddrPortFrom(target.Addr().Unmap(), target.Port())
 	// Netstack reaches exactly the network map's peers and subnet routes. Upstream Server.Dial would
 	// dial other addresses, including unknown nodes' Tailscale IPs, through the device's network.
 	if !dialer.UseNetstackForIP(target.Addr()) {

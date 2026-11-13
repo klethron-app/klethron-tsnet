@@ -55,7 +55,8 @@ with Go 1.27.4. All entries rechecked 2026-11-13; none fixed upstream. Remove en
   Storage callback exceptions stop the node, including failures upstream only logs.
 - **`tsnet.Server.Dial` can leave the tailnet.** For addresses not in the network map, `tsdial.UserDial`
   falls back to the routing table, then a plain `net.Dialer`. `node.dial` requires `UseNetstackForIP`
-  after `UserDialPlan`, connects with `NetstackDialTCP` and closes connections that arrive after timeout.
+  after `UserDialPlan`, normalizing IPv4-mapped IPv6 addresses before checking the route. It connects
+  with `NetstackDialTCP` and closes connections that arrive after timeout.
 - **Android NIO cannot adopt a socket descriptor.** `TailnetNode.connect` creates a private loopback
   TCP pair to return a standard `SocketChannel`. Setup is non-blocking and verifies the accepted
   socket's remote address against the client's local address before passing a duplicate to Go.
