@@ -49,10 +49,12 @@ jobs:
           - api: '34'
             sdk: 34
             pages: 4096
+            page-label: 4 KB pages
             target: google_apis
           - api: '37.2'
             sdk: 37
             pages: 16384
+            page-label: 16 KB pages
             target: google_apis_ps16k
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -116,7 +118,7 @@ jobs:
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
-      - name: Test API ${{ matrix.api }} (${{ matrix.pages }}-byte pages)
+      - name: Test API ${{ matrix.api }} (${{ matrix.page-label }})
         uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
         env:
           CURL_HOME: ${{ github.workspace }}/.github

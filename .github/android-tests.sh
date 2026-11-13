@@ -13,9 +13,9 @@ api=$(adb shell getprop ro.build.version.sdk)
 abi=$(adb shell getprop ro.product.cpu.abi)
 pages=$(adb shell getconf PAGESIZE)
 selinux=$(adb shell getenforce)
-printf 'API=%s ABI=%s page_size=%s SELinux=%s\n' "$api" "$abi" "$pages" "$selinux" | tee "$reports/device.txt"
+printf 'API=%s ABI=%s page_size=%s KB SELinux=%s\n' "$api" "$abi" "$((pages / 1024))" "$selinux" | tee "$reports/device.txt"
 [[ $api == "$1" && $abi == x86_64 && $pages == "$2" && $selinux == Enforcing ]] ||
-    { echo "Expected an SELinux Enforcing x86_64 device with API $1 and $2-byte pages" >&2; exit 1; }
+    { echo "Expected an SELinux Enforcing x86_64 device with API $1 and $(($2 / 1024)) KB pages" >&2; exit 1; }
 adb shell svc wifi enable
 adb shell svc data enable
 
@@ -36,7 +36,7 @@ from pathlib import Path
 import sys
 import xml.etree.ElementTree as ET
 
-lines = [f'### API {sys.argv[1]} / {sys.argv[2]}-byte pages / x86_64', '',
+lines = [f'### API {sys.argv[1]} / {int(sys.argv[2]) // 1024} KB pages / x86_64', '',
          '| Module | Tests | Failures | Errors | Skipped |', '| --- | ---: | ---: | ---: | ---: |']
 complete = True
 for module in ('tsnet', 'demo'):
