@@ -37,6 +37,7 @@ var loginProbe struct {
 	flooded  atomic.Int64  // Bytes the peer's flooding port has written.
 	expired  set.Set[key.NodePublic]
 	removed  atomic.Bool // Map requests fail as for nodes deleted from the tailnet.
+	rejected atomic.Bool // Registration requests fail, including logout.
 }
 
 // startControl starts the control server, requiring interactive login if interactive is "true".
@@ -64,12 +65,16 @@ func startControl(interactive string) string {
 		control.MagicDNSDomain = "tail-scale.ts.net" // As in upstream's tsnet tests.
 	}
 	// Real control answers map requests from deleted nodes with 404, as in upstream's tests.
-	control.MaybeRejectRequest = testcontrol.RejectRequestForPath("/machine/map", func() (int, string, string) {
-		if loginProbe.removed.Load() {
+	control.MaybeRejectRequest = func(request *http.Request) (int, string, string) {
+		if request.URL.Path == "/machine/map" && loginProbe.removed.Load() {
 			return http.StatusNotFound, "", "node not found"
 		}
+		if request.URL.Path == "/machine/register" && loginProbe.rejected.Load() {
+			// Registration errors use a JSON response with HTTP 200, as in testcontrol.
+			return http.StatusOK, "", `{"Error":"invalid authkey"}`
+		}
 		return 0, "", ""
-	})
+	}
 	stop, err := startLoopbackControl(control)
 	if err != nil {
 		return ""
@@ -329,13 +334,9 @@ func removeNodes(removed string) string {
 
 // rejectRegistrations makes control reject every registration request, including logouts, with an
 // error if reject is "true", or no longer. Stopping the server would not: nodes keep their hijacked
-// Noise connection. testcontrol reads the field without locking; a racing registration may see the
-// old value.
-func rejectRegistrations(control *testcontrol.Server, reject string) string {
-	control.RequireAuthKey = ""
-	if reject == "true" {
-		control.RequireAuthKey = "tskey-test-never-sent"
-	}
+// Noise connection.
+func rejectRegistrations(reject string) string {
+	loginProbe.rejected.Store(reject == "true")
 	return ""
 }
 
@@ -384,6 +385,7 @@ func stopControl(string) string {
 		loginProbe.received, loginProbe.release = nil, nil
 		loginProbe.expired = nil
 		loginProbe.removed.Store(false)
+		loginProbe.rejected.Store(false)
 	}
 	return ""
 }

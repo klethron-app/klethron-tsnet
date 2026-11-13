@@ -49,7 +49,8 @@ public final class TailnetNode implements AutoCloseable {
             KeyStore roots = KeyStore.getInstance("AndroidCAStore");
             roots.load(null);
             ByteArrayOutputStream certificates = new ByteArrayOutputStream();
-            for (String alias : Collections.list(roots.aliases())) {
+            for (var aliases = roots.aliases(); aliases.hasMoreElements();) {
+                String alias = aliases.nextElement();
                 var certificate = alias.startsWith("system:") ? roots.getCertificate(alias) : null;
                 if (certificate != null) certificates.writeBytes(certificate.getEncoded());
             }

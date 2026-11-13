@@ -20,10 +20,7 @@ import (
 
 func probeLoginURL(argument string) string {
 	control, raw, _ := strings.Cut(argument, "\x00")
-	n := newNode(newServer())
-	defer n.cancel()
-	n.server.ControlURL = control
-	if n.loginURL(raw) == "" {
+	if loginURL(control, raw) == "" {
 		return "rejected"
 	}
 	return "accepted"

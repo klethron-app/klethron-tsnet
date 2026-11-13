@@ -36,14 +36,6 @@ func lookupNode(id C.longlong) *node {
 	return nodes.byID[int64(id)]
 }
 
-func addNode(n *node) C.longlong {
-	nodes.Lock()
-	defer nodes.Unlock()
-	nodes.last++
-	nodes.byID[nodes.last] = n
-	return C.longlong(nodes.last)
-}
-
 // klethron_node_start starts a node and returns its positive ID, or a negative failure result.
 //
 //export klethron_node_start
@@ -58,7 +50,11 @@ func klethron_node_start(store *C.state_store, config *C.char, length C.int) C.l
 		n.close()
 		return C.longlong(result)
 	}
-	return addNode(n)
+	nodes.Lock()
+	defer nodes.Unlock()
+	nodes.last++
+	nodes.byID[nodes.last] = n
+	return C.longlong(nodes.last)
 }
 
 // klethron_node_await_status returns the changed status, "" if unchanged, or NULL after close.

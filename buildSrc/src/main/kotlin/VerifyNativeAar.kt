@@ -32,21 +32,24 @@ abstract class VerifyNativeAar : DefaultTask() {
                 // The instrumentation test bridge exports klethron_probe and binds Probe.nativeCall.
                 requireNative(!Regex("klethron_probe|Probe_nativeCall").containsMatchIn(String(bytes, Charsets.ISO_8859_1)),
                     "${entry.name} includes a debug-only test bridge")
+                requireNative(bytes.size >= 64, "${entry.name} has a truncated ELF header")
                 val elf = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
-                requireNative(elf.getInt(0) == 0x464c457f && bytes[4] == 2.toByte() && bytes[5] == 1.toByte(),
-                    "${entry.name} must be little-endian ELF64")
+                requireNative(elf.getInt(0) == 0x464c457f && bytes[4] == 2.toByte() && bytes[5] == 1.toByte() &&
+                    elf.getShort(16).toInt() == 3, "${entry.name} must be a little-endian ELF64 shared library")
                 requireNative(elf.getShort(18).toInt() == machines[entry.name.split('/')[1]],
                     "${entry.name} has the wrong architecture")
-                val offset = elf.getLong(32).toInt()
+                val offset = elf.getLong(32)
                 val stride = elf.getShort(54).toInt() and 0xffff
                 val count = elf.getShort(56).toInt() and 0xffff
-                repeat(count) { index ->
-                    val header = offset + index * stride
-                    if (elf.getInt(header) == 1) {
-                        requireNative(elf.getLong(header + 48) >= 16384 &&
-                            elf.getLong(header + 8) % 16384 == elf.getLong(header + 16) % 16384,
-                            "${entry.name} has a LOAD segment incompatible with 16 KiB pages")
-                    }
+                requireNative(stride == 56 && count > 0 && offset >= 64 && offset <= bytes.size - count * 56L,
+                    "${entry.name} has an invalid program header table")
+                val loads = (0 until count).map { offset.toInt() + it * stride }.filter { elf.getInt(it) == 1 }
+                requireNative(loads.isNotEmpty(), "${entry.name} has no LOAD segments")
+                for (header in loads) {
+                    val alignment = elf.getLong(header + 48)
+                    requireNative(alignment >= 16384 && (alignment and (alignment - 1)) == 0L &&
+                        elf.getLong(header + 8) % 16384 == elf.getLong(header + 16) % 16384,
+                        "${entry.name} has a LOAD segment incompatible with 16 KiB pages")
                 }
                 sizes.append("${entry.name}\t${entry.size}\t${entry.compressedSize}\n")
             }

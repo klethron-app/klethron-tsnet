@@ -230,10 +230,10 @@ func (n *node) publish(notify ipn.Notify, read *statusRead) {
 	n.selfKey, n.keyExpiry = self, expiry
 	// Running snapshots omit BrowseToURL, even during renewal. Replace stale URLs after a watch gap.
 	if initial := notify.InitialStatus; initial != nil && initial.AuthURL != "" {
-		status.loginURL = n.loginURL(initial.AuthURL)
+		status.loginURL = loginURL(n.server.ControlURL, initial.AuthURL)
 	}
 	if notify.BrowseToURL != nil {
-		status.loginURL = n.loginURL(*notify.BrowseToURL)
+		status.loginURL = loginURL(n.server.ControlURL, *notify.BrowseToURL)
 	}
 	// Upstream reports logout, key expiry and removal alike as NeedsLogin.
 	status.revocation = ""
@@ -271,13 +271,12 @@ func printable(s string, limit int) string {
 
 // loginURL validates here as well as upstream: initial watch snapshots bypass upstream's
 // browser notification filter. Login URLs are bearer credentials, including in development.
-func (n *node) loginURL(raw string) string {
+func loginURL(control, raw string) string {
 	u, err := url.Parse(raw)
 	if err != nil || u.Hostname() == "" || u.User != nil ||
 		strings.ContainsFunc(raw, func(r rune) bool { return r <= ' ' || r > '~' }) {
 		return ""
 	}
-	control := n.server.ControlURL
 	if ipn.IsLoginServerSynonym(control) && u.Hostname() != "tailscale.com" && !strings.HasSuffix(u.Hostname(), ".tailscale.com") {
 		return ""
 	}

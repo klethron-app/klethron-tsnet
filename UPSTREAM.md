@@ -43,7 +43,7 @@ with Go 1.27.4. All entries rechecked 2026-11-13; none fixed upstream. Remove en
 - **Initial watch snapshots bypass the browser URL filter.** While Running, they carry pending
   renewals only in `InitialStatus.AuthURL`. `node.publish` restores nonempty URLs on reconnect; only a
   changed node key confirms persistence. Empty URLs can arrive earlier.
-  `node.loginURL` enforces HTTPS and tailscale.com hosts, rejects userinfo, and permits HTTP only for
+  `loginURL` enforces HTTPS and tailscale.com hosts, rejects userinfo, and permits HTTP only for
   an explicitly selected loopback test server at the same origin.
 - **`tsnet.Server` fills empty fields from the environment.** `node.start` sets `Hostname` and
   `ControlURL`, overriding `TS_CONTROL_URL`, and rejects `TS_AUTHKEY`/`TS_AUTH_KEY`. `oauthkey` and

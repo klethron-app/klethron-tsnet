@@ -33,7 +33,7 @@ var probes = map[string]func(string) string{
 	"netchangeAwait":        awaitNetworkChange,
 	"netchangeStart":        startNetworkProbe,
 	"netchangeStop":         stopNetworkProbe,
-	"rejectRegistrations":   withControl(rejectRegistrations),
+	"rejectRegistrations":   rejectRegistrations,
 	"release":               releaseStalled,
 	"remove":                removeNodes,
 	"rename":                withControl(renameNodes),

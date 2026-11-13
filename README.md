@@ -11,12 +11,11 @@ no Tailscale app or device-wide VPN is needed.
 Requires **Android 14 (API 34)** or later. The AAR supports **arm64-v8a**, **x86_64** and 16 KiB pages;
 consumers need no Go compiler or NDK.
 
-**Under development.** Login, logout and revocation have local and live tailnet tests. Caller-owned
-SQLite persistence has local restart and crash coverage. The `SocketChannel` API, IPv6 connections
-and peer listing have local coverage. Tailnet Lock authority persistence and restart have local
-coverage; its status and signing operations are not exposed. TCP transport and Wi-Fi/cellular
-switches also have live coverage, the latter only with Tailscale's VPN
-active. See [limitations](UPSTREAM.md#limits) and [Javadoc](https://javadoc.io/doc/com.klethron/tsnet/latest/).
+**Under development.** Local tests cover login, logout, revocation, SQLite restart and crash recovery,
+`SocketChannel` operations, IPv6, peer listing and Tailnet Lock persistence. Live tests cover login,
+logout, revocation, TCP transport and Wi-Fi/cellular switches; switches have only been tested with
+Tailscale's VPN active. Tailnet Lock status and signing APIs are not exposed.
+See [limitations](UPSTREAM.md#limits) and [Javadoc](https://javadoc.io/doc/com.klethron/tsnet/latest/).
 
 ## Install
 
