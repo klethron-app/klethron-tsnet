@@ -122,6 +122,11 @@ func (n *node) watchStatus(refresh chan<- struct{}) {
 			}
 			_ = watcher.Close()
 		}
+		// A gap can hide logout, expiry or a different login. Existing dials and relays
+		// must not inherit access from the next snapshot, even if it is already Running.
+		n.mu.Lock()
+		n.endAccess()
+		n.mu.Unlock()
 		select {
 		case <-n.ctx.Done():
 		case <-time.After(time.Second):
@@ -200,7 +205,7 @@ func (n *node) publish(notify ipn.Notify, read *statusRead) {
 		status.err = printable(*notify.ErrMessage, 256)
 	}
 	if notify.BrowseToURL != nil {
-		status.loginURL = loginURL(*notify.BrowseToURL)
+		status.loginURL = n.loginURL(*notify.BrowseToURL)
 	}
 	// A watch has no initial SelfChange. Self has a key only with a network map.
 	self, expiry := n.selfKey, n.keyExpiry
@@ -260,12 +265,28 @@ func printable(s string, limit int) string {
 	return string(b)
 }
 
-// loginURL returns raw if it is an absolute HTTP(S) URL of printable ASCII without spaces, otherwise "".
-func loginURL(raw string) string {
+// loginURL validates here as well as upstream: initial watch snapshots bypass upstream's
+// browser notification filter. Login URLs are bearer credentials, including in development.
+func (n *node) loginURL(raw string) string {
 	u, err := url.Parse(raw)
-	if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" ||
+	if err != nil || u.Hostname() == "" || u.User != nil ||
 		strings.ContainsFunc(raw, func(r rune) bool { return r <= ' ' || r > '~' }) {
 		return ""
+	}
+	control := n.server.ControlURL
+	if ipn.IsLoginServerSynonym(control) && u.Hostname() != "tailscale.com" && !strings.HasSuffix(u.Hostname(), ".tailscale.com") {
+		return ""
+	}
+	if u.Scheme != "https" {
+		// Only the explicitly selected loopback test control server may use plaintext.
+		server, err := url.Parse(control)
+		if err != nil || u.Scheme != "http" || server.Scheme != "http" || u.Host != server.Host {
+			return ""
+		}
+		ip, err := netip.ParseAddr(u.Hostname())
+		if err != nil || !ip.IsLoopback() {
+			return ""
+		}
 	}
 	return raw
 }

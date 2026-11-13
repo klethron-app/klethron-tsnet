@@ -1,10 +1,12 @@
-Klethron tsnet modifies four tailscale.com source files in an isolated build copy.
+Klethron tsnet modifies six tailscale.com source files in an isolated build copy.
 Upstream revision: 59064619a0f4ea3293be038e08651c66c2886255
 Original file SHA-256:
 net/tlsdial/tlsdial.go: 49adc77dc68cf066fa695037cc41164509949dfa8a97e96a9c4fd334cd3b7e1e
 control/controlclient/direct.go: ccdcc186decb2efe76c98af7e4914b77f15a7d7eda9406b1bb2b441c7fa1575a
 tsnet/dns_lookup.go: b49ecd66f1b9f4de7e7ef20061148a0e903de2e847627db38c88715c6964dc93
 tsnet/tsnet.go: c37b19724de27737147f427e4a6e81e947736244848d55d6425a966cdbf24125
+ipn/ipnlocal/tailnet-lock.go: 8d4e038c7e5d377fa3e734ccaa911d1715b7fadcfb8c0364365f4ccce67b2862
+ipn/ipnlocal/profiles.go: 4e6a67d855b82e492123bc18f7b3cdc6075ceaf2176476057eff419281b6b585
 
 Binary build metadata records the copy as "tailscale.com => ./tailscale"; the
 GO-MODULES.tsv checksum identifies the upstream module before these changes:
@@ -51,7 +53,19 @@ In tsnet/tsnet.go startup, use the caller's Hostname directly, remove executable
 and state-directory discovery/creation, keep rootPath empty, require Store,
 and remove the fallback FileStore setup and unused runtime/ipn/store imports.
 The Java StateStore supplies persistence; an empty var-root prevents auxiliary
-state directories. Tailnet Lock authority history is currently memory-only.
+state directories.
+
+In ipn/ipnlocal/tailnet-lock.go, replace directory-backed authority loading and
+bootstrap storage with an optional StateStore.OpenTailnetLock(ProfileID) method,
+returning the restored authority and its CompactableChonk. Remove chonkPathLocked,
+the memory-only-storage warning and unused imports. Stores without this method retain in-memory storage
+for the local test fixtures. The library's javaStore implements the method using
+the existing Java callbacks, and stops the node on invalid state or storage failure.
+
+In ipn/ipnlocal/profiles.go, route profile credential deletion through a helper
+that deletes credentials before calling optional StateStore.DeleteTailnetLock(ProfileID).
+This removes authority history on logout, profile deletion and profile deduplication,
+without leaving credentials whose pinned trust was lost if a deletion fails or crashes.
 
 --- a/net/tlsdial/tlsdial.go
 +++ b/net/tlsdial/tlsdial.go

@@ -126,6 +126,56 @@ abstract class BuildGoLibrary @Inject constructor(
         workspace.resolve("tailscale/tsnet/tsnet.go").appendText(
             "\n// Status reads directly from the backend; call only between Start and Close.\n" +
             "func (s *Server) Status() *ipnstate.Status { return s.lb.Status() }\n")
+        val tailnetSource = upstream.resolve("ipn/ipnlocal/tailnet-lock.go").readText()
+        val loadTailnet = "\troot := b.TailscaleVarRoot()" + tailnetSource.substringAfter("\troot := b.TailscaleVarRoot()")
+            .substringBefore("\n\treturn nil\n}")
+        val createTailnet = "\troot := b.TailscaleVarRoot()" + tailnetSource.substringAfterLast("\troot := b.TailscaleVarRoot()")
+            .substringBefore("\n\tauthority, err := tka.Bootstrap")
+        val tailnetDirectory = "// chonkPathLocked returns" + tailnetSource.substringAfter("// chonkPathLocked returns")
+            .substringBefore("// tkaBootstrapFromGenesisLocked")
+        val memoryWarning = "// noTailnetLockStateDirWarnable" + tailnetSource.substringAfter("// noTailnetLockStateDirWarnable")
+            .substringBefore("// tkaFilterDeltaMutsLocked")
+        patch("ipn/ipnlocal/tailnet-lock.go", "8d4e038c7e5d377fa3e734ccaa911d1715b7fadcfb8c0364365f4ccce67b2862",
+            "\t\"path/filepath\"\n" to "",
+            "\t\"tailscale.com/health\"\n" to "",
+            memoryWarning to "",
+            loadTailnet to """
+                    authority, storage, err := b.openTailnetLock()
+                    if err != nil { return err }
+                    if authority != nil {
+                        b.tka = &tkaState{profile: cp.ID(), authority: authority, storage: storage}
+                    }
+            """.trimIndent().prependIndent("\t"),
+            createTailnet to "\t_, storage, err := b.openTailnetLock()\n\tif err != nil { return err }\n",
+            tailnetDirectory to "")
+        workspace.resolve("tailscale/ipn/ipnlocal/tailnet-lock.go").appendText("""
+
+            // openTailnetLock uses caller-owned persistence. Plain memory stores are used by test fixtures.
+            func (b *LocalBackend) openTailnetLock() (*tka.Authority, tka.CompactableChonk, error) {
+                if store, ok := b.store.(interface {
+                    OpenTailnetLock(ipn.ProfileID) (*tka.Authority, tka.CompactableChonk, error)
+                }); ok { return store.OpenTailnetLock(b.pm.CurrentProfile().ID()) }
+                return nil, tka.ChonkMem(), nil
+            }
+
+        """.trimIndent())
+        patch("ipn/ipnlocal/profiles.go", "4e6a67d855b82e492123bc18f7b3cdc6075ceaf2176476057eff419281b6b585",
+            "pm.store.WriteState(p.Key(), nil)" to "pm.deleteProfileState(p)",
+            "pm.WriteState(profile.Key(), nil)" to "pm.deleteProfileState(profile)",
+            "pm.WriteState(kp.Key(), nil)" to "pm.deleteProfileState(kp)")
+        workspace.resolve("tailscale/ipn/ipnlocal/profiles.go").appendText("""
+
+            // Delete authority history as well as credentials, including on logout and profile deduplication.
+            func (pm *profileManager) deleteProfileState(profile ipn.LoginProfileView) error {
+                // Keep pinned trust if deleting credentials fails or the process dies between writes.
+                if err := pm.WriteState(profile.Key(), nil); err != nil { return err }
+                if store, ok := pm.store.(interface { DeleteTailnetLock(ipn.ProfileID) error }); ok {
+                    return store.DeleteTailnetLock(profile.ID())
+                }
+                return nil
+            }
+
+        """.trimIndent())
         patch("net/tlsdial/tlsdial.go", "49adc77dc68cf066fa695037cc41164509949dfa8a97e96a9c4fd334cd3b7e1e",
             "\t\t\tDNSName:       dialedHost," to "\t\t\tDNSName:       dialedHost,\n\t\t\tRoots: SystemRoots,")
         workspace.resolve("tailscale/net/tlsdial/tlsdial.go").appendText(

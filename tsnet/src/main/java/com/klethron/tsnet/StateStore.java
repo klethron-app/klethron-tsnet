@@ -3,7 +3,8 @@ package com.klethron.tsnet;
 import java.io.IOException;
 import org.jspecify.annotations.Nullable;
 
-/// Caller-owned storage for one node's opaque keys and values, including private credentials.
+/// Caller-owned storage for one node's opaque keys and values, including private credentials
+/// and Tailnet Lock authority history. The library compacts that history and removes it on logout.
 /// Keep it out of backups, exports and sync. Each running node needs exclusive access to its
 /// logical store, including across processes; separate wrappers must not share the same records.
 ///

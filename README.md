@@ -13,8 +13,9 @@ consumers need no Go compiler or NDK.
 
 **Under development.** Login, logout and revocation have local and live tailnet tests. Caller-owned
 SQLite persistence has local restart and crash coverage. The `SocketChannel` API, IPv6 connections
-and peer listing have local coverage. TCP transport and Wi-Fi/cellular switches also have live
-coverage, the latter only with Tailscale's VPN
+and peer listing have local coverage. Tailnet Lock authority persistence and restart have local
+coverage; its status and signing operations are not exposed. TCP transport and Wi-Fi/cellular
+switches also have live coverage, the latter only with Tailscale's VPN
 active. See [limitations](UPSTREAM.md#limits) and [Javadoc](https://javadoc.io/doc/com.klethron/tsnet/latest/).
 
 ## Install
@@ -66,6 +67,9 @@ normally. An exception escaping a callback stops the node and makes node operati
 Close the node before closing or reusing its store. The library creates no state files or directories;
 apps using files should keep them under `Context.getNoBackupFilesDir()`.
 
+The same callbacks persist Tailnet Lock authority history when enabled. History is compacted using
+Tailscale's retention policy and removed on logout; callers should treat all store keys as opaque.
+
 `NodeStatus` reports the device name, tailnet, user and peers (names, OS, online state, addresses and
 [Tailscale SSH](https://tailscale.com/kb/1193/tailscale-ssh) host keys).
 
@@ -74,7 +78,8 @@ It handles the local socket bridge internally; socket addresses and options desc
 For concurrent reads and writes, use the channel directly; Android's channel-backed streams share a lock.
 Only peers and subnet routes are reachable; names resolve only through the tailnet.
 `close` ends connections and keeps the identity. `logout`, key expiry and device removal end access
-and connections; `login` requests authorization again.
+and connections; `login` requests authorization again. A status notification gap also ends existing
+connections, since it could hide revocation or a change of login.
 The app controls node lifetime and services.
 
 ## Network

@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"tailscale.com/tailcfg"
+	"tailscale.com/tailcfg/nodecap"
 	"tailscale.com/tstest/integration/testcontrol"
 	"tailscale.com/types/key"
 	"tailscale.com/util/set"
@@ -44,6 +45,20 @@ func startControl(interactive string) string {
 	loginProbe.Lock()
 	defer loginProbe.Unlock()
 	control := &testcontrol.Server{RequireAuth: interactive == "true"}
+	if interactive == "locked" {
+		lockExpectSaved.Store(false)
+		lockMissingHead.Store(0)
+		control.ModifyFirstMapResponse = func(response *tailcfg.MapResponse, request *tailcfg.MapRequest) {
+			if response.Node.CapMap == nil {
+				response.Node.CapMap = make(tailcfg.NodeCapMap)
+			}
+			response.Node.CapMap[nodecap.TailnetLock] = nil
+			control.SetNodeCapMap(request.NodeKey, response.Node.CapMap)
+			if lockExpectSaved.Load() && request.TKAHead == "" {
+				lockMissingHead.Add(1)
+			}
+		}
+	}
 	if !control.RequireAuth {
 		control.DNSConfig = &tailcfg.DNSConfig{Proxied: true}
 		control.MagicDNSDomain = "tail-scale.ts.net" // As in upstream's tsnet tests.

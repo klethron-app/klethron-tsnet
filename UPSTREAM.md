@@ -22,6 +22,12 @@ with Go 1.27.4. All entries rechecked 2026-11-13; none fixed upstream. Remove en
 - **A custom store still requires a directory.** Patch `tsnet/tsnet.go` to require an injected
   `StateStore`, skip directory and executable discovery, and leave the backend var-root empty.
   Java callbacks own persistence; no directory lock or file-store fallback remains.
+- **Tailnet Lock authority storage bypasses `StateStore`.** Patch authority loading and bootstrap
+  to use `javaStore`'s callback-backed storage. Each profile has one atomic snapshot containing
+  signed updates, their original commit times and the compaction ancestor. Upstream compaction
+  removes old updates from the snapshot, retaining at least 24 updates, the last 14 days and
+  required chain history; this is not a hard byte cap. Profile deletion and logout remove it entirely.
+  Invalid saved history and callback errors stop the node. No authority directory is used.
 - **TLS discovers roots through filesystem reads.** Android supplies enabled system certificates via
   `AndroidCAStore`; patch `tlsdial` to use that explicit pool. `bakedroots` is omitted. This also fixes
   Go missing Android 14's updatable Conscrypt store and user-disabled roots
@@ -31,6 +37,10 @@ with Go 1.27.4. All entries rechecked 2026-11-13; none fixed upstream. Remove en
 
 - **Logs can contain login URLs.** `main.go` discards `tsnet.Server.UserLogf`, `Logf` and Go's standard
   log output, which netmon and others use directly.
+- **Initial watch snapshots bypass the browser URL filter.** `WatchIPNBus` copies the saved auth URL
+  directly into its initial notification. `node.loginURL` enforces HTTPS and tailscale.com hosts for
+  production control, rejects userinfo, and permits HTTP only for an explicitly selected loopback
+  test control server at the same origin. This also protects callers if upstream filtering changes.
 - **`tsnet.Server` fills empty fields from the environment.** `node.start` sets `Hostname` and
   `ControlURL`, overriding `TS_CONTROL_URL`, and rejects `TS_AUTHKEY`/`TS_AUTH_KEY`. `oauthkey` and
   `useproxy` are omitted; nothing imports `identityfederation`, which reads ID-token variables.
@@ -78,12 +88,14 @@ with Go 1.27.4. All entries rechecked 2026-11-13; none fixed upstream. Remove en
   removal by the `node-removed` health warning, otherwise expiry by the latest key expiry time.
 - **A watch that falls behind ends with an `ErrMessage`.** `node.publish` ignores that text
   (`watchFellBehind`, a copy of the unexported `watchIPNBusFellBehindMessage`) and `watchStatus`
-  reconnects. Upstream now applies the same lag handling to policy notifications; the error text
-  and our watch's disconnect behavior are unchanged.
+  reconnects. Any watch interruption ends previously granted access for dials and relays: missed
+  events can include logout, expiry or a different login. A new Running snapshot cannot revive that access.
 
 ## Limits
 
-- **Tailnet Lock is compiled in but unverified.** See [TODO.md](TODO.md) for the API and storage gaps.
+- **Tailnet Lock has no public status or signing API.** Authority persistence, restart, unsigned-peer
+  filtering and compaction have local tests; live locked-tailnet operation remains unverified.
+  See [TODO.md](TODO.md) for remaining coverage.
 - **Another app's VPN.** Apps cannot see a VPN's underlying networks, so nodes follow the best non-VPN
   network. Split tunnels, such as the Tailscale app's, leave node traffic on that network (tested
   live). With a full tunnel, such as an exit node, traffic uses the VPN while nodes follow the network

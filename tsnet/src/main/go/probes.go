@@ -24,6 +24,7 @@ var probes = map[string]func(string) string{
 	"flooded":               flooded,
 	"hostnames":             withControl(hostnames),
 	"interfaces":            probeInterfaces,
+	"loginURL":              probeLoginURL,
 	"netchangeAwait":        awaitNetworkChange,
 	"netchangeStart":        startNetworkProbe,
 	"netchangeStop":         stopNetworkProbe,
@@ -41,6 +42,10 @@ var probes = map[string]func(string) string{
 	"store":                 probeStore,
 	"tailnet":               func(string) string { return probeTailnet(false) },
 	"tailnetDerp":           func(string) string { return probeTailnet(true) },
+	"tailnetLock":           probeTailnetLock,
+	"tailnetLockRestart":    func(string) string { lockExpectSaved.Store(true); return "ok" },
+	"tailnetStore":          probeTailnetStore,
+	"watchDisconnect":       probeWatchDisconnect,
 }
 
 // klethron_probe calls the probe named before the first NUL in call with the rest as argument.

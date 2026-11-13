@@ -200,7 +200,8 @@ public final class TailnetNode implements AutoCloseable {
     /// Peer end of stream leaves the connection writable. Closing the channel or shutting down its
     /// output ends the connection after delivering written data; unread received data can cause a reset.
     /// Failures reset the connection, as does closing the node or losing tailnet access (leaving
-    /// [NodeStatus.State#RUNNING] except for [NodeStatus.State#STARTING]).
+    /// [NodeStatus.State#RUNNING] except for [NodeStatus.State#STARTING]). A gap in status notifications
+    /// also ends existing connections because it can hide revocation or a change of login.
     ///
     /// @param host a tailnet IP address or MagicDNS name, at most 255 UTF-8 bytes
     /// @throws IllegalArgumentException if the host is invalid or the port is not 1–65535
