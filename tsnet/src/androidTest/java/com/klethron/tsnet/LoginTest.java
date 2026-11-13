@@ -3,6 +3,7 @@ package com.klethron.tsnet;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
@@ -100,7 +101,7 @@ public final class LoginTest {
             assertTrue(status.addresses().isEmpty());
             node.logout(WAIT); // Already logged out.
             NodeStatus unchanged = node.awaitStatus(status, Duration.ofMillis(500));
-            assertEquals(status + " then " + unchanged, status.version, unchanged.version);
+            assertSame(status, unchanged);
 
             // The same node can log in again, with a new login URL.
             node.login();

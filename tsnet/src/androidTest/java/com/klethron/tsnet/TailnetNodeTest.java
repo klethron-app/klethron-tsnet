@@ -40,7 +40,7 @@ public final class TailnetNodeTest {
     }
 
     @Test(timeout = 30000)
-    @SuppressWarnings("AssertThrowsMultipleStatements") // The loop waits until close.
+    @SuppressWarnings({"AssertThrowsMultipleStatements", "NullAway"}) // Check blocking loops and null arguments.
     public void refusesInvalidCallsAndCloseEndsBlockedOnes() throws Exception {
         Path directory = LoginTest.temporaryDirectory("close-");
         try (TailnetNode node = TailnetNode.start(LoginTest.CONTEXT, directory.toFile(), "close", "http://127.0.0.1:1")) {
@@ -49,6 +49,7 @@ public final class TailnetNodeTest {
             }
             DialTest.assertDialThrows(IllegalArgumentException.class, node, "100.64.0.1", 0, Duration.ZERO);
             DialTest.assertDialThrows(IllegalArgumentException.class, node, "100.64.0.1", 65536, Duration.ZERO);
+            DialTest.assertDialThrows(NullPointerException.class, node, "100.64.0.1", 22, null);
             try (DatagramSocket datagram = new DatagramSocket(); SocketChannel unconnected = SocketChannel.open()) {
                 for (ParcelFileDescriptor socket : List.of(ParcelFileDescriptor.fromDatagramSocket(datagram),
                         ParcelFileDescriptor.fromSocket(unconnected.socket()))) {

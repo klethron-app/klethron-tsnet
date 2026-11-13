@@ -37,6 +37,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Random;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import org.junit.After;
 import org.junit.Before;
@@ -73,9 +74,7 @@ public final class DialTest {
     public void echoesThroughTheTailnet() throws Exception {
         // Over a Unix socket pair. The dial waits for the node to join; listsPeersAndTheirChanges
         // dials by name.
-        ParcelFileDescriptor[] pair = ParcelFileDescriptor.createSocketPair();
-        try (TailnetNode node = startNode(); ParcelFileDescriptor connection = pair[0]) {
-            node.dial(peer, 7070, pair[1], WAIT);
+        try (TailnetNode node = startNode(); ParcelFileDescriptor connection = node.dial(peer, 7070, WAIT)) {
             byte[] sent = new byte[1 << 20];
             new Random().nextBytes(sent);
             CompletableFuture<Void> writer = CompletableFuture.runAsync(() -> {
@@ -141,6 +140,26 @@ public final class DialTest {
         try (TailnetNode node = startNode(); SocketChannel connection = dial(node, peer, 7070, WAIT)) {
             assertEquals("2", Probe.call("expire"));
             assertReset(connection);
+        }
+    }
+
+    @Test(timeout = 60000)
+    public void logoutCancelsPendingConnections() throws Exception {
+        try (TailnetNode node = startNode()) {
+            Probe.call("addPeers");
+            LoginTest.await(node, status -> status.state() == NodeStatus.State.RUNNING
+                    && status.peers().stream().anyMatch(device -> device.dnsName().startsWith("klethron-other.")));
+            // This peer is in the network map but never answers, so connecting would take all of WAIT.
+            CountDownLatch dialing = new CountDownLatch(1);
+            CompletableFuture<ConnectException> pending = CompletableFuture.supplyAsync(() -> {
+                dialing.countDown();
+                return assertDialThrows(ConnectException.class, node, "100.101.0.1", 22, WAIT);
+            });
+            assertTrue("Dial task did not start", dialing.await(5, TimeUnit.SECONDS));
+            Thread.sleep(200);
+            assertFalse("Connection did not wait for the peer", pending.isDone());
+            node.logout(WAIT);
+            pending.get(5, TimeUnit.SECONDS);
         }
     }
 

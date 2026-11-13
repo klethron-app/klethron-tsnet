@@ -150,15 +150,12 @@ public final class LiveActivity extends Activity {
             // With Keep open, echoes reuse one stream, e.g. to test that it survives a network change.
             String target = host + ":" + port;
             if (!target.equals(heldTarget)) closeHeld();
-            ParcelFileDescriptor relayed = null;
-            if (held == null) {
-                ParcelFileDescriptor[] pair = ParcelFileDescriptor.createSocketPair();
-                held = pair[0];
-                heldTarget = target;
-                relayed = pair[1];
-            }
+            boolean opened = held == null;
             try {
-                if (relayed != null) current.dial(host, port, relayed, TIMEOUT);
+                if (held == null) {
+                    held = current.dial(host, port, TIMEOUT);
+                    heldTarget = target;
+                }
                 echo(held, sent);
             } catch (Exception failure) {
                 closeHeld();
@@ -166,7 +163,7 @@ public final class LiveActivity extends Activity {
             }
             long elapsed = SystemClock.elapsedRealtime() - start;
             if (!keepOpen) closeHeld();
-            return getString(relayed != null ? R.string.echo_verified : R.string.echo_verified_open, sent.length, elapsed);
+            return getString(opened ? R.string.echo_verified : R.string.echo_verified_open, sent.length, elapsed);
         });
     }
 

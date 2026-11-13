@@ -139,7 +139,7 @@ public final class TailnetNode implements AutoCloseable {
 
     /// Waits for a status change, returning the latest snapshot when it changes or `timeout` elapses.
     /// Pass `null` to read immediately, or a previous snapshot from this node to wait. Intermediate
-    /// changes may be skipped.
+    /// changes may be skipped. Returns `previous` itself if nothing changed.
     ///
     /// @throws IllegalArgumentException if `previous` belongs to another node
     /// @throws ClosedChannelException if the node is or becomes closed
@@ -152,7 +152,30 @@ public final class TailnetNode implements AutoCloseable {
         if (record == null) {
             throw new ClosedChannelException();
         }
-        return new NodeStatus(handle, record);
+        return record.isEmpty() ? Objects.requireNonNull(previous) : new NodeStatus(handle, record);
+    }
+
+    /// Opens a tailnet TCP connection and returns a blocking Unix stream socket owned by the caller.
+    /// Read and write its descriptor with file streams or [android.system.Os], and close it when
+    /// finished. See [#dial(String, int, ParcelFileDescriptor, Duration)] for routing, timeout and
+    /// shutdown behavior. Use that overload for NIO selectors or to distinguish a reset from a
+    /// peer's end of stream.
+    ///
+    /// @throws IOException if the connection cannot be opened
+    @WorkerThread
+    public ParcelFileDescriptor dial(String host, int port, Duration timeout) throws IOException {
+        ParcelFileDescriptor[] pair = ParcelFileDescriptor.createSocketPair();
+        try {
+            dial(host, port, pair[1], timeout);
+            return pair[0];
+        } catch (IOException | RuntimeException | Error failure) {
+            try {
+                pair[0].close();
+            } catch (IOException closeFailure) {
+                failure.addSuppressed(closeFailure);
+            }
+            throw failure;
+        }
     }
 
     /// Opens a TCP connection to a tailnet address or
@@ -180,15 +203,16 @@ public final class TailnetNode implements AutoCloseable {
     /// @throws UnknownHostException if the tailnet's DNS cannot resolve `host`
     /// @throws NoRouteToHostException if the address is outside the tailnet; it never falls back to a local connection
     /// @throws SocketTimeoutException if the timeout elapses first
-    /// @throws ConnectException if the connection fails
+    /// @throws ConnectException if the connection fails or tailnet access ends while connecting
     @WorkerThread
     public void dial(String host, int port, ParcelFileDescriptor socket, Duration timeout) throws IOException {
         try (socket) { // Closes it unless passed on.
+            long timeoutNanos = NANOSECONDS.convert(timeout);
             byte[] name = host.getBytes(StandardCharsets.UTF_8);
             if (name.length == 0 || name.length > 255 || host.indexOf(0) >= 0 || port < 1 || port > 65535) {
                 throw new IllegalArgumentException("Host must have 1–255 bytes without NUL and port must be 1–65535");
             }
-            check(nativeDial(handle, name, port, socket.detachFd(), NANOSECONDS.convert(timeout)));
+            check(nativeDial(handle, name, port, socket.detachFd(), timeoutNanos));
         }
     }
 

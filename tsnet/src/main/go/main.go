@@ -56,7 +56,7 @@ func klethron_node_start(config *C.char, length C.int) C.longlong {
 	return addNode(n)
 }
 
-// klethron_node_await_status returns the status record, or NULL once the node is closed.
+// klethron_node_await_status returns the changed status, "" if unchanged, or NULL after close.
 //
 //export klethron_node_await_status
 func klethron_node_await_status(id C.longlong, after C.longlong, timeout C.longlong) *C.char {

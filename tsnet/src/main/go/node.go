@@ -283,8 +283,8 @@ func loginURL(raw string) string {
 	return raw
 }
 
-// await returns the status record once its version differs from after, or the timeout elapses.
-// It returns false once the node is closed.
+// await returns the status record once its version differs from after, or "" on timeout without a
+// change so Java can keep its existing snapshot. It returns false once the node is closed.
 func (n *node) await(after uint64, timeout time.Duration) (string, bool) {
 	if n == nil {
 		return "", false
@@ -292,7 +292,13 @@ func (n *node) await(after uint64, timeout time.Duration) (string, bool) {
 	ctx, cancel := context.WithTimeout(n.ctx, timeout)
 	defer cancel()
 	status, version := n.wait(ctx, func(_ nodeStatus, version uint64) bool { return version != after })
-	return status.record(version), n.ctx.Err() == nil
+	if n.ctx.Err() != nil {
+		return "", false
+	}
+	if version == after {
+		return "", true
+	}
+	return status.record(version), true
 }
 
 // wait returns the latest status and its version once done accepts them or ctx ends.
@@ -376,11 +382,18 @@ func (n *node) dial(host string, port uint16, fd int, timeout time.Duration) (re
 	n.mu.Lock()
 	access := n.access // Ends if the node stops running from now on, also while dialing.
 	n.mu.Unlock()
+	dialCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	unwatch := context.AfterFunc(access, cancel)
+	defer unwatch()
 	// Peer names resolve from the network map, others only through the tailnet's DNS: the
 	// dns_lookup.go patch keeps them from the device's resolver.
 	dialer := n.server.Sys().Dialer.Get()
-	target, _, err := dialer.UserDialPlan(ctx, "tcp", net.JoinHostPort(host, strconv.Itoa(int(port))))
+	target, _, err := dialer.UserDialPlan(dialCtx, "tcp", net.JoinHostPort(host, strconv.Itoa(int(port))))
 	if err != nil {
+		if access.Err() != nil {
+			return n.failed(ctx, resultDialFailed)
+		}
 		return n.failed(ctx, resultUnknownHost)
 	}
 	// Netstack reaches exactly the network map's peers and subnet routes. Upstream Server.Dial would
@@ -388,8 +401,12 @@ func (n *node) dial(host string, port uint16, fd int, timeout time.Duration) (re
 	if !dialer.UseNetstackForIP(target.Addr()) {
 		return n.failed(ctx, resultNoRoute)
 	}
-	conn, err := dialer.NetstackDialTCP(ctx, target)
+	conn, err := dialer.NetstackDialTCP(dialCtx, target)
 	if err != nil {
+		return n.failed(ctx, resultDialFailed)
+	}
+	if access.Err() != nil {
+		_ = conn.Close()
 		return n.failed(ctx, resultDialFailed)
 	}
 	relay(access, conn, app)
