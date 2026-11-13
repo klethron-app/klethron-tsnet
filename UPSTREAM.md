@@ -82,6 +82,7 @@ with Go 1.27.4. All entries rechecked 2026-11-13; none fixed upstream. Remove en
 
 ## Limits
 
+- **Tailnet Lock is compiled in but unverified.** See [TODO.md](TODO.md) for the API and storage gaps.
 - **Another app's VPN.** Apps cannot see a VPN's underlying networks, so nodes follow the best non-VPN
   network. Split tunnels, such as the Tailscale app's, leave node traffic on that network (tested
   live). With a full tunnel, such as an exit node, traffic uses the VPN while nodes follow the network
