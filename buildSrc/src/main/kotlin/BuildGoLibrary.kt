@@ -107,6 +107,11 @@ abstract class BuildGoLibrary @Inject constructor(
         // Names that the tailnet's DNS does not answer must not reach the device's resolver.
         patch("tsnet/dns_lookup.go", "b49ecd66f1b9f4de7e7ef20061148a0e903de2e847627db38c88715c6964dc93",
             "return c.hostLookup(ctx, network, hostFB)", "return candidateResult{servfail: true, err: firstErr}")
+        patch("tsnet/tsnet.go", "c37b19724de27737147f427e4a6e81e947736244848d55d6425a966cdbf24125",
+            "\tgo s.printAuthURLLoop()\n", "")
+        workspace.resolve("tailscale/tsnet/tsnet.go").appendText(
+            "\n// Status reads directly from the backend; call only between Start and Close.\n" +
+            "func (s *Server) Status() *ipnstate.Status { return s.lb.Status() }\n")
         workspace.resolve("go.mod").appendText("\nreplace tailscale.com => ./tailscale\n")
         val flags = arrayOf("-mod=readonly", "-trimpath", "-buildvcs=false", "-tags=" + buildTags.get().joinToString(","))
         val target = mapOf("GOOS" to "android", "GOARCH" to arch, "CGO_ENABLED" to "1", "CC" to compiler.absolutePath)

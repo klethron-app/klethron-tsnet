@@ -81,7 +81,6 @@ func (n *node) start(config string) int {
 	refresh := make(chan struct{}, 1)
 	n.watchers.Go(func() { n.watchStatus(refresh) })
 	n.watchers.Go(func() { n.refreshStatus(refresh) })
-	context.AfterFunc(n.ctx, watchDefaultNetwork(n.server))
 	return 0
 }
 
@@ -97,6 +96,7 @@ func (n *node) close() {
 // large status reads can stall the watch. Every map sends SelfChange; among peer patches, only
 // online changes affect our records. Other peer changes arrive as full nodes.
 func (n *node) watchStatus(refresh chan<- struct{}) {
+	defer watchDefaultNetwork(n.server)()
 	for n.ctx.Err() == nil {
 		if watcher, err := n.client.WatchIPNBus(n.ctx, ipn.NotifyInitialState|ipn.NotifyInitialStatus|ipn.NotifyPeerPatches); err == nil {
 			for {
@@ -123,7 +123,6 @@ func (n *node) watchStatus(refresh chan<- struct{}) {
 	}
 }
 
-// refreshStatus reads names and peers from the current map, which logout clears.
 func (n *node) refreshStatus(refresh <-chan struct{}) {
 	for {
 		select {
@@ -131,9 +130,7 @@ func (n *node) refreshStatus(refresh <-chan struct{}) {
 			return
 		case <-refresh:
 		}
-		if status, err := n.client.Status(n.ctx); err == nil {
-			n.publish(ipn.Notify{}, readStatus(status))
-		}
+		n.publish(ipn.Notify{}, readStatus(n.server.Status()))
 	}
 }
 

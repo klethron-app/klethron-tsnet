@@ -79,16 +79,13 @@ public final class NodeStatus {
         loginName = emptyToNull(fields[8]);
         peers = fields.length == 9 ? List.of() : Arrays.stream(fields, 9, fields.length).map(line -> {
             String[] peer = line.split("\t", -1);
-            return new Peer(peer[0], peer[1], Boolean.parseBoolean(peer[2]), addresses(peer[3]), list(peer[4]));
+            return new Peer(peer[0], peer[1], Boolean.parseBoolean(peer[2]), addresses(peer[3]),
+                    peer[4].isEmpty() ? List.of() : List.of(peer[4].split(",")));
         }).toList();
     }
 
     private static @Nullable String emptyToNull(String field) {
         return field.isEmpty() ? null : field;
-    }
-
-    private static List<String> list(String commaSeparated) {
-        return commaSeparated.isEmpty() ? List.of() : List.of(commaSeparated.split(","));
     }
 
     private static List<InetAddress> addresses(String commaSeparated) {

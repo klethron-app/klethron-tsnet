@@ -84,7 +84,7 @@ public final class TailnetNode implements AutoCloseable {
 
     private final long handle;
     private final String directory;
-    private boolean closed; // Guarded by this.
+    private volatile boolean closed;
 
     private TailnetNode(long handle, String directory) {
         this.handle = handle;
@@ -196,9 +196,7 @@ public final class TailnetNode implements AutoCloseable {
         if (name.length == 0 || name.length > 255 || host.indexOf(0) >= 0 || port < 1 || port > 65535) {
             throw new IllegalArgumentException("Host must have 1–255 bytes without NUL and port must be 1–65535");
         }
-        synchronized (this) {
-            if (closed) throw new ClosedChannelException();
-        }
+        if (closed) throw new ClosedChannelException();
         if (timeoutNanos <= 0) throw new SocketTimeoutException("Timed out");
         long started = System.nanoTime();
         SocketChannel connection = SocketChannel.open();
@@ -279,8 +277,8 @@ public final class TailnetNode implements AutoCloseable {
     public synchronized void close() {
         // Serialized, so no call returns before the directory is free.
         if (closed) return;
-        nativeClose(handle);
         closed = true;
+        nativeClose(handle);
         release(directory);
     }
 

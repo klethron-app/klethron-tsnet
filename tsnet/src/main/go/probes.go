@@ -15,7 +15,6 @@ var probes = map[string]func(string) string{
 	"approveMachines":       withControl(approveMachines),
 	"awaitReceived":         awaitReceived,
 	"complete":              withControl(completeLogin),
-	"concurrentClose":       probeConcurrentClose,
 	"control":               probeControl,
 	"crash":                 probeCrash,
 	"defaultRoute":          probeDefaultRoute,

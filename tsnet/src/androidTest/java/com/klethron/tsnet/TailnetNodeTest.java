@@ -1,6 +1,5 @@
 package com.klethron.tsnet;
 
-import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
@@ -60,20 +59,18 @@ public final class TailnetNodeTest {
                             DialTest.assertDialThrows(ClosedChannelException.class, node, "100.64.0.1", 22, forever)));
             Thread.sleep(200); // Best effort: let both calls block.
             assertFalse(blocked.stream().anyMatch(CompletableFuture::isDone));
+            CompletableFuture<Void> closing = CompletableFuture.runAsync(node::close);
             node.close();
+            closing.get(10, TimeUnit.SECONDS);
             for (var call : blocked) call.get(10, TimeUnit.SECONDS);
             node.close();
             assertThrows(ClosedChannelException.class, () -> node.awaitStatus(null, Duration.ZERO));
             DialTest.assertDialThrows(ClosedChannelException.class, node, "100.64.0.1", 22, Duration.ZERO);
             assertThrows(ClosedChannelException.class, () -> node.logout(Duration.ZERO));
             assertThrows(ClosedChannelException.class, node::login);
+            TailnetNode.start(LoginTest.CONTEXT, directory.toFile(), "reopened", "http://127.0.0.1:1").close();
         } finally {
             LoginTest.deleteDirectory(directory);
         }
-    }
-
-    @Test
-    public void concurrentCloseWaitsForShutdown() {
-        assertEquals("ok", Probe.call("concurrentClose"));
     }
 }

@@ -14,6 +14,11 @@ with Go 1.27.4. All entries rechecked 2026-11-13; none fixed upstream. Remove en
   which sends the name to the device's network and lets its DNS answer with any address, including a
   reachable peer's. Upstream has no option to disable this. Patch: count that case as a failed lookup,
   in a hash-checked copy of `tsnet/dns_lookup.go`. `DialTest.reachesOnlyTheTailnet` fails without it.
+- **Status reads serialize the whole peer list through HTTP and JSON.** A `Server.Status` accessor
+  reads the same backend snapshot directly. Called only between startup and watcher shutdown.
+- **The login logger polls even with logging discarded.** Remove the `printAuthURLLoop` launch;
+  our IPN watcher already receives login URLs. This saves two goroutines and five-second status polls
+  while awaiting initial login. Both changes are hash-checked in `tsnet/tsnet.go`.
 
 ## Worked around
 

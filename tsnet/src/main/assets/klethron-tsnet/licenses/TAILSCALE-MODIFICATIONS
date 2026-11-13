@@ -1,8 +1,9 @@
-Klethron tsnet modifies two tailscale.com source files in an isolated build copy.
+Klethron tsnet modifies three tailscale.com source files in an isolated build copy.
 Upstream revision: 59064619a0f4ea3293be038e08651c66c2886255
 Original file SHA-256:
 control/controlclient/direct.go: ccdcc186decb2efe76c98af7e4914b77f15a7d7eda9406b1bb2b441c7fa1575a
 tsnet/dns_lookup.go: b49ecd66f1b9f4de7e7ef20061148a0e903de2e847627db38c88715c6964dc93
+tsnet/tsnet.go: c37b19724de27737147f427e4a6e81e947736244848d55d6425a966cdbf24125
 
 Binary build metadata records the copy as "tailscale.com => ./tailscale"; the
 GO-MODULES.tsv checksum identifies the upstream module before these changes:
@@ -33,3 +34,14 @@ A name that no tailnet DNS route covers, and whose tailnet queries all fail,
 counts as a failed lookup. Upstream then asks the host's resolver, which sends
 the name to the device's network and lets that network's DNS answer with any
 address, including a reachable tailnet address.
+
+--- a/tsnet/tsnet.go
++++ b/tsnet/tsnet.go
+@@ -1049 +1048,0 @@
+-	go s.printAuthURLLoop()
+
+Remove the discarded login logger's two goroutines and five-second status polls.
+Append a direct status accessor to avoid LocalAPI's HTTP/JSON round trip:
+
+// Status reads directly from the backend; call only between Start and Close.
+func (s *Server) Status() *ipnstate.Status { return s.lb.Status() }
