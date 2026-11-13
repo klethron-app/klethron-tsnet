@@ -57,8 +57,16 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: tsnet/src/main/go/go.mod
-          # Release builds must not restore a Go build cache that other runs wrote.
-          cache: false
+          # Only v* tags can publish; those builds never restore shared caches.
+          cache: ${{ !startsWith(github.ref, 'refs/tags/v') }} # zizmor: ignore[cache-poisoning]
+          cache-dependency-path: tsnet/src/main/go/go.sum
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+        with:
+          cache-provider: basic
+          cache-disabled: ${{ startsWith(github.ref, 'refs/tags/v') }} # zizmor: ignore[cache-poisoning]
+          cache-read-only: ${{ github.ref != 'refs/heads/main' }}
+          validate-wrappers: false # Already checked by validate.
+          add-job-summary: on-failure
       - name: Check Go formatting
         run: |
           files=$(gofmt -l tsnet/src/main/go)
@@ -131,13 +139,13 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: reports
+          if-no-files-found: ignore
           path: |
             tsnet/build/reports/
             demo/build/reports/
             build/emulator-tests/
 
-  # Release tags only. Secrets live in the protected maven-central environment, and this job runs no
-  # build code. Approving it publishes irreversibly once Central validates the upload.
+  # Signing and publishing need approval in the maven-central environment.
   release:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: build

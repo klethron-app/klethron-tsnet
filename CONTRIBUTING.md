@@ -1,22 +1,35 @@
 # Contributing
 
-See [AGENTS.md](AGENTS.md) for conventions and [UPSTREAM.md](UPSTREAM.md) for patches and limitations.
+Small fixes, documentation changes and bug reports are welcome. See [AGENTS.md](AGENTS.md) for
+conventions and [UPSTREAM.md](UPSTREAM.md) for patches and limitations.
+
+## Pull requests
+
+Fork the repository, make a branch and open a PR against `main`. Describe the problem, your change
+and what you tested. If you cannot run the build or device tests locally, say so; CI runs both.
+The automated tests use local fixtures and need no Tailscale account or repository secrets.
+
+First-time contributors may need a maintainer to approve the CI run. If GitHub shows **Awaiting
+approval**, there is nothing you need to configure in your fork. Further pushes update the same PR
+and cancel its older CI run.
+
+Open a failed check's **Details** to find the failing step. The run summary shows Android test counts;
+download its `reports` artifact for HTML reports and JUnit XML. CI checks whitespace, shell scripts,
+workflows and Go formatting, then builds and tests API 34/4 KiB and API 37.2/16 KiB x86_64 emulators.
+For Go changes, run `gofmt -w tsnet/src/main/go`; `git diff --check` catches whitespace errors.
 
 ## Build and test
 
-Use the toolchains pinned in [libs.versions.toml](gradle/libs.versions.toml) and
-[go.mod](tsnet/src/main/go/go.mod). JDK 25+ also works; releases need the pinned version.
-Set `ANDROID_HOME` or `sdk.dir` in `local.properties`. Native builds support Linux x86_64 and macOS;
-only Linux has been verified.
+Install JDK 25 or newer, the Go version in [go.mod](tsnet/src/main/go/go.mod), and the Android SDK
+platform, build tools and NDK pinned in [libs.versions.toml](gradle/libs.versions.toml).
+CI and releases use the pinned JDK. Set `ANDROID_HOME` or `sdk.dir` in `local.properties` to your SDK.
+Native builds support Linux x86_64 and macOS; only Linux has been verified.
 
 ```sh
 ./gradlew build
 ANDROID_SERIAL=<serial> ./gradlew :tsnet:connectedDebugAndroidTest
 ANDROID_SERIAL=<serial> ./gradlew :demo:connectedReleaseAndroidTest
 ```
-
-CI tests main, pull requests and release tags on x86_64 emulators with API 34/4 KiB and API 37.2/16 KiB
-pages. Results are in its `reports` artifact.
 
 Device tests require SELinux Enforcing and internet access. The network-change test toggles Wi-Fi and
 needs cellular fallback; use USB ADB on hardware. Debug builds include local control-server and peer
