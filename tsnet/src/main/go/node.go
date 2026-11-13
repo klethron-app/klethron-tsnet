@@ -367,6 +367,9 @@ func (n *node) dial(host string, port uint16, fd int, timeout time.Duration) (re
 	if status.state != ipn.Running || ctx.Err() != nil {
 		return n.failed(ctx, resultTimeout)
 	}
+	if access.Err() != nil {
+		return n.failed(ctx, resultDialFailed)
+	}
 	dialCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	unwatch := context.AfterFunc(access, cancel)

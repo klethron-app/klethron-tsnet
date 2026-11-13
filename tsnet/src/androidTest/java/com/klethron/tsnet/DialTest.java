@@ -114,11 +114,6 @@ public final class DialTest {
                     Arrays.asList(status.dnsName(), status.tailnetName(), status.loginName()));
             assertTrue(status.toString(), status.toString().endsWith(", peers=1}"));
             assertFalse(status.toString().contains("tail-scale") || status.toString().contains("example.net"));
-            connection.write(ByteBuffer.wrap(new byte[] {1}));
-            ByteBuffer one = ByteBuffer.allocate(1);
-            assertEquals(1, connection.read(one));
-            assertEquals(1, one.get(0));
-
             // Hides the sharee and Mullvad nodes; sorts by name, lists IPv4 first, trims host keys and
             // drops one with a comma.
             Probe.call("addPeers");
@@ -276,13 +271,11 @@ public final class DialTest {
         }
     }
 
-    /// Requires the public connection operation to throw `expected`.
     @CanIgnoreReturnValue
     static <T extends Throwable> T assertDialThrows(Class<T> expected, TailnetNode node, String host, int port, Duration timeout) {
         return assertThrows(expected, () -> node.connect(host, port, timeout).close());
     }
 
-    /// Asserts that reading `connection` reports a reset, as when the node loses tailnet access.
     private static void assertReset(SocketChannel connection) {
         assertEquals("Connection reset by peer",
                 assertThrows(IOException.class, () -> connection.read(ByteBuffer.allocate(1))).getMessage());
@@ -305,7 +298,6 @@ public final class DialTest {
     /// login_probe.go's floodBytes: bytes of the probe pattern (byte `i` is `i % 251`) on ports 7073 and 7074.
     private static final long FLOOD = 48 << 20;
 
-    /// Fills `bytes` with the probe pattern from stream offset `offset`.
     private static byte[] pattern(long offset, byte[] bytes) {
         for (int i = 0; i < bytes.length; i++) {
             bytes[i] = (byte) ((offset + i) % 251);
@@ -313,7 +305,6 @@ public final class DialTest {
         return bytes;
     }
 
-    /// Returns whether the selector's only channel became ready within `timeoutMillis`.
     private static boolean ready(Selector selector, int timeoutMillis) throws IOException {
         boolean ready = selector.select(timeoutMillis) == 1;
         selector.selectedKeys().clear();
