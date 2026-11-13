@@ -13,6 +13,11 @@ import java.util.TreeSet;
 import org.junit.Test;
 
 public final class TrustRootsTest {
+    @Test(timeout = 30000)
+    public void dnsOverHttpsUsesTheSuppliedRoots() {
+        assertEquals("ok", Probe.call("dnsRoots"));
+    }
+
     @Test
     public void goTrustsExactlyAndroidSystemRoots() throws Exception {
         Set<String> expected = systemRootFingerprints();

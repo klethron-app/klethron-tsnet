@@ -25,6 +25,7 @@ var probes = map[string]func(string) string{
 	"controlRotation":       probeNonInteractiveRotation,
 	"crash":                 probeCrash,
 	"defaultRoute":          probeDefaultRoute,
+	"dnsRoots":              probeDNSRoots,
 	"expire":                withControl(expireNodes),
 	"flooded":               flooded,
 	"hostnames":             withControl(hostnames),

@@ -118,8 +118,8 @@ func probeNonInteractiveRotation(string) string {
 // closed. On port 7073 it writes floodBytes of the probe pattern, counting progress, then closes.
 // On port 7074 it reads nothing until released, then reports how many bytes of the probe pattern
 // it received until the dialer closed, or -3 at the first other byte. It returns the peer's
-// tailnet IPv4 address, or "" on failure.
-func startPeer(string) string {
+// tailnet IPv4 address, or a diagnostic on failure. Mode "dns" also starts the split-DNS fixture.
+func startPeer(mode string) string {
 	loginProbe.Lock()
 	defer loginProbe.Unlock()
 	if loginProbe.control == nil {
@@ -172,6 +172,11 @@ func startPeer(string) string {
 		}
 		peer.closers = append(peer.closers, func() { _ = ln.Close() })
 		go serve(ln, handle)
+	}
+	if mode == "dns" {
+		if err := startPeerDNS(peer, server, ip, loginProbe.control); err != nil {
+			return "DNS peer failed"
+		}
 	}
 	return ip.String()
 }

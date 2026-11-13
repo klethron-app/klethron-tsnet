@@ -108,6 +108,36 @@ abstract class BuildGoLibrary @Inject constructor(
         // Names that the tailnet's DNS does not answer must not reach the device's resolver.
         patch("tsnet/dns_lookup.go", "b49ecd66f1b9f4de7e7ef20061148a0e903de2e847627db38c88715c6964dc93",
             "return c.hostLookup(ctx, network, hostFB)" to "return candidateResult{servfail: true, err: firstErr}")
+        // DNS TCP retries and DoH must use netstack for tailnet resolvers, including on Android.
+        patch("net/dns/resolver/forwarder.go", "804a86c6264a7fcb3d2795e33d047a88502836ca74f5eaa516331acc8e0e4b94",
+            "\t\"tailscale.com/net/tsdial\"" to "\t\"tailscale.com/net/tlsdial\"\n\t\"tailscale.com/net/tsdial\"",
+            "\t\tMinVersion: tls.VersionTLS13," to "\t\tMinVersion: tls.VersionTLS13,\n\t\tRootCAs: tlsdial.SystemRoots,",
+            "func (f *forwarder) getDialerType() netx.DialFunc {\n" +
+                "\tif ShouldUseRoutes(f.controlKnobs) {\n\t\treturn f.dialer.UserDial\n\t}\n\treturn f.dialer.SystemDial\n}" to """
+                func (f *forwarder) getDialerType() netx.DialFunc {
+                    dial := f.dialer.SystemDial
+                    if ShouldUseRoutes(f.controlKnobs) {
+                        dial = f.dialer.UserDial
+                    }
+                    return func(ctx context.Context, network, address string) (net.Conn, error) {
+                        if ipp, err := netip.ParseAddrPort(address); err == nil {
+                            ipp = netip.AddrPortFrom(ipp.Addr().Unmap(), ipp.Port())
+                            if f.dialer.UseNetstackForIP != nil && f.dialer.UseNetstackForIP(ipp.Addr()) {
+                                if f.dialer.NetstackDialTCP == nil {
+                                    return nil, errors.New("dialer not initialized correctly: no NetstackDialTCP")
+                                }
+                                return f.dialer.NetstackDialTCP(ctx, ipp)
+                            }
+                        }
+                        return dial(ctx, network, address)
+                    }
+                }
+            """.trimIndent())
+        // Control can supply mixed-case split-DNS routes; wire query names are lowercased.
+        patch("util/dnsname/dnsname.go", "5608189341565036e81b5d09c808034dd2f44e9d9cd8c7c9b7cd90764a7cdf3c",
+            "\tif f == other {" to "\tif strings.EqualFold(string(f), string(other)) {",
+            "\treturn strings.HasSuffix(other.WithTrailingDot(), cmp)" to
+                "\tname := other.WithTrailingDot()\n\treturn len(name) >= len(cmp) && strings.EqualFold(name[len(name)-len(cmp):], cmp)")
         if ("klethron_test" in buildTags.get()) {
             patch("tstest/integration/testcontrol/testcontrol.go", "e8f952ff2ea480a7e52dc95faeb824f13b3e7102ef0b8afedd5f14077e890a53",
                 "\t\tif isFollowup {" to "\t\tif isFollowup || !s.RequireAuth {")

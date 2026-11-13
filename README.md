@@ -12,7 +12,8 @@ Requires **Android 14 (API 34)** or later. The AAR supports **arm64-v8a**, **x86
 consumers need no Go compiler or NDK.
 
 **Under development.** Local tests cover login, logout, revocation, SQLite restart and crash recovery,
-`SocketChannel` operations, IPv6, peer listing, network replacement and Tailnet Lock persistence.
+`SocketChannel` operations, IPv6, peer listing, split DNS, DNS-over-HTTPS trust, network replacement
+and Tailnet Lock persistence.
 Live tests cover login, logout, revocation, TCP transport and Wi-Fi/cellular switches; switches have
 only been tested with Tailscale's VPN active. Tailnet Lock status and signing APIs are not exposed.
 See [limitations](UPSTREAM.md#limits) and [Javadoc](https://javadoc.io/doc/com.klethron/tsnet/latest/).

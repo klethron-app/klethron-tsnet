@@ -1,8 +1,10 @@
-Klethron tsnet modifies six tailscale.com source files in an isolated build copy.
+Klethron tsnet modifies eight tailscale.com source files in an isolated build copy.
 Debug builds also patch tstest/integration/testcontrol/testcontrol.go, as described below.
 Upstream revision: 59064619a0f4ea3293be038e08651c66c2886255
 Original file SHA-256:
 net/tlsdial/tlsdial.go: 49adc77dc68cf066fa695037cc41164509949dfa8a97e96a9c4fd334cd3b7e1e
+net/dns/resolver/forwarder.go: 804a86c6264a7fcb3d2795e33d047a88502836ca74f5eaa516331acc8e0e4b94
+util/dnsname/dnsname.go: 5608189341565036e81b5d09c808034dd2f44e9d9cd8c7c9b7cd90764a7cdf3c
 control/controlclient/direct.go: ccdcc186decb2efe76c98af7e4914b77f15a7d7eda9406b1bb2b441c7fa1575a
 tsnet/dns_lookup.go: b49ecd66f1b9f4de7e7ef20061148a0e903de2e847627db38c88715c6964dc93
 tsnet/tsnet.go: c37b19724de27737147f427e4a6e81e947736244848d55d6425a966cdbf24125
@@ -44,6 +46,35 @@ A name that no tailnet DNS route covers, and whose tailnet queries all fail,
 counts as a failed lookup. Upstream then asks the host's resolver, which sends
 the name to the device's network and lets that network's DNS answer with any
 address, including a reachable tailnet address.
+
+In net/dns/resolver/forwarder.go, getDialerType wraps the selected dialer with
+a per-address check. Normalize IP literals and dial them with NetstackDialTCP
+when UseNetstackForIP recognizes the route; retain the original dialer for all
+other destinations. Android otherwise uses SystemDial for TCP DNS and DoH
+unless control enables user-dial-routes, even though UDP DNS already uses
+netstack for tailnet resolvers. Calling NetstackDialTCP directly also prevents
+a route disappearing between the check and dial from causing device-network
+fallback. See https://github.com/tailscale/tailscale/pull/15259.
+
+The same file imports net/tlsdial and sets the DoH TLS configuration's RootCAs
+to tlsdial.SystemRoots. This path bypasses tlsdial.Config, so it also needs the
+Android certificate pool to avoid filesystem root discovery.
+
+--- a/util/dnsname/dnsname.go
++++ b/util/dnsname/dnsname.go
+@@
+ func (f FQDN) Contains(other FQDN) bool {
+-	if f == other {
++	if strings.EqualFold(string(f), string(other)) {
+@@
+-	return strings.HasSuffix(other.WithTrailingDot(), cmp)
++	name := other.WithTrailingDot()
++	return len(name) >= len(cmp) && strings.EqualFold(name[len(name)-len(cmp):], cmp)
+
+Match DNS route suffixes case-insensitively while preserving label boundaries.
+Control-supplied route keys can contain uppercase letters, while the resolver
+lowercases query names. This applies the Contains fix from the broader proposal
+https://github.com/tailscale/tailscale/pull/22380.
 
 --- a/tsnet/tsnet.go
 +++ b/tsnet/tsnet.go

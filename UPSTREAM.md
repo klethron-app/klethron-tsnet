@@ -3,6 +3,9 @@
 Pinned: Tailscale [`59064619a0f4`](https://github.com/tailscale/tailscale/commit/59064619a0f4ea3293be038e08651c66c2886255)
 with Go 1.27.4. Reviewed 2026-11-13. Remove patches when equivalent fixes reach the pin.
 
+This pin already includes the [netstack shutdown fix](https://github.com/tailscale/tailscale/pull/21668)
+needed by [Tailcat #151](https://github.com/tailscale/tailcat/issues/151); no backport is needed.
+
 ## Patched
 
 - **Test control keeps old keys after noninteractive rotation.** It deletes them only after a
@@ -17,6 +20,18 @@ with Go 1.27.4. Reviewed 2026-11-13. Remove patches when equivalent fixes reach 
   which sends the name to the device's network and lets its DNS answer with any address, including a
   reachable peer's. Upstream has no option to disable this. Patch: count that case as a failed lookup,
   in a hash-checked copy of `tsnet/dns_lookup.go`. `DialTest.reachesOnlyTheTailnet` fails without it.
+- **DNS-over-TCP and HTTPS can bypass netstack on Android.** UDP already checks `UseNetstackForIP`,
+  but TCP and DoH select `SystemDial` unless the `user-dial-routes` capability is enabled
+  ([#14854](https://github.com/tailscale/tailscale/issues/14854), proposed
+  [PR #15259](https://github.com/tailscale/tailscale/pull/15259)). Following the
+  [TailSocks fix](https://github.com/bropines/tailsocks/blob/d7f1e574fe293adc2e81b8aa24085c53e9afa56c/appctr/patches/14-dns-forwarder-netstack.patch),
+  patch `forwarder.getDialerType` to dial matching IP literals directly with `NetstackDialTCP`.
+  Other destinations retain upstream's dialer selection. `DnsTest` exercises a tailnet resolver's
+  UDP answers and TCP retries after truncation or silence.
+- **Mixed-case split-DNS routes do not match queries.** Route keys preserve case while queries are
+  lowercased. Patch `dnsname.FQDN.Contains` to compare case-insensitively, retaining label boundaries
+  ([PR #22380](https://github.com/tailscale/tailscale/pull/22380)). `DnsTest` covers an uppercase route,
+  a mixed-case query and a nonmatching label suffix.
 - **Status reads serialize the whole peer list through HTTP and JSON.** A `Server.Status` accessor
   reads the same backend snapshot directly. Called only between startup and watcher shutdown.
 - **The login logger polls even with logging discarded.** Remove the `printAuthURLLoop` launch;
@@ -32,8 +47,9 @@ with Go 1.27.4. Reviewed 2026-11-13. Remove patches when equivalent fixes reach 
   required chain history; this is not a hard byte cap. Profile deletion and logout remove it entirely.
   Invalid saved history and callback errors stop the node. No authority directory is used.
 - **TLS discovers roots through filesystem reads.** Android supplies enabled system certificates via
-  `AndroidCAStore`; patch `tlsdial` to use that explicit pool. `bakedroots` is omitted. This also fixes
-  Go missing Android 14's updatable Conscrypt store and user-disabled roots
+  `AndroidCAStore`; patch `tlsdial` and the DNS-over-HTTPS transport to use that explicit pool.
+  `TrustRootsTest` checks DoH rejection and acceptance with supplied pools. `bakedroots` is omitted.
+  This also fixes Go missing Android 14's updatable Conscrypt store and user-disabled roots
   ([golang/go#71258](https://github.com/golang/go/issues/71258)).
 
 ## Worked around
@@ -103,6 +119,9 @@ with Go 1.27.4. Reviewed 2026-11-13. Remove patches when equivalent fixes reach 
   (upstream's unexported `watchIPNBusFellBehindMessage`) as terminal without waiting for EOF.
   Any watch interruption ends previously granted access for dials and relays: missed
   events can include logout, expiry or a different login. A new Running snapshot cannot revive that access.
+  Android's watcher fixes ([#941](https://github.com/tailscale/tailscale-android/pull/941),
+  [#945](https://github.com/tailscale/tailscale-android/pull/945)) reinforce restarting interrupted watches;
+  this library also revokes access across the gap.
 
 ## Limits
 

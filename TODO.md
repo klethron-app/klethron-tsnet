@@ -10,6 +10,8 @@ Preserve peer-name resolution, the caller's deadline and revocation cancellation
 - Test an unreachable first answer followed by a working one, including IPv4/IPv6 fallback.
 - Test mixed tailnet and non-tailnet answers without device-network fallback.
 - Verify cancellation closes losing and late connections; cover peer names with MagicDNS disabled.
+- Preserve both Service VIP address families: the fast name lookup also overwrites extra DNS records
+  with the same name ([upstream PR #22292](https://github.com/tailscale/tailscale/pull/22292)).
 
 ## Tailnet Lock
 
