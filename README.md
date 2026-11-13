@@ -4,16 +4,16 @@
 
 # Klethron tsnet
 
-Connect an Android app to a [Tailscale](https://tailscale.com/) network and open TCP connections to its
-peers. The library embeds [tsnet](https://github.com/tailscale/tailscale/tree/main/tsnet) in your app's
-process. Each node has its own identity; it needs neither the Tailscale app nor a device-wide VPN.
+Open TCP connections from an Android app to peers on a [Tailscale](https://tailscale.com/) network.
+The library embeds [tsnet](https://github.com/tailscale/tailscale/tree/main/tsnet) in your app's process.
+Each node has its own identity; it needs neither the Tailscale app nor a device-wide VPN.
 
 Requires **Android 14 (API 34)** or later. The AAR includes native libraries for **arm64-v8a** and
 **x86_64**, with 16 KiB page support. Consumers need no Go compiler or NDK.
 
-**Under development.** Tested locally and on a real tailnet: login, persistent identity, TCP dialing,
-logout, revocation and Wi-Fi/cellular switches (live only with the Tailscale app's VPN active). Peer
-listing is tested locally. See [known limitations](UPSTREAM.md#limits) and the
+**Under development.** Login, saved identity, TCP dialing, logout and revocation are tested locally
+and on a real tailnet. Wi-Fi/cellular switches have live coverage only with the Tailscale app's VPN
+active; peer listing has local coverage. See [known limitations](UPSTREAM.md#limits) and the
 [Javadoc](https://javadoc.io/doc/com.klethron/tsnet/latest/).
 
 ## Install
@@ -37,8 +37,8 @@ not let nodes follow Wi-Fi to cellular.
 
 ## Connect
 
-A [`TailnetNode`][TailnetNode] represents your app as a device on a tailnet (a private Tailscale network).
-Run node operations on a worker thread. Keep its state in a dedicated directory under
+A [`TailnetNode`][TailnetNode] is a device on a tailnet (a private Tailscale network). Run node operations
+on a worker thread. Keep its state in a dedicated directory under
 [`Context.getNoBackupFilesDir()`](https://developer.android.com/reference/android/content/Context#getNoBackupFilesDir()):
 it contains private keys and must never be logged, backed up or shared.
 
@@ -52,8 +52,7 @@ try (TailnetNode node = TailnetNode.start(context, directory, "my-device")) {
             // Offer to open this URL in the user's browser. Never log it.
         }
         if (status.error() != null) {
-            // Show the error to the user, who can cancel: closing the node from another thread
-            // makes the waiting call throw ClosedChannelException.
+            // Show the error. Close the node from another thread to cancel the wait.
         }
     } while (status.state() != NodeStatus.State.RUNNING || status.loginUrl() != null);
 
@@ -63,13 +62,14 @@ try (TailnetNode node = TailnetNode.start(context, directory, "my-device")) {
 }
 ```
 
-[`awaitStatus`][awaitStatus] waits for changes without polling. Whoever opens a login URL can claim the
-node. Wait for the URL to clear before closing, so the login is saved; starting with the same directory
-then resumes that identity. The status also names this device, its tailnet and the signed-in user.
+[`awaitStatus`][awaitStatus] waits for changes without polling; closing the node cancels it with
+`ClosedChannelException`. Whoever opens a login URL can claim the node. Wait for the URL to clear
+before closing so the login is saved. Starting with the same directory resumes that identity.
+Status snapshots also include the device name, tailnet and signed-in user.
 
-[`NodeStatus.peers`][peers] lists the other devices this node can see, with their MagicDNS name, operating
-system, online state, addresses and [Tailscale SSH](https://tailscale.com/kb/1193/tailscale-ssh) host
-keys, so users can pick a device and SSH clients can verify it without trust-on-first-use.
+[`NodeStatus.peers`][peers] lists visible devices with their MagicDNS name, OS, online state, addresses
+and [Tailscale SSH](https://tailscale.com/kb/1193/tailscale-ssh) host keys. Use it for a device picker or
+to verify Tailscale SSH servers without trust-on-first-use.
 
 [`dial`][dial] accepts a tailnet IP address or MagicDNS name and returns a socket owned by the caller.
 For NIO selectors, pass one end of a loopback TCP pair to the [socket overload][dialSocket]. Dialing

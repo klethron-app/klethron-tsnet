@@ -10,6 +10,7 @@ import "strings"
 // UTF-8 argument. They return fixed ASCII diagnostics, counts, addresses, URLs of loopback test
 // servers or public certificate hashes; never credentials.
 var probes = map[string]func(string) string{
+	"accessLifetime":        probeAccessLifetime,
 	"addPeers":              withControl(addPeers),
 	"approveMachines":       withControl(approveMachines),
 	"awaitReceived":         awaitReceived,
@@ -17,6 +18,7 @@ var probes = map[string]func(string) string{
 	"concurrentClose":       probeConcurrentClose,
 	"control":               probeControl,
 	"crash":                 probeCrash,
+	"defaultRoute":          probeDefaultRoute,
 	"expire":                withControl(expireNodes),
 	"flooded":               flooded,
 	"hostnames":             withControl(hostnames),

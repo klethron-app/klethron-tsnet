@@ -145,6 +145,7 @@ public final class DialTest {
 
     @Test(timeout = 60000)
     public void logoutCancelsPendingConnections() throws Exception {
+        assertEquals("ok", Probe.call("accessLifetime"));
         try (TailnetNode node = startNode()) {
             Probe.call("addPeers");
             LoginTest.await(node, status -> status.state() == NodeStatus.State.RUNNING

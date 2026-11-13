@@ -37,8 +37,8 @@ with Go 1.27.4. Entries are ordered by impact on this library; drop those upstre
   only with a network map, so closing right after `LoginFinished` can lose the login. `node.publish`
   clears the login URL only once the self node's key changes.
 - **The state directory is not locked.** Two servers on one directory save their state over each
-  other's. `TailnetNode.start` refuses a directory that an open node in the process uses; separate
-  processes are not guarded.
+  other's. `TailnetNode.start` resolves the directory once and refuses to share it with another open
+  node in the process. Separate processes are not guarded.
 - **`tsnet.Server.Dial` can leave the tailnet.** For addresses not in the network map, `tsdial.UserDial`
   falls back to the routing table, then a plain `net.Dialer`. `node.dial` resolves with `UserDialPlan`,
   requires `UseNetstackForIP` and connects with `NetstackDialTCP`.

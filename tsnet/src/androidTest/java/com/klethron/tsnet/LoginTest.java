@@ -136,6 +136,27 @@ public final class LoginTest {
         assertOnlyStateFile();
     }
 
+    @Test(timeout = 90000)
+    public void keepsTheResolvedStateDirectory() throws Exception {
+        Files.createDirectory(directory);
+        Path alias = Files.createSymbolicLink(directory.resolveSibling("alias"), directory);
+        List<InetAddress> addresses;
+        try (TailnetNode node = TailnetNode.start(CONTEXT, alias.toFile(), HOSTNAME, controlUrl)) {
+            NodeStatus status = await(node, s -> s.loginUrl() != null);
+            Files.delete(alias);
+            Path redirected = Files.createDirectory(directory.resolveSibling("redirected"));
+            Files.createSymbolicLink(alias, redirected);
+            complete(status);
+            addresses = await(node, s -> s.state() == NodeStatus.State.RUNNING && s.loginUrl() == null).addresses();
+            try (var files = Files.list(redirected)) {
+                assertEquals("Node followed the changed symlink", 0, files.count());
+            }
+        }
+        try (TailnetNode node = start()) {
+            awaitResumed(node, addresses);
+        }
+    }
+
     @Test(timeout = 120000)
     public void failedLogoutKeepsTheLoginForRetries() throws Exception {
         List<InetAddress> addresses;

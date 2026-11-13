@@ -44,30 +44,46 @@ public final class TailnetNode implements AutoCloseable {
         System.loadLibrary("klethron_tsnet");
     }
 
-    /// Reports the network to all nodes in this process; registered while any node runs.
-    private static final ConnectivityManager.NetworkCallback NETWORK = new ConnectivityManager.NetworkCallback() {
+    /// Reports the network while this registration is active, including during node startup.
+    private static final class NetworkMonitor extends ConnectivityManager.NetworkCallback {
+        final ConnectivityManager connectivity;
+
+        NetworkMonitor(Context context) {
+            connectivity = Objects.requireNonNullElse(context.getApplicationContext(), context)
+                    .getSystemService(ConnectivityManager.class);
+            connectivity.registerBestMatchingNetworkCallback(PHYSICAL_NETWORK, this,
+                    new Handler(Looper.getMainLooper()));
+        }
+
         @Override
         public void onLinkPropertiesChanged(Network network, LinkProperties properties) {
             String gateway = properties.getRoutes().stream()
                     .filter(route -> route.isDefaultRoute() && route.hasGateway() && route.getGateway() instanceof Inet4Address)
                     .map(route -> route.getGateway().getHostAddress()).findFirst().orElse("");
             String name = Objects.toString(properties.getInterfaceName(), "");
-            nativeSetDefaultNetwork((name + '\0' + gateway).getBytes(StandardCharsets.UTF_8));
+            report((name + '\0' + gateway).getBytes(StandardCharsets.UTF_8));
         }
 
         @Override
         public void onLost(Network network) {
-            nativeSetDefaultNetwork(new byte[0]);
+            report(new byte[0]);
         }
-    };
+
+        private void report(byte[] value) {
+            synchronized (directories) {
+                // Unregistering cannot cancel a callback already dispatched on the main thread.
+                if (network == this) nativeSetDefaultNetwork(value);
+            }
+        }
+    }
     /// Another app's VPN, often a split tunnel that the node's traffic bypasses, would be the default
     /// network and hide changes of the network underneath.
     static final NetworkRequest PHYSICAL_NETWORK = new NetworkRequest.Builder()
             .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
             .addCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN).build();
-    /// Canonical state directories of running nodes. Guarded by NETWORK, as is connectivity.
+    /// Canonical state directories of running nodes. Also guards the active network registration.
     private static final Set<String> directories = new HashSet<>();
-    private static @Nullable ConnectivityManager connectivity;
+    private static @Nullable NetworkMonitor network;
 
     private final long handle;
     private final String directory;
@@ -83,9 +99,9 @@ public final class TailnetNode implements AutoCloseable {
     /// login URL. The `context` gives access to [ConnectivityManager].
     ///
     /// The directory stores this node's private keys. Give each node its own directory under
-    /// [Context#getNoBackupFilesDir()]; it is created if missing. Starting again with it after
-    /// [#close] restores the same identity. Never back up or share its contents, and never use it
-    /// from two processes at once.
+    /// [Context#getNoBackupFilesDir()]; it is created if missing, with symlinks resolved before startup.
+    /// Starting again with it after [#close] restores the same identity. Never back up or share its
+    /// contents, and never use it from two processes at once.
     ///
     /// @param hostname the requested device name; Tailscale may adjust it
     /// @throws IllegalArgumentException if the directory is relative or the hostname is empty or contains NUL
@@ -101,15 +117,11 @@ public final class TailnetNode implements AutoCloseable {
         if (!stateDirectory.isAbsolute() || hostname.isEmpty() || hostname.indexOf(0) >= 0) {
             throw new IllegalArgumentException("State directory must be absolute and hostname non-empty without NUL");
         }
-        String config = stateDirectory.getPath() + '\0' + hostname + '\0' + controlUrl;
         String directory = stateDirectory.getCanonicalPath();
-        synchronized (NETWORK) {
+        String config = directory + '\0' + hostname + '\0' + controlUrl;
+        synchronized (directories) {
             if (directories.isEmpty()) {
-                // Registering reports the current network at once.
-                connectivity = Objects.requireNonNullElse(context.getApplicationContext(), context)
-                        .getSystemService(ConnectivityManager.class);
-                connectivity.registerBestMatchingNetworkCallback(PHYSICAL_NETWORK, NETWORK,
-                        new Handler(Looper.getMainLooper()));
+                network = new NetworkMonitor(context);
             }
             // Both nodes would save their own login state over the other's.
             if (!directories.add(directory)) {
@@ -128,11 +140,16 @@ public final class TailnetNode implements AutoCloseable {
 
     /// Frees the directory, and stops following the network once no node runs.
     private static void release(String directory) {
-        synchronized (NETWORK) {
+        synchronized (directories) {
             directories.remove(directory);
-            if (directories.isEmpty() && connectivity != null) {
-                connectivity.unregisterNetworkCallback(NETWORK);
-                nativeSetDefaultNetwork(new byte[0]); // Unknown until the next start reports it.
+            if (directories.isEmpty() && network != null) {
+                NetworkMonitor previous = network;
+                network = null;
+                try {
+                    previous.connectivity.unregisterNetworkCallback(previous);
+                } finally {
+                    nativeSetDefaultNetwork(new byte[0]); // Unknown until the next start reports it.
+                }
             }
         }
     }
@@ -254,9 +271,10 @@ public final class TailnetNode implements AutoCloseable {
     @Override
     public synchronized void close() {
         // Serialized, so no call returns before the directory is free.
+        if (closed) return;
         nativeClose(handle);
-        if (!closed) release(directory);
         closed = true;
+        release(directory);
     }
 
     /// Maps node.go's negative results to exceptions.

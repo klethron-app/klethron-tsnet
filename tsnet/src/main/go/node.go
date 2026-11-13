@@ -291,7 +291,7 @@ func (n *node) await(after uint64, timeout time.Duration) (string, bool) {
 	}
 	ctx, cancel := context.WithTimeout(n.ctx, timeout)
 	defer cancel()
-	status, version := n.wait(ctx, func(_ nodeStatus, version uint64) bool { return version != after })
+	status, version, _ := n.wait(ctx, func(_ nodeStatus, version uint64) bool { return version != after })
 	if n.ctx.Err() != nil {
 		return "", false
 	}
@@ -301,14 +301,14 @@ func (n *node) await(after uint64, timeout time.Duration) (string, bool) {
 	return status.record(version), true
 }
 
-// wait returns the latest status and its version once done accepts them or ctx ends.
-func (n *node) wait(ctx context.Context, done func(nodeStatus, uint64) bool) (nodeStatus, uint64) {
+// wait returns the latest status, version and access lifetime once done accepts them or ctx ends.
+func (n *node) wait(ctx context.Context, done func(nodeStatus, uint64) bool) (nodeStatus, uint64, context.Context) {
 	for {
 		n.mu.Lock()
-		status, version, changed := n.status, n.version, n.changed
+		status, version, changed, access := n.status, n.version, n.changed, n.access
 		n.mu.Unlock()
 		if done(status, version) || ctx.Err() != nil {
-			return status, version
+			return status, version, access
 		}
 		select {
 		case <-changed:
@@ -375,13 +375,11 @@ func (n *node) dial(host string, port uint16, fd int, timeout time.Duration) (re
 		return result
 	}
 	defer done()
-	status, _ := n.wait(ctx, func(s nodeStatus, _ uint64) bool { return s.state == ipn.Running })
+	// Capture access with Running: a later logout/login must not give this call new access.
+	status, _, access := n.wait(ctx, func(s nodeStatus, _ uint64) bool { return s.state == ipn.Running })
 	if status.state != ipn.Running {
 		return n.failed(ctx, resultTimeout)
 	}
-	n.mu.Lock()
-	access := n.access // Ends if the node stops running from now on, also while dialing.
-	n.mu.Unlock()
 	dialCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	unwatch := context.AfterFunc(access, cancel)

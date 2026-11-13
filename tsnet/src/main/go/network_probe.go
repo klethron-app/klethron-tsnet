@@ -12,6 +12,11 @@ import (
 	"tailscale.com/net/netmon"
 )
 
+func probeDefaultRoute(string) string {
+	name, _ := netmon.DefaultRouteInterface()
+	return name
+}
+
 // probeInterfaces returns Go's own discovery error, then a line per address from the registered
 // getter, or the getter's error. It does not start a node or contact any endpoint.
 func probeInterfaces(string) string {
