@@ -5,6 +5,9 @@ with Go 1.27.4. All entries rechecked 2026-11-13; none fixed upstream. Remove en
 
 ## Patched
 
+- **Test control keeps old keys after noninteractive rotation.** It deletes them only after a
+  browser followup, leaving duplicate peers when `RequireAuth` is false. A debug-only patch also
+  retires them when authorization is unnecessary; `SecurityTest` covers the rotation.
 - **A failed logout cannot be retried** ([#22248](https://github.com/tailscale/tailscale/issues/22248);
   fix [PR #22249](https://github.com/tailscale/tailscale/pull/22249)). `TryLogout` forgets the node key
   even on failure. `BuildGoLibrary.kt` patches a hash-checked copy of `control/controlclient/direct.go`

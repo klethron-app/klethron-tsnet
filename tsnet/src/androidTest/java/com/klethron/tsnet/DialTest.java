@@ -95,8 +95,7 @@ public final class DialTest {
     @Test(timeout = 90000)
     public void listsPeersAndTheirChanges() throws Exception {
         try (TailnetNode node = startNode(); SocketChannel connection = node.connect(PEER_NAME, 7070, WAIT)) {
-            NodeStatus status = LoginTest.await(node, s -> s.state() == NodeStatus.State.RUNNING && !s.peers().isEmpty());
-            assertEquals(1, status.peers().size());
+            NodeStatus status = LoginTest.await(node, s -> s.state() == NodeStatus.State.RUNNING && s.peers().size() == 1);
             NodeStatus.Peer listed = status.peers().get(0);
             assertEquals(PEER_NAME, listed.dnsName());
             assertEquals("android", listed.operatingSystem());

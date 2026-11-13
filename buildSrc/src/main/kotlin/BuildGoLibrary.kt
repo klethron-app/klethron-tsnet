@@ -108,6 +108,10 @@ abstract class BuildGoLibrary @Inject constructor(
         // Names that the tailnet's DNS does not answer must not reach the device's resolver.
         patch("tsnet/dns_lookup.go", "b49ecd66f1b9f4de7e7ef20061148a0e903de2e847627db38c88715c6964dc93",
             "return c.hostLookup(ctx, network, hostFB)" to "return candidateResult{servfail: true, err: firstErr}")
+        if ("klethron_test" in buildTags.get()) {
+            patch("tstest/integration/testcontrol/testcontrol.go", "e8f952ff2ea480a7e52dc95faeb824f13b3e7102ef0b8afedd5f14077e890a53",
+                "\t\tif isFollowup {" to "\t\tif isFollowup || !s.RequireAuth {")
+        }
         val tsnetSource = upstream.resolve("tsnet/tsnet.go").readText()
         val hostnameSetup = "\texe, err := os.Executable()" + tsnetSource.substringAfter("\texe, err := os.Executable()")
             .substringBefore("\n\ts.rootPath =")

@@ -157,7 +157,8 @@ public final class LoginTest {
             addresses = await(node, s -> s.state() == NodeStatus.State.RUNNING).addresses();
 
             assertEquals("1", Probe.call("expire"));
-            NodeStatus status = await(node, s -> s.state() == NodeStatus.State.NEEDS_LOGIN);
+            // State and the self node's expiry can arrive in separate notifications.
+            NodeStatus status = await(node, s -> s.state() == NodeStatus.State.NEEDS_LOGIN && s.revocation() != null);
             assertEquals(NodeStatus.Revocation.KEY_EXPIRED, status.revocation());
             assertTrue(status.toString().contains("KEY_EXPIRED"));
             assertEquals(HOSTNAME, status.dnsName());

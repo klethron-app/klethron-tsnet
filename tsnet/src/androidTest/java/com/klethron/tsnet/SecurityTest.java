@@ -42,4 +42,9 @@ public final class SecurityTest {
     public void aNewLoginEndsAccessGrantedToThePreviousKey() {
         assertEquals("ok", Probe.call("watchDisconnect", "key"));
     }
+
+    @Test(timeout = 30000)
+    public void localControlRetiresKeysWithoutABrowserFollowup() {
+        assertEquals("ok", Probe.call("controlRotation"));
+    }
 }

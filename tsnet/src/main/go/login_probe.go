@@ -78,7 +78,37 @@ func startControl(interactive string) string {
 	return control.HTTPTestServer.URL
 }
 
-// startPeer starts an in-memory peer with state in dir that echoes on port 7070. On port 7071
+// testcontrol must retire the previous key even when no browser followup is required.
+func probeNonInteractiveRotation(string) string {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	control := new(testcontrol.Server)
+	stop, err := startLoopbackControl(control)
+	if err != nil {
+		return "control failed"
+	}
+	defer stop()
+	fixture := new(loopbackTailnet)
+	defer fixture.close()
+	server, _, problem := fixture.startNode(ctx, control.HTTPTestServer.URL, "rotation")
+	if problem != "" {
+		return problem
+	}
+	previous := server.Status().Self.PublicKey
+	client, err := server.LocalClient()
+	if err != nil || client.StartLoginInteractive(ctx) != nil {
+		return "login failed"
+	}
+	for ctx.Err() == nil {
+		if server.Status().Self.PublicKey != previous && len(control.AllNodes()) == 1 {
+			return "ok"
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	return "rotation did not retire the previous node key"
+}
+
+// startPeer starts an in-memory peer that echoes on port 7070. On port 7071
 // it sends a greeting, closes its side, then reports how many bytes it received until the dialer
 // closed. On port 7073 it writes floodBytes of the probe pattern, counting progress, then closes.
 // On port 7074 it reads nothing until released, then reports how many bytes of the probe pattern

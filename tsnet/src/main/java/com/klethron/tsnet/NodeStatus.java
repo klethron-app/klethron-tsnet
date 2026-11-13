@@ -100,6 +100,7 @@ public final class NodeStatus {
 
     /// Why access ended; `null` before first login, after logout, and outside [State#NEEDS_LOGIN]. Remains
     /// set during re-login. Expiry while closed may report [State#NEEDS_LOGIN] without a reason.
+    /// The reason can arrive after the state change.
     public @Nullable Revocation revocation() {
         return revocation;
     }
