@@ -27,7 +27,7 @@ the line to record after a review. Reports are in `tsnet/build/reports/native/no
 
 ## Per-file review
 
-Reviewed 2026-11-10 for the release libraries: all 2,734 Go, assembly, C, header and embedded files that
+Reviewed 2026-11-13 for the release libraries: all 2,734 Go, assembly, C, header and embedded files that
 `go list -deps` selects for either ABI (1,381 from the standard library), searched for copyright, licence,
 SPDX, public-domain and "derived/adapted/copied from" text and for `Code generated` headers.
 

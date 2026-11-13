@@ -4,7 +4,7 @@ go 1.27.4
 
 require (
 	golang.org/x/sys v0.50.0
-	tailscale.com v1.105.0-pre.0.20261110184513-5b6c39b94d50
+	tailscale.com v1.105.0-pre.0.20261113020038-59064619a0f4
 )
 
 require (
@@ -42,7 +42,7 @@ require (
 	github.com/tailscale/hujson v0.0.0-20260727124030-b80ff77dac4f // indirect
 	github.com/tailscale/peercred v0.0.0-20250107143737-35a0c7bd7edc // indirect
 	github.com/tailscale/web-client-prebuilt v0.0.0-20260917222731-e0ed2d0d0fea // indirect
-	github.com/tailscale/wireguard-go v0.0.0-20261105205217-79ead109a81a // indirect
+	github.com/tailscale/wireguard-go v0.0.0-20261110220948-9e10ef9af415 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	go4.org/mem v0.0.0-20240501181205-ae6ca9944745 // indirect
 	go4.org/netipx v0.0.0-20260823151212-3075585bcbeb // indirect

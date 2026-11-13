@@ -1,7 +1,7 @@
 # Upstream issues
 
-Pinned: Tailscale [`5b6c39b94d50`](https://github.com/tailscale/tailscale/commit/5b6c39b94d50beac39dd7302d6f75f14e281a01f)
-with Go 1.27.4. Remove entries when fixed upstream.
+Pinned: Tailscale [`59064619a0f4`](https://github.com/tailscale/tailscale/commit/59064619a0f4ea3293be038e08651c66c2886255)
+with Go 1.27.4. All entries rechecked 2026-11-13; none fixed upstream. Remove entries when fixed.
 
 ## Patched
 
@@ -57,7 +57,9 @@ with Go 1.27.4. Remove entries when fixed upstream.
 - **netmon misses Android network changes.** It polls every ten minutes and cannot find the default
   route, so changes never trigger a rebind, re-STUN or DERP reconnect. `TailnetNode` follows the best
   `INTERNET`, `NOT_VPN` network, which `default_network.go` reports with `netmon.UpdateLastKnown*` and
-  `InjectEvent` on each node's monitor (from the unstable `Server.Sys().NetMon`).
+  `InjectEvent` on each node's monitor (from the unstable `Server.Sys().NetMon`). The new
+  `Server.SystemDial` hook covers host-network dials such as control, but excludes DERP and WireGuard;
+  it does not replace these network-change notifications.
 - **`Server.Close` must not run before or during `Start`**, and LocalAPI `Start` ignores its context and,
   after `Close`, starts a control client that retries forever. `TailnetNode.start` returns only started
   nodes, `node.close` cancels calls and waits for them (`lifecycle` lock), and `login` runs LocalAPI
@@ -69,7 +71,9 @@ with Go 1.27.4. Remove entries when fixed upstream.
 - **The IPN bus reports logout, key expiry and removal as `NeedsLogin`.** `node.publish` distinguishes
   removal by the `node-removed` health warning, otherwise expiry by the latest key expiry time.
 - **A watch that falls behind ends with an `ErrMessage`.** `node.publish` ignores that text
-  (`watchFellBehind`, a copy of the unexported `watchIPNBusFellBehindMessage`).
+  (`watchFellBehind`, a copy of the unexported `watchIPNBusFellBehindMessage`) and `watchStatus`
+  reconnects. Upstream now applies the same lag handling to policy notifications; the error text
+  and our watch's disconnect behavior are unchanged.
 
 ## Limits
 

@@ -1,7 +1,7 @@
 Klethron tsnet modifies two tailscale.com source files in an isolated build copy.
-Upstream revision: 5b6c39b94d50beac39dd7302d6f75f14e281a01f
+Upstream revision: 59064619a0f4ea3293be038e08651c66c2886255
 Original file SHA-256:
-control/controlclient/direct.go: a28e97e2a6822604182cdcfdd319ea9bb10c29b17e8b4592289c1cf2278160a9
+control/controlclient/direct.go: ccdcc186decb2efe76c98af7e4914b77f15a7d7eda9406b1bb2b441c7fa1575a
 tsnet/dns_lookup.go: b49ecd66f1b9f4de7e7ef20061148a0e903de2e847627db38c88715c6964dc93
 
 Binary build metadata records the copy as "tailscale.com => ./tailscale"; the

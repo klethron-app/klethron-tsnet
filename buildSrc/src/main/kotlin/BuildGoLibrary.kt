@@ -102,7 +102,7 @@ abstract class BuildGoLibrary @Inject constructor(
         }
         // tailscale/tailscale#22248: a failed logout must not forget the node key.
         val forgetKey = "\tc.mu.Lock()\n\tc.persist = new(persist.Persist).View()\n\tc.mu.Unlock()\n"
-        patch("control/controlclient/direct.go", "a28e97e2a6822604182cdcfdd319ea9bb10c29b17e8b4592289c1cf2278160a9",
+        patch("control/controlclient/direct.go", "ccdcc186decb2efe76c98af7e4914b77f15a7d7eda9406b1bb2b441c7fa1575a",
             forgetKey, "\tif err == nil {\n" + forgetKey.replace("\t", "\t\t") + "\t}\n")
         // Names that the tailnet's DNS does not answer must not reach the device's resolver.
         patch("tsnet/dns_lookup.go", "b49ecd66f1b9f4de7e7ef20061148a0e903de2e847627db38c88715c6964dc93",
