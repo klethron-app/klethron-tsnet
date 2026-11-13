@@ -1,7 +1,7 @@
 # Upstream issues
 
 Pinned: Tailscale [`59064619a0f4`](https://github.com/tailscale/tailscale/commit/59064619a0f4ea3293be038e08651c66c2886255)
-with Go 1.27.4. All entries rechecked 2026-11-13; none fixed upstream. Remove entries when fixed.
+with Go 1.27.4. Reviewed 2026-11-13. Remove patches when equivalent fixes reach the pin.
 
 ## Patched
 
@@ -81,6 +81,10 @@ with Go 1.27.4. All entries rechecked 2026-11-13; none fixed upstream. Remove en
   `InjectEvent` on each node's monitor (from the unstable `Server.Sys().NetMon`). The new
   `Server.SystemDial` hook covers host-network dials such as control, but excludes DERP and WireGuard;
   it does not replace these network-change notifications.
+- **Android can replace a network without changing its interface or addresses.** Following
+  [Android PR #912](https://github.com/tailscale/tailscale-android/pull/912), retain the network
+  identity across temporary loss and rebind when a replacement reuses the interface. A plain
+  `InjectEvent` only refreshes netmon's snapshot; unchanged interfaces do not trigger a rebind.
 - **`Server.Close` must not run before or during `Start`**, and LocalAPI `Start` ignores its context and,
   after `Close`, starts a control client that retries forever. `TailnetNode.start` returns only started
   nodes, `node.close` cancels calls and waits for them (`lifecycle` lock), and `login` runs LocalAPI
@@ -102,6 +106,14 @@ with Go 1.27.4. All entries rechecked 2026-11-13; none fixed upstream. Remove en
 
 ## Limits
 
+- **Only the first resolved address is dialed.** `UserDialPlan` discards later DNS answers, so an
+  unreachable first address can prevent a connection even when another works. Haven's
+  [#691 follow-up](https://github.com/GlassHaven/Haven/blob/db7c77d872852f0e0b19fcd7d79d99c8fae2f273/rclone-android/go/tsbridge/tsbridge.go)
+  handles this by trying multiple answers. See [TODO.md](TODO.md#multiple-dns-addresses).
+- **Roaming can pause traffic while a peer trusts an old endpoint**
+  ([#22337](https://github.com/tailscale/tailscale/issues/22337), proposed
+  [PR #22359](https://github.com/tailscale/tailscale/pull/22359)). A local rebind does not eliminate
+  the remote peer's stale-path delay; the proposed transport change is not backported.
 - **Tailnet Lock has no public status or signing API.** Authority persistence, restart, unsigned-peer
   filtering and compaction have local tests; live locked-tailnet operation remains unverified.
   See [TODO.md](TODO.md) for remaining coverage.

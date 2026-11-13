@@ -76,18 +76,18 @@ public final class TailnetNode implements AutoCloseable {
                     .filter(route -> route.isDefaultRoute() && route.hasGateway() && route.getGateway() instanceof Inet4Address)
                     .map(route -> route.getGateway().getHostAddress()).findFirst().orElse("");
             String name = Objects.toString(properties.getInterfaceName(), "");
-            report(this, (name + '\0' + gateway).getBytes(StandardCharsets.UTF_8));
+            report(this, (name + '\0' + gateway).getBytes(StandardCharsets.UTF_8), network.getNetworkHandle());
         }
 
         @Override
         public void onLost(Network network) {
-            report(this, new byte[0]);
+            report(this, new byte[0], 0);
         }
     }
 
-    private static synchronized void report(NetworkMonitor monitor, byte[] value) {
+    private static synchronized void report(NetworkMonitor monitor, byte[] value, long handle) {
         // Unregistering cannot cancel a callback already dispatched on the main thread.
-        if (network == monitor) nativeSetDefaultNetwork(value);
+        if (network == monitor) nativeSetDefaultNetwork(value, handle);
     }
     /// Following a VPN would hide changes to the underlying network.
     static final NetworkRequest PHYSICAL_NETWORK = new NetworkRequest.Builder()
@@ -181,7 +181,7 @@ public final class TailnetNode implements AutoCloseable {
             try {
                 previous.connectivity.unregisterNetworkCallback(previous);
             } finally {
-                nativeSetDefaultNetwork(new byte[0]); // Unknown until the next start reports it.
+                nativeSetDefaultNetwork(new byte[0], 0); // Unknown until the next start reports it.
             }
         }
     }
@@ -368,7 +368,7 @@ public final class TailnetNode implements AutoCloseable {
 
     private static native void nativeClose(long handle);
 
-    private static native void nativeSetDefaultNetwork(byte[] network);
+    private static native void nativeSetDefaultNetwork(byte[] network, long handle);
 
     private static native String nativeTailscaleVersion();
 }

@@ -74,3 +74,26 @@ func stopNetworkProbe(string) string {
 	}
 	return ""
 }
+
+func resetNetworkRebinds(string) string {
+	if tailnet := networkTailnet.Load(); tailnet != nil {
+		tailnet.rebound.Clear()
+		return "ok"
+	}
+	return "not started"
+}
+
+func unchangedNetworkRebinds(string) string {
+	tailnet := networkTailnet.Load()
+	if tailnet == nil {
+		return "not started"
+	}
+	// Allow netmon's one-second debounce to deliver the repeated properties.
+	time.Sleep(1500 * time.Millisecond)
+	for _, node := range []*tsnet.Server{tailnet.dialer, tailnet.listener} {
+		if _, ok := tailnet.rebound.Load(node); ok {
+			return "unexpected rebind"
+		}
+	}
+	return "ok"
+}
