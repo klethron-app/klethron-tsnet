@@ -6,11 +6,9 @@ with Go 1.27.4. Remove entries when fixed upstream.
 ## Patched
 
 - **A failed logout cannot be retried** ([#22248](https://github.com/tailscale/tailscale/issues/22248);
-  fix [PR #22249](https://github.com/tailscale/tailscale/pull/22249)). `controlclient.Direct.TryLogout`
-  forgets the in-memory node key even when control rejects the logout, so retries fail until the node
-  restarts. Patch: forget the key only after a successful logout.
-  `BuildGoLibrary.kt` applies it to a hash-checked copy of `control/controlclient/direct.go`;
-  `TAILSCALE-MODIFICATIONS` documents it. `LoginTest.failedLogoutKeepsTheLoginForRetries` fails without it.
+  fix [PR #22249](https://github.com/tailscale/tailscale/pull/22249)). `TryLogout` forgets the node key
+  even on failure. `BuildGoLibrary.kt` patches a hash-checked copy of `control/controlclient/direct.go`
+  to forget it only on success. See `TAILSCALE-MODIFICATIONS` and `LoginTest.failedLogoutKeepsTheLoginForRetries`.
 - **Names outside the tailnet's DNS go to the device's resolver.** When no tailnet DNS route covers a
   name and its tailnet queries fail, `tsnet` `dnsResolver.lookupCandidate` asks `net.DefaultResolver`,
   which sends the name to the device's network and lets its DNS answer with any address, including a
@@ -21,10 +19,9 @@ with Go 1.27.4. Remove entries when fixed upstream.
 
 - **Logs can contain login URLs.** `main.go` discards `tsnet.Server.UserLogf`, `Logf` and Go's standard
   log output, which netmon and others use directly.
-- **`tsnet.Server` reads empty fields from the process environment:** `TS_CONTROL_URL`,
-  `TS_AUTHKEY`/`TS_AUTH_KEY`, and OAuth or ID-token variables when `oauthkey` or `identityfederation`
-  is linked. `node.start` sets `Dir`, `Hostname` and `ControlURL` and refuses to start when an auth-key
-  variable is set; `oauthkey` and `useproxy` are omitted, and nothing imports `identityfederation`.
+- **`tsnet.Server` fills empty fields from the environment.** `node.start` sets `Dir`, `Hostname` and
+  `ControlURL`, overriding `TS_CONTROL_URL`, and rejects `TS_AUTHKEY`/`TS_AUTH_KEY`. `oauthkey` and
+  `useproxy` are omitted; nothing imports `identityfederation`, which reads ID-token variables.
 - **TLS trusts the wrong roots.** Go's `crypto/x509` reads only `/system/etc/security/cacerts`, missing
   Android 14's updatable Conscrypt APEX store, and ignores roots the user disabled
   ([golang/go#71258](https://github.com/golang/go/issues/71258)). `tlsdial` also falls back to baked-in
@@ -35,8 +32,8 @@ with Go 1.27.4. Remove entries when fixed upstream.
   [PR #19150](https://github.com/tailscale/tailscale/pull/19150)). `controlclient.Auto` saves `Persist`
   only with a network map, so closing right after `LoginFinished` can lose the login. `node.publish`
   clears the login URL only once the self node's key changes.
-- **The state directory is not locked.** `TailnetNode.start` resolves it once and refuses to share it
-  with another open node in the process. Separate processes can still overwrite each other's state.
+- **The state directory is not locked.** `TailnetNode.start` canonicalizes it and rejects sharing
+  within the process. Separate processes can still overwrite each other's state.
 - **`tsnet.Server.Dial` can leave the tailnet.** For addresses not in the network map, `tsdial.UserDial`
   falls back to the routing table, then a plain `net.Dialer`. `node.dial` resolves with `UserDialPlan`,
   requires `UseNetstackForIP` and connects with `NetstackDialTCP`.
@@ -56,10 +53,9 @@ with Go 1.27.4. Remove entries when fixed upstream.
   after `Close`, starts a control client that retries forever. `TailnetNode.start` returns only started
   nodes, `node.close` cancels calls and waits for them (`lifecycle` lock), and `login` runs LocalAPI
   `Start` uncancelled.
-- **No automatic re-login.** After key expiry a running node reports `NeedsLogin` but requests no login
-  URL; only `Server.Start` does. After logout the new profile has default prefs (Tailscale's control
-  URL, the device hostname). `login()` restores tsnet's prefs with LocalAPI `Start` when they differ or
-  say logged out, then calls `StartLoginInteractive`. Upstream's private `beginLoginAs`
+- **No automatic re-login.** Key expiry reports `NeedsLogin` without requesting a URL; logout resets
+  the control URL and hostname. `login()` restores tsnet's prefs with LocalAPI `Start` if needed,
+  then calls `StartLoginInteractive`. Upstream's private `beginLoginAs`
   ([PR #21857](https://github.com/tailscale/tailscale/pull/21857)) does the same but is not in LocalAPI.
 - **The IPN bus reports logout, key expiry and removal as `NeedsLogin`.** `node.publish` distinguishes
   removal by the `node-removed` health warning, otherwise expiry by the latest key expiry time.

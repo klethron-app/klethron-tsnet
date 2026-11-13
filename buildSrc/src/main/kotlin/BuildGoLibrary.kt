@@ -49,6 +49,7 @@ abstract class BuildGoLibrary @Inject constructor(
                 // Override ambient settings that would change the shipped code without changing inputs.
                 // Go reads empty variables from the user's go env file, so ignore that file.
                 environment(mapOf("GOENV" to "off", "GOTOOLCHAIN" to "local", "GOWORK" to "off",
+                    "GOOS" to "", "GOARCH" to "", "CGO_ENABLED" to "",
                     "GOFLAGS" to "", "GOEXPERIMENT" to "", "GOFIPS140" to "off", "GOAMD64" to "v1", "GOARM64" to "v8.0",
                     "CGO_CFLAGS" to "-O2 -g", "CGO_CPPFLAGS" to "", "CGO_LDFLAGS" to "-O2 -g") + env)
                 standardOutput = output

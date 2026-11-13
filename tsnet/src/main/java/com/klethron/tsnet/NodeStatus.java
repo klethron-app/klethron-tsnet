@@ -35,16 +35,16 @@ public final class NodeStatus {
         NODE_REMOVED,
     }
 
-    /// A tailnet device. Pass its name or address to [TailnetNode#dial].
+    /// A tailnet device; pass its name or address to [TailnetNode#dial].
     ///
-    /// @param dnsName the [MagicDNS](https://tailscale.com/kb/1081/magicdns) name without a trailing
-    ///     dot, such as `host.tailnet-name.ts.net`. Its first label is the device's machine name.
+    /// @param dnsName the [MagicDNS](https://tailscale.com/kb/1081/magicdns) name, such as
+    ///     `host.tailnet-name.ts.net`, without a trailing dot; the first label is the machine name
     /// @param os the reported operating system, such as `linux` or `android`; empty if unknown
     /// @param online whether Tailscale reports the device as connected; `false` if unknown
     /// @param addresses the device's Tailscale IP addresses, IPv4 first
-    /// @param sshHostKeys [Tailscale SSH](https://tailscale.com/kb/1193/tailscale-ssh) host keys from the
-    ///     control server, in OpenSSH format, such as `ssh-ed25519 AAAA…`; empty without Tailscale SSH.
-    ///     Accept them for [#dnsName()] and [#addresses()] without trust-on-first-use.
+    /// @param sshHostKeys [Tailscale SSH](https://tailscale.com/kb/1193/tailscale-ssh) host keys from
+    ///     control, in OpenSSH format; empty without Tailscale SSH. Accept them for [#dnsName()] and
+    ///     [#addresses()] without trust-on-first-use.
     public record Peer(String dnsName, String os, boolean online, List<InetAddress> addresses, List<String> sshHostKeys) {
         public Peer {
             addresses = List.copyOf(addresses);
@@ -101,9 +101,8 @@ public final class NodeStatus {
         return state;
     }
 
-    /// Why access ended, or `null` before first login, after logout, and outside [State#NEEDS_LOGIN].
-    /// Remains set while requesting a new login. Expiry while the node was closed may only report
-    /// [State#NEEDS_LOGIN], without a reason.
+    /// Why access ended; `null` before first login, after logout, and outside [State#NEEDS_LOGIN]. Remains
+    /// set during re-login. Expiry while closed may report [State#NEEDS_LOGIN] without a reason.
     public @Nullable Revocation revocation() {
         return revocation;
     }
@@ -121,29 +120,26 @@ public final class NodeStatus {
         return addresses;
     }
 
-    /// The latest connection or login error, or `null` when none is reported. Cleared on reaching
-    /// [State#RUNNING]. Show this text to the user, but do not parse or log it; it may contain private
-    /// information and its wording can change.
+    /// The latest connection or login error; `null` if absent or cleared by reaching [State#RUNNING].
+    /// Show it to the user, but do not parse or log it: wording can change and include private data.
     public @Nullable String error() {
         return error;
     }
 
-    /// This node's [MagicDNS](https://tailscale.com/kb/1081/magicdns) name, such as
-    /// `phone.tailnet-name.ts.net`, without a trailing dot; `null` before joining and after logout.
-    /// Tailscale may adjust the hostname; administrators can rename it. The suffix after the first
-    /// label identifies the tailnet. Like [#tailnet()] and [#loginName()], it remains after key expiry
-    /// and can change on login to another account or tailnet.
+    /// This node's [MagicDNS](https://tailscale.com/kb/1081/magicdns) name without a trailing dot,
+    /// e.g. `phone.tailnet-name.ts.net`; `null` before joining and after logout. Tailscale or an
+    /// administrator can rename it. Like [#tailnet()] and [#loginName()], it survives key expiry
+    /// and can change with the account or tailnet.
     public @Nullable String dnsName() {
         return dnsName;
     }
 
-    /// The name of this node's tailnet, such as `example.com`; `null` before joining and after logout.
+    /// This node's tailnet name, e.g. `example.com`; `null` before joining and after logout.
     public @Nullable String tailnet() {
         return tailnet;
     }
 
-    /// The login name of the user who signed in this node, such as `alice@example.com`; `null` before
-    /// joining and after logout.
+    /// The user's login name, e.g. `alice@example.com`; `null` before joining and after logout.
     public @Nullable String loginName() {
         return loginName;
     }

@@ -277,9 +277,14 @@ func (n *node) await(after uint64, timeout time.Duration) (string, bool) {
 	if n == nil {
 		return "", false
 	}
-	ctx, cancel := context.WithTimeout(n.ctx, timeout)
-	defer cancel()
-	status, version, _ := n.wait(ctx, func(_ nodeStatus, version uint64) bool { return version != after })
+	n.mu.Lock()
+	status, version := n.status, n.version
+	n.mu.Unlock()
+	if version == after && timeout > 0 {
+		ctx, cancel := context.WithTimeout(n.ctx, timeout)
+		defer cancel()
+		status, version, _ = n.wait(ctx, func(_ nodeStatus, version uint64) bool { return version != after })
+	}
 	if n.ctx.Err() != nil {
 		return "", false
 	}
@@ -505,8 +510,10 @@ func (s nodeStatus) record(version uint64) string {
 
 // addressList returns the valid addresses, IPv4 first, comma-separated.
 func addressList(ips ...netip.Addr) string {
-	ips = slices.Clone(ips)
-	slices.SortFunc(ips, netip.Addr.Compare)
+	if !slices.IsSortedFunc(ips, netip.Addr.Compare) {
+		ips = slices.Clone(ips)
+		slices.SortFunc(ips, netip.Addr.Compare)
+	}
 	list := make([]string, 0, len(ips))
 	for _, ip := range ips {
 		if ip.IsValid() {

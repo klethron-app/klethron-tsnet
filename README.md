@@ -4,12 +4,12 @@
 
 # Klethron tsnet
 
-Connect an Android app to a [Tailscale](https://tailscale.com/) network over TCP. An embedded
-[tsnet](https://github.com/tailscale/tailscale/tree/main/tsnet) node has its own identity and needs
-neither the Tailscale app nor a device-wide VPN.
+Connect Android apps to [Tailscale](https://tailscale.com/) over TCP. The embedded
+[tsnet](https://github.com/tailscale/tailscale/tree/main/tsnet) node has its own identity;
+no Tailscale app or device-wide VPN is needed.
 
-Requires **Android 14 (API 34)** or later. The AAR includes native libraries for **arm64-v8a** and
-**x86_64**, with 16 KiB page support. Consumers need no Go compiler or NDK.
+Requires **Android 14 (API 34)** or later. The AAR supports **arm64-v8a**, **x86_64** and 16 KiB pages;
+consumers need no Go compiler or NDK.
 
 **Under development.** Login, saved identity, TCP dialing, logout and revocation have local and live
 tailnet tests. Wi-Fi/cellular switches have live coverage only with Tailscale's VPN active; peer
@@ -42,12 +42,7 @@ try (TailnetNode node = TailnetNode.start(context, directory, "my-device")) {
     NodeStatus status = null;
     do {
         status = node.awaitStatus(status, Duration.ofSeconds(30));
-        if (status.loginUrl() != null) {
-            // Offer to open this URL in the user's browser. Never log it.
-        }
-        if (status.error() != null) {
-            // Show the error. Close the node from another thread to cancel the wait.
-        }
+        // Offer loginUrl() in the user's browser; never log it. Show error() if present.
     } while (status.state() != NodeStatus.State.RUNNING || status.loginUrl() != null);
 
     try (ParcelFileDescriptor connection = node.dial("my-server", 443, Duration.ofSeconds(30))) {
@@ -56,12 +51,12 @@ try (TailnetNode node = TailnetNode.start(context, directory, "my-device")) {
 }
 ```
 
-`awaitStatus` waits without polling; closing cancels it with `ClosedChannelException`. Whoever opens
-a login URL can claim the node. Wait for the URL to clear before closing so the login is saved.
-Starting with the same directory resumes that identity.
+`awaitStatus` waits without polling; closing from another thread cancels it with `ClosedChannelException`.
+Whoever opens a login URL can claim the node. Wait for it to clear before closing so the login is saved.
+Restarting with the same directory resumes that identity.
 
-`NodeStatus` reports the device name, tailnet and user. Its `peers()` list includes names, OS, online
-state, addresses and [Tailscale SSH](https://tailscale.com/kb/1193/tailscale-ssh) host keys.
+`NodeStatus` reports the device name, tailnet, user and peers (names, OS, online state, addresses and
+[Tailscale SSH](https://tailscale.com/kb/1193/tailscale-ssh) host keys).
 
 `dial` returns a caller-owned socket to a tailnet IP or MagicDNS name. For NIO selectors, `relay`
 takes ownership of one end of a loopback TCP pair. Only peers and subnet routes are reachable; names
