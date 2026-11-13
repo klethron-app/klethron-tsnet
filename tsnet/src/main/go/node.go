@@ -24,7 +24,6 @@ import (
 	"tailscale.com/types/key"
 )
 
-// node publishes status and dials through the tailnet. Closing cancels calls and connections.
 type node struct {
 	server *tsnet.Server
 	client *local.Client
@@ -86,7 +85,6 @@ func (n *node) start(config string) int {
 	return 0
 }
 
-// close ends waiters, calls and relayed connections, and closes the server once calls return.
 func (n *node) close() {
 	n.cancel()
 	n.lifecycle.Lock()
@@ -139,7 +137,6 @@ func (n *node) refreshStatus(refresh <-chan struct{}) {
 	}
 }
 
-// readStatus returns this node's names and the record's peer lines.
 func readStatus(status *ipnstate.Status) *statusRead {
 	lines := make([]string, 0, len(status.Peer))
 	for _, peer := range status.Peer {
@@ -368,7 +365,7 @@ func (n *node) dial(host string, port uint16, fd int, timeout time.Duration) (re
 	defer done()
 	// Capture access with Running: a later logout/login must not give this call new access.
 	status, _, access := n.wait(ctx, func(s nodeStatus, _ uint64) bool { return s.state == ipn.Running })
-	if status.state != ipn.Running {
+	if status.state != ipn.Running || ctx.Err() != nil {
 		return n.failed(ctx, resultTimeout)
 	}
 	dialCtx, cancel := context.WithCancel(ctx)
@@ -420,8 +417,6 @@ func streamSocket(fd int) net.Conn {
 	return conn
 }
 
-// logout asks control to expire this node's key, then deletes the node's profile from its state,
-// leaving the node in NeedsLogin. It returns 0, also when the node was not logged in, or a failure.
 func (n *node) logout(timeout time.Duration) int {
 	ctx, done, result := n.whenOpen(timeout)
 	if result != 0 {
@@ -434,7 +429,6 @@ func (n *node) logout(timeout time.Duration) int {
 	return 0
 }
 
-// login starts or renews browser authorization; status carries the URL.
 func (n *node) login() int {
 	ctx, done, result := n.whenOpen(math.MaxInt64) // Neither call waits for the network.
 	if result != 0 {
@@ -514,11 +508,11 @@ func addressList(ips ...netip.Addr) string {
 		ips = slices.Clone(ips)
 		slices.SortFunc(ips, netip.Addr.Compare)
 	}
-	list := make([]string, 0, len(ips))
+	list := make([]byte, 0, 80) // Two IPv6 literals fit on the stack.
 	for _, ip := range ips {
 		if ip.IsValid() {
-			list = append(list, ip.String())
+			list = append(ip.AppendTo(list), ',')
 		}
 	}
-	return strings.Join(list, ",")
+	return string(list[:max(0, len(list)-1)])
 }

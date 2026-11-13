@@ -250,6 +250,7 @@ public final class DialTest {
     public void reachesOnlyTheTailnet() throws Exception {
         try (TailnetNode node = startNode()) {
             dial(node, peer, 7070, WAIT).close(); // Joined.
+            assertDialThrows(SocketTimeoutException.class, node, peer, 7070, Duration.ZERO);
             // Upstream would dial both through the device's network: the first is the control server.
             int controlPort = URI.create(controlUrl).getPort();
             assertDialThrows(NoRouteToHostException.class, node, "127.0.0.1", controlPort, WAIT);
