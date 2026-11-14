@@ -81,9 +81,11 @@ It also already checks UDP DNS reply sources and transaction IDs, covering
   Other destinations retain upstream's dialer selection. `DnsTest` exercises a tailnet resolver's
   UDP answers and TCP retries after truncation or silence; `TrustRootsTest` checks DoH dialer selection.
 - **Mixed-case split-DNS routes do not match queries.** Route keys preserve case while queries are
-  lowercased. Patch `dnsname.FQDN.Contains` to compare case-insensitively, retaining label boundaries
-  ([PR #22380](https://github.com/tailscale/tailscale/pull/22380)). `DnsTest` covers an uppercase route,
-  a mixed-case query and a nonmatching label suffix.
+  lowercased. Patch `dnsname.FQDN.Contains` to compare ASCII letters case-insensitively, retaining
+  label boundaries and all other bytes ([PR #22380](https://github.com/tailscale/tailscale/pull/22380)).
+  Unicode folding would incorrectly match distinct DNS wire labels, such as `K` and `K`.
+  The comparison reuses upstream's byte folding without allocating a suffix. `DnsTest` covers
+  uppercase routes, mixed-case queries, nonmatching label suffixes and distinct non-ASCII labels.
 - **DNS name validation skips the final label.** `dnsname.ToFQDN` accepts an empty or overlong
   final label after removing the trailing dot. Include the final label in its validation loop
   ([PR #22107](https://github.com/tailscale/tailscale/pull/22107)); the debug parser probe covers

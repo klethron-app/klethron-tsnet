@@ -73,8 +73,11 @@ func startPeerDNS(peer *loopbackTailnet, server *tsnet.Server, ip netip.Addr, co
 			{Name: "same-family.service.test", Value: ip.String()},
 		},
 		Routes: map[string][]*dnstype.Resolver{
-			"split.test": {{Addr: address}},
-			"MiXeD.TeSt": {{Addr: address}},
+			"split.test":  {{Addr: address}},
+			"MiXeD.TeSt":  {{Addr: address}},
+			"S.FoLd.TeSt": {{Addr: address}},
+			"K.FoLd.TeSt": {{Addr: address}},
+			"É.FoLd.TeSt": {{Addr: address}},
 		},
 	})
 	return nil

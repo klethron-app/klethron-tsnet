@@ -62,6 +62,19 @@ public final class DnsTest {
     }
 
     @Test(timeout = 60000)
+    public void foldsOnlyAsciiLettersInSplitDnsRoutes() throws Exception {
+        try (TailnetNode node = startNode()) {
+            for (String host : new String[] {"s.fold.test", "echo.S.fold.test", "k.fold.test", "É.fold.test"}) {
+                echo(node, host);
+            }
+            // These are distinct DNS wire labels, although Unicode case folding equates them.
+            for (String host : new String[] {"ſ.fold.test", "K.fold.test", "é.fold.test", "echo.é.fold.test"}) {
+                assertDialThrows(UnknownHostException.class, node, host, 7070, WAIT);
+            }
+        }
+    }
+
+    @Test(timeout = 60000)
     public void triesLaterDnsAnswersWithinTheCallersDeadline() throws Exception {
         try (TailnetNode node = startNode()) {
             // Each first address is an actual network-map peer with no working endpoints.

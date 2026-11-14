@@ -1,5 +1,7 @@
 import java.lang.classfile.ClassFile
 import java.lang.classfile.constantpool.MemberRefEntry
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import java.util.zip.ZipFile
 import java.util.zip.ZipInputStream
 import org.gradle.api.DefaultTask
@@ -28,6 +30,7 @@ abstract class VerifyNativeAar : DefaultTask() {
         ZipFile(file).use { zip ->
             for (entry in zip.entries().asSequence().filter { it.name.endsWith(".so") }) {
                 val bytes = zip.getInputStream(entry).use { it.readBytes() }
+                requireNative(has16KiBLoadAlignment(bytes), "${entry.name} must be ELF64 with 16 KiB load alignment")
                 val text = bytes.toString(Charsets.ISO_8859_1)
                 requireNative(!text.contains("/proc/net/route"), "${entry.name} includes filesystem gateway discovery")
                 // The instrumentation test bridge exports klethron_probe and binds Probe.nativeCall.
@@ -51,6 +54,28 @@ abstract class VerifyNativeAar : DefaultTask() {
         sizes.append("AAR\t${file.length()}\t${file.length()}\n")
         report.get().asFile.writeText(sizes.toString())
         logger.lifecycle(sizes.toString())
+    }
+
+    private fun has16KiBLoadAlignment(bytes: ByteArray): Boolean {
+        if (bytes.size < 64) return false
+        val elf = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
+        // Both supported Android ABIs use ELF64, little endian.
+        if (elf.getInt(0) != 0x464c457f || elf.get(4) != 2.toByte() || elf.get(5) != 1.toByte()) return false
+        val table = elf.getLong(32)
+        val entrySize = elf.getShort(54).toInt() and 0xffff
+        val entryCount = elf.getShort(56).toInt() and 0xffff
+        if (entrySize < 56 || table < 64 || table > bytes.size.toLong() - entrySize.toLong() * entryCount) return false
+        var loads = 0
+        repeat(entryCount) { index ->
+            val offset = (table + index.toLong() * entrySize).toInt()
+            if (elf.getInt(offset) == 1) { // PT_LOAD
+                loads++
+                val alignment = elf.getLong(offset + 48)
+                if (alignment < 16384 || (alignment and (alignment - 1)) != 0L ||
+                    (elf.getLong(offset + 8) and 16383L) != (elf.getLong(offset + 16) and 16383L)) return false
+            }
+        }
+        return loads > 0
     }
 
     // javac retains an unused Class constant for a folded ENABLED reference. Reject executable

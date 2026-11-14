@@ -14,6 +14,7 @@ consumers need no Go compiler or NDK.
 **Under development.** Local tests cover login, logout, revocation, SQLite restart and crash recovery,
 `SocketChannel` operations, IPv6, peer listing, DNS address fallback, split DNS, TLS certificate trust,
 network replacement and Tailnet Lock persistence.
+Split-DNS matching ignores ASCII letter case and preserves distinct non-ASCII label bytes.
 UDP permission recovery preserves established and connecting relay transports and queued packets.
 An optional startup handler offers local-network permission after a denied direct UDP attempt.
 Live tests cover login, logout, revocation, TCP transport and Wi-Fi/cellular switches; switches have

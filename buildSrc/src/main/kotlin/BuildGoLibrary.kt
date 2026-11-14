@@ -224,9 +224,20 @@ abstract class BuildGoLibrary @Inject constructor(
             """.trimIndent())
         // Control can supply mixed-case split-DNS routes; wire query names are lowercased.
         patch("util/dnsname/dnsname.go", "5608189341565036e81b5d09c808034dd2f44e9d9cd8c7c9b7cd90764a7cdf3c",
-            "\tif f == other {" to "\tif strings.EqualFold(string(f), string(other)) {",
-            "\treturn strings.HasSuffix(other.WithTrailingDot(), cmp)" to
-                "\tname := other.WithTrailingDot()\n\treturn len(name) >= len(cmp) && strings.EqualFold(name[len(name)-len(cmp):], cmp)",
+            "func (f FQDN) Contains(other FQDN) bool {\n\tif f == other {\n\t\treturn true\n\t}\n" +
+                "\tcmp := f.WithTrailingDot()\n\tif cmp != \".\" {\n\t\tcmp = \".\" + cmp\n\t}\n" +
+                "\treturn strings.HasSuffix(other.WithTrailingDot(), cmp)\n}" to """
+                func (f FQDN) Contains(other FQDN) bool {
+                    if len(f) > len(other) { return false }
+                    offset := len(other) - len(f)
+                    if offset > 0 && f != "." && other[offset-1] != '.' { return false }
+                    // DNS folds ASCII letters only; other label bytes remain distinct.
+                    for i := range len(f) {
+                        if tolower(f[i]) != tolower(other[offset+i]) { return false }
+                    }
+                    return true
+                }
+            """.trimIndent(),
             // tailscale/tailscale#22107: also validate the last label after removing the trailing dot.
             "\tfor i := range len(s) {\n\t\tif s[i] != '.' {" to
                 "\tfor i := range len(s) + 1 {\n\t\tif i < len(s) && s[i] != '.' {")
