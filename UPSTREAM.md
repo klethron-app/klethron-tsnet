@@ -27,6 +27,13 @@ It also already checks UDP DNS reply sources and transaction IDs, covering
 
 ## Patched
 
+- **Android UDP permission errors can interrupt an unrelated relay connection.** Android's local-network
+  policy can reject a speculative LAN packet with `EPERM`. Keep the existing throttled UDP socket
+  recovery, endpoint-trust reset and re-STUN, but leave DERP TCP connections and their queued writes
+  intact for this error on Android. Ordinary network changes and other recovery errors still use
+  the full rebind. `PermissionRecoveryTest` holds the initial DERP upgrade, injects a wrapped `EPERM`
+  through the UDP send path, and verifies the same relay and queued initiation-sized packet survive;
+  it also covers an established relay, the recovery throttle, and full-rebind controls.
 - **Saved nodes wait for network probing before connecting to their home relay.** Seed the initial
   home DERP from the self node in a fresh control response, after applying `OnlyTCP443`. Accept only
   a relay-capable region in that response's DERP map which is not avoided or excluded from home

@@ -28,7 +28,7 @@ abstract class VerifyNativeAar : DefaultTask() {
             for (entry in zip.entries().asSequence().filter { it.name.endsWith(".so") }) {
                 val bytes = zip.getInputStream(entry).use { it.readBytes() }
                 // The instrumentation test bridge exports klethron_probe and binds Probe.nativeCall.
-                requireNative(!Regex("klethron_probe|Probe_nativeCall|klethron_timing|klethrontiming|Timing_initialize|timing_debug.go|timing.c")
+                requireNative(!Regex("klethron_probe|Probe_nativeCall|klethron_timing|klethrontiming|Timing_initialize|timing_debug.go|timing.c|KlethronProbePermissionRecovery|klethron_rebind_probe.go")
                     .containsMatchIn(String(bytes, Charsets.ISO_8859_1)), "${entry.name} includes debug instrumentation")
                 sizes.append("${entry.name}\t${entry.size}\t${entry.compressedSize}\n")
             }

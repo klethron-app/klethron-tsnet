@@ -14,6 +14,7 @@ consumers need no Go compiler or NDK.
 **Under development.** Local tests cover login, logout, revocation, SQLite restart and crash recovery,
 `SocketChannel` operations, IPv6, peer listing, DNS address fallback, split DNS, TLS certificate trust,
 network replacement and Tailnet Lock persistence.
+UDP permission recovery preserves established and connecting relay transports and queued packets.
 Live tests cover login, logout, revocation, TCP transport and Wi-Fi/cellular switches; switches have
 only been tested with Tailscale's VPN active. Tailnet Lock status and signing APIs are not exposed.
 See [limitations](UPSTREAM.md#limits) and [Javadoc](https://javadoc.io/doc/com.klethron/tsnet/latest/).

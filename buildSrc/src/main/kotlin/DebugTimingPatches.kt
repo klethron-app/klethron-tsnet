@@ -96,5 +96,6 @@ fun applyDebugTiming(workspace: File, upstream: File) {
         "    c.setNearestDERPLocked(regionID)" to "    klethrontiming.Mark(c.logf, \"relay_hint\")\n    c.setNearestDERPLocked(regionID)",
         "\tprevious := c.myDerp" to "\tklethrontiming.Mark(c.logf, \"relay_selected\")\n\tprevious := c.myDerp")
     patch("wgengine/magicsock/magicsock.go", "c501a422c108fd57e6e8f2b6b90ec9a07786cd6f0b2d75a3b8b33fd150aafba1",
-        "func (c *Conn) Rebind() {" to "func (c *Conn) Rebind() {\n\tdefer klethrontiming.Span(c.logf, \"rebind\")()")
+        "func (c *Conn) rebindAndReset(resetDERP bool) {" to
+            "func (c *Conn) rebindAndReset(resetDERP bool) {\n\tdefer klethrontiming.Span(c.logf, \"rebind\")()")
 }

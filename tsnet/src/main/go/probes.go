@@ -41,6 +41,7 @@ var probes = map[string]func(string) string{
 	"netchangeStart":        startNetworkProbe,
 	"netchangeStop":         stopNetworkProbe,
 	"netchangeUnchanged":    unchangedNetworkRebinds,
+	"permissionRecovery":    probePermissionRecovery,
 	"readyStatus":           probeReadyStatus,
 	"rejectRegistrations":   rejectRegistrations,
 	"relayHint":             probeRelayHint,

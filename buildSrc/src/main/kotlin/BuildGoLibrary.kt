@@ -142,6 +142,25 @@ abstract class BuildGoLibrary @Inject constructor(
                 func (c *Conn) setNearestDERPLocked(derpNum tailcfg.DERPRegionID) (wantDERP bool) {
 
             """.trimIndent())
+        // Android can deny a speculative LAN packet without invalidating the relay's TCP socket.
+        patch("wgengine/magicsock/magicsock.go", "c501a422c108fd57e6e8f2b6b90ec9a07786cd6f0b2d75a3b8b33fd150aafba1",
+            "\t\tc.Rebind()\n\t\tgo c.ReSTUN(reason)" to """
+                    if runtime.GOOS == "android" && reason == "operation-not-permitted" {
+                        c.rebindAndReset(false)
+                    } else {
+                        c.Rebind()
+                    }
+                    go c.ReSTUN(reason)
+            """.trimIndent().prependIndent("\t\t"),
+            "func (c *Conn) Rebind() {\n" to """
+                func (c *Conn) Rebind() { c.rebindAndReset(true) }
+
+                // resetDERP is false only for Android UDP permission errors; network changes reset both transports.
+                func (c *Conn) rebindAndReset(resetDERP bool) {
+
+            """.trimIndent(),
+            "\tif len(ifIPs) > 0 {\n\t\tc.maybeCloseDERPsOnRebind(ifIPs)" to
+                "\tif resetDERP && len(ifIPs) > 0 {\n\t\tc.maybeCloseDERPsOnRebind(ifIPs)")
         // Names that the tailnet's DNS does not answer must not reach the device's resolver.
         patch("tsnet/dns_lookup.go", "b49ecd66f1b9f4de7e7ef20061148a0e903de2e847627db38c88715c6964dc93",
             "return c.hostLookup(ctx, network, hostFB)" to "return candidateResult{servfail: true, err: firstErr}")
@@ -213,6 +232,8 @@ abstract class BuildGoLibrary @Inject constructor(
         if ("klethron_test" in buildTags.get()) {
             patch("tstest/integration/testcontrol/testcontrol.go", "e8f952ff2ea480a7e52dc95faeb824f13b3e7102ef0b8afedd5f14077e890a53",
                 "\t\tif isFollowup {" to "\t\tif isFollowup || !s.RequireAuth {")
+            workspace.resolve("tailscale/wgengine/magicsock/klethron_rebind_probe.go")
+                .writeText(source.resolve("testsupport/magicsock_rebind.go").readText())
         }
         val tsnetSource = upstream.resolve("tsnet/tsnet.go").readText()
         val hostnameSetup = "\texe, err := os.Executable()" + tsnetSource.substringAfter("\texe, err := os.Executable()")
