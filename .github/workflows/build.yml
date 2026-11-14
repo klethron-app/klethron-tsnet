@@ -112,6 +112,7 @@ jobs:
           log=$RUNNER_TEMP/gradle-repeat.log
           ./gradlew --console=plain build :tsnet:publishReleasePublicationToLocalBuildRepository | tee "$log"
           grep -Fx 'Reusing configuration cache.' "$log"
+          test "$(grep -Ec '^> Task :tsnet:prepare(Release|Debug)GoSources UP-TO-DATE$' "$log")" -eq 2
           test "$(grep -Ec '^> Task :tsnet:buildGo(Arm64|X86_64)(Debug)? UP-TO-DATE$' "$log")" -eq 4
       - name: Enable emulator acceleration
         run: |

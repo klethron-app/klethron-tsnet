@@ -72,7 +72,7 @@ To repeat the review after a native dependency change, list the files from the p
 search them, then update `FILE-NOTICES`, including its review line:
 
 ```sh
-cd tsnet/build/tmp/buildGoArm64/go   # left by the last release build
+cd tsnet/build/go/release   # prepared by the release build, shared by both ABIs
 tags=…   # ts_omit_<name> for each omittedFeatures entry in tsnet/build.gradle.kts, comma-separated
 for arch in arm64 amd64; do
   GOOS=android GOARCH=$arch CGO_ENABLED=1 GOTOOLCHAIN=local GOWORK=off go list -mod=readonly -deps -tags="$tags" -json . |

@@ -36,6 +36,22 @@ Device tests require SELinux Enforcing and internet access. The network-change t
 needs cellular fallback; use USB ADB on hardware. Debug builds include local control-server and peer
 fixtures. Demo tests exercise an R8-minified release consumer.
 
+To run the same suite and report checks as CI on an x86_64 emulator:
+
+```sh
+ANDROID_SERIAL=<serial> .github/android-tests.sh 34 4096
+# For the API 37.2 / 16 KiB emulator, use: .github/android-tests.sh 37 16384
+```
+
+The script checks the selected device, clears old test results, runs both modules, and saves JUnit
+counts and HTML reports under `build/emulator-tests/`. Missing results, failures and skips fail the
+run. These fixtures run inside the test APK; Docker and a Tailscale account are not needed.
+
+Gradle prepares one patched Go source tree per variant under `tsnet/build/go/`, shared by both ABIs.
+Debug probes are excluded from the release tree, so editing them does not rebuild release libraries.
+Native builds run vet and staticcheck for each ABI. Unchanged builds reuse both preparation and
+native outputs; CI checks this along with configuration-cache reuse.
+
 The AAR is `tsnet/build/outputs/aar/tsnet-release.aar`. `verifyNativeAar`, included in `check`, checks the
 packaged native binaries for 16 KiB ELF load alignment, and the binaries and Java classes for debug
 test/timing code, logging strings and logging call dependencies. It writes sizes to

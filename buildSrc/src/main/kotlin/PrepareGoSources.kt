@@ -1,0 +1,447 @@
+import java.io.File
+import groovy.json.JsonSlurper
+import javax.inject.Inject
+import org.gradle.api.DefaultTask
+import org.gradle.api.GradleException
+import org.gradle.api.file.DirectoryProperty
+import org.gradle.api.file.FileSystemOperations
+import org.gradle.api.file.FileTree
+import org.gradle.api.provider.Property
+import org.gradle.api.tasks.Input
+import org.gradle.api.tasks.InputFiles
+import org.gradle.api.tasks.Internal
+import org.gradle.api.tasks.OutputDirectory
+import org.gradle.api.tasks.PathSensitive
+import org.gradle.api.tasks.PathSensitivity
+import org.gradle.api.tasks.TaskAction
+import org.gradle.process.ExecOperations
+import org.gradle.work.DisableCachingByDefault
+
+@DisableCachingByDefault(because = "Verifies the local Go module cache before patching")
+abstract class PrepareGoSources @Inject constructor(
+    private val exec: ExecOperations,
+    private val files: FileSystemOperations,
+) : DefaultTask() {
+    @get:Internal abstract val sources: DirectoryProperty
+
+    @get:InputFiles
+    @get:PathSensitive(PathSensitivity.RELATIVE)
+    val sourceFiles: FileTree
+        get() = sources.asFileTree.matching {
+            // Test edits should not invalidate release preparation or compilation.
+            if (!debug.get()) exclude("*_probe.go", "probes.*", "timing_debug.go", "timing.c", "testsupport/**")
+        }
+
+    @get:Input abstract val goVersion: Property<String>
+    @get:Input abstract val debug: Property<Boolean>
+    @get:OutputDirectory abstract val outputDirectory: DirectoryProperty
+
+    @TaskAction
+    fun prepare() {
+        val source = sources.get().asFile
+        exec.checkGoVersion(source, goVersion.get())
+        // Patch an isolated copy of the pinned source, without changing the module cache.
+        // See the distributed TAILSCALE-MODIFICATIONS notice for the upstream diff.
+        val module = JsonSlurper().parseText(exec.go(source, "mod", "download", "-json", "tailscale.com")) as Map<*, *>
+        exec.go(source, "mod", "verify")
+        val upstream = File(module["Dir"] as String)
+        val workspace = outputDirectory.get().asFile
+        files.sync {
+            into(workspace)
+            from(sourceFiles)
+            from(upstream) {
+                into("tailscale")
+                // Module-cache directories are read-only; our private build copy must be writable.
+                dirPermissions { unix("0755") }
+                filePermissions { unix("0644") }
+            }
+        }
+        fun patch(path: String, hash: String, vararg changes: Pair<String, String>) {
+            val original = upstream.resolve(path).readBytes()
+            if (sha256(original) != hash) throw GradleException("Pinned $path changed; review TAILSCALE-MODIFICATIONS")
+            var text = original.toString(Charsets.UTF_8)
+            for ((old, new) in changes) {
+                if (text.split(old).size != 2) throw GradleException("Patch does not match $path")
+                text = text.replace(old, new)
+            }
+            workspace.resolve("tailscale/$path").writeText(text)
+        }
+        // tailscale/tailscale#22248: a failed logout must not forget the node key.
+        val forgetKey = "\tc.mu.Lock()\n\tc.persist = new(persist.Persist).View()\n\tc.mu.Unlock()\n"
+        patch("control/controlclient/direct.go", "ccdcc186decb2efe76c98af7e4914b77f15a7d7eda9406b1bb2b441c7fa1575a",
+            forgetKey to "\tif err == nil {\n" + forgetKey.replace("\t", "\t\t") + "\t}\n")
+        // Bootstrap a relay from the fresh self node while ordinary network probing continues.
+        val onlyTCP443 = "\t\tb.MagicConn().SetOnlyTCP443(st.NetMap.HasCap(nodecap.OnlyTCP443))\n"
+        patch("ipn/ipnlocal/local.go", "82e9dc779055ea2697285785a1c1b5056057c35e4af0f91845a6ff7990ff5695",
+            "// SetControlClientStatus is the callback" to
+                "var errTKAStateChanged = errors.New(\"tailnet lock state changed\")\n\n// SetControlClientStatus is the callback",
+            "b.tkaSyncIfNeeded(st.NetMap, prefs.View())" to "b.tkaSyncIfNeeded(c, st.NetMap, prefs.View())",
+            "\t\tif err := b.tkaSyncIfNeeded(c, st.NetMap, prefs.View()); err != nil {\n" +
+                "\t\t\tb.logf(\"[v1] TKA sync error: %v\", err)\n\t\t}" to
+                "\t\ttkaErr := b.tkaSyncIfNeeded(c, st.NetMap, prefs.View())\n\t\tif tkaErr != nil {\n" +
+                    "\t\t\tb.logf(\"[v1] TKA sync error: %v\", tkaErr)\n\t\t}",
+            "\t\tif b.cc != c {\n\t\t\t// The client was replaced" to
+                "\t\tif b.cc != c || errors.Is(tkaErr, errTKAStateChanged) {\n\t\t\t// The client or Tailnet Lock state was replaced",
+            onlyTCP443 to "",
+            "\t\tvar cachedHome tailcfg.DERPRegionID" to onlyTCP443 + "\n\t\tvar cachedHome tailcfg.DERPRegionID",
+            "\t\t\tb.MagicConn().SetDERPMap(st.NetMap.DERPMap)" to
+                "\t\t\tb.MagicConn().SetDERPMap(st.NetMap.DERPMap)\n" +
+                    "\t\t\tif c != nil && !st.NetMap.Cached && st.NetMap.SelfNode.Valid() {\n" +
+                    "\t\t\t\tb.MagicConn().SeedHomeDERP(st.NetMap.SelfNode.HomeDERP())\n\t\t\t}")
+        patch("wgengine/magicsock/derp.go", "2a733a8eabdcee27b80b7f1e325da1171ced39b7742a56965a41c564bb632a07",
+            "\t\t\tc.myDerp, report.RegionLatency[myDerp]" to "\t\t\tmyDerp, report.RegionLatency[myDerp]",
+            "\t} else if preferredDERP != myDerp {\n\t\tc.homeDERPChangedPub.Publish(HomeDERPChanged{Old: myDerp, New: preferredDERP})" to "",
+            "\tc.myDerp = derpNum\n" to
+                "\tprevious := c.myDerp\n\tc.myDerp = derpNum\n" +
+                    "\tc.homeDERPChangedPub.Publish(HomeDERPChanged{Old: previous, New: derpNum})\n",
+            "func (c *Conn) setNearestDERP(derpNum tailcfg.DERPRegionID) (wantDERP bool) {\n\tc.mu.Lock()\n\tdefer c.mu.Unlock()\n" to """
+                func (c *Conn) setNearestDERP(derpNum tailcfg.DERPRegionID) (wantDERP bool) {
+                    c.mu.Lock()
+                    defer c.mu.Unlock()
+                    return c.setNearestDERPLocked(derpNum)
+                }
+
+                // SeedHomeDERP accepts a region from a fresh self node after installing its DERP map.
+                // It cannot replace a selected home; ordinary netcheck may replace this initial hint.
+                func (c *Conn) SeedHomeDERP(regionID tailcfg.DERPRegionID) {
+                    c.mu.Lock()
+                    defer c.mu.Unlock()
+                    if c.closed || c.myDerp != 0 || regionID == 0 || c.derpMap == nil { return }
+                    region := c.derpMap.Regions[regionID]
+                    if region == nil || !region.CanServeDERP() || region.Avoid || region.NoMeasureNoHome { return }
+                    c.setNearestDERPLocked(regionID)
+                }
+
+                // c.mu must be held. Publish home changes under the same lock to preserve their order.
+                func (c *Conn) setNearestDERPLocked(derpNum tailcfg.DERPRegionID) (wantDERP bool) {
+
+            """.trimIndent())
+        // tailscale/tailscale#20722: no IPv4 probes is not evidence of a broken IPv4 socket.
+        patch("net/netcheck/netcheck.go", "15857e228e9ba2449ca5cf9bad3223e4c96e593df80d3b8dcb0d40dd54506bcb",
+            "\t// MappingVariesByDestIP is whether STUN results depend which" to
+                "\t// IPv4SendAttempted distinguishes an unsuccessful send from an empty IPv4 probe plan.\n" +
+                    "\tIPv4SendAttempted bool\n\n\t// MappingVariesByDestIP is whether STUN results depend which",
+            "\tn, err := rs.c.SendPacket(req, addr)\n" +
+                "\tif n == len(req) && err == nil || neterror.TreatAsLostUDP(err) {\n\t\trs.mu.Lock()" to
+                "\tn, err := rs.c.SendPacket(req, addr)\n\trs.mu.Lock()\n" +
+                    "\tif probe.proto == probeIPv4 { rs.report.IPv4SendAttempted = true }\n" +
+                    "\tif n == len(req) && err == nil || neterror.TreatAsLostUDP(err) {",
+            "\t\trs.mu.Unlock()\n\t}\n\n\tc.vlogf(\"sent to %v\", addr)" to
+                "\t}\n\trs.mu.Unlock()\n\n\tc.vlogf(\"sent to %v\", addr)")
+        // Android can deny a speculative LAN packet without invalidating the relay's TCP socket.
+        patch("wgengine/magicsock/magicsock.go", "c501a422c108fd57e6e8f2b6b90ec9a07786cd6f0b2d75a3b8b33fd150aafba1",
+            "type Conn struct {" to "type Conn struct {\n\tpeerUDPDenied atomic.Pointer[func(netip.Addr, netip.Addr)]",
+            "\tc.noV4Send.Store(!report.IPv4CanSend)" to
+                "\tc.noV4Send.Store(report.IPv4SendAttempted && !report.IPv4CanSend)",
+            "\t\tc.Rebind()\n\t\tgo c.ReSTUN(reason)" to """
+                    if runtime.GOOS == "android" && reason == "operation-not-permitted" {
+                        c.rebindAndReset(false)
+                    } else {
+                        c.Rebind()
+                    }
+                    go c.ReSTUN(reason)
+            """.trimIndent().prependIndent("\t\t"),
+            "func (c *Conn) Rebind() {\n" to """
+                func (c *Conn) Rebind() { c.rebindAndReset(true) }
+
+                // resetDERP is false only for Android UDP permission errors; network changes reset both transports.
+                func (c *Conn) rebindAndReset(resetDERP bool) {
+
+            """.trimIndent(),
+            "\tif len(ifIPs) > 0 {\n\t\tc.maybeCloseDERPsOnRebind(ifIPs)" to
+                "\tif resetDERP && len(ifIPs) > 0 {\n\t\tc.maybeCloseDERPsOnRebind(ifIPs)")
+        // Attribute only direct peer discovery/data sends, excluding STUN and UDP relay traffic.
+        patch("wgengine/magicsock/endpoint.go", "90e54e1945f08f18ac4bb29872f72233eed39133db199d84d06a216adad0828f",
+            "\t\t_, err = de.c.sendUDPBatch(flow, udpAddr, buffs, offset)" to
+                "\t\t_, err = de.c.sendUDPBatch(flow, udpAddr, buffs, offset)\n\t\tde.reportUDPDenied(udpAddr, err)",
+            "\tsent, _ := de.c.sendDiscoMessage(ep, de.publicKey, discoKey, &disco.Ping{" to
+                "\tsent, err := de.c.sendDiscoMessage(ep, de.publicKey, discoKey, &disco.Ping{",
+            "\t}, logLevel)\n\tif !sent {" to "\t}, logLevel)\n\tde.reportUDPDenied(ep, err)\n\tif !sent {")
+        workspace.resolve("tailscale/wgengine/magicsock/klethron_permission.go").writeText("""
+            package magicsock
+
+            import (
+                "errors"
+                "net/netip"
+                "runtime"
+                "syscall"
+            )
+
+            // SetPeerUDPDeniedCallback installs a notification hook for direct peer sends.
+            func (c *Conn) SetPeerUDPDeniedCallback(callback func(peer, destination netip.Addr)) {
+                c.peerUDPDenied.Store(&callback)
+            }
+
+            func (de *endpoint) reportUDPDenied(address epAddr, err error) {
+                if err == nil || runtime.GOOS != "android" || !address.isDirect() || !de.nodeAddr.IsValid() ||
+                    (!errors.Is(err, syscall.EPERM) && !errors.Is(err, syscall.EACCES)) {
+                    return
+                }
+                if callback := de.c.peerUDPDenied.Load(); callback != nil {
+                    (*callback)(de.nodeAddr, address.ap.Addr())
+                }
+            }
+        """.trimIndent() + "\n")
+        // Names that the tailnet's DNS does not answer must not reach the device's resolver.
+        patch("tsnet/dns_lookup.go", "b49ecd66f1b9f4de7e7ef20061148a0e903de2e847627db38c88715c6964dc93",
+            "return c.hostLookup(ctx, network, hostFB)" to "return candidateResult{servfail: true, err: firstErr}")
+        // DNS TCP retries and DoH must use netstack for tailnet resolvers, including on Android.
+        patch("net/dns/resolver/forwarder.go", "804a86c6264a7fcb3d2795e33d047a88502836ca74f5eaa516331acc8e0e4b94",
+            "\t\"tailscale.com/net/tsdial\"" to "\t\"tailscale.com/net/tlsdial\"\n\t\"tailscale.com/net/tsdial\"",
+            "\t\tMinVersion: tls.VersionTLS13," to "\t\tMinVersion: tls.VersionTLS13,\n\t\tRootCAs: tlsdial.SystemRoots,",
+            "func (f *forwarder) getDialerType() netx.DialFunc {\n" +
+                "\tif ShouldUseRoutes(f.controlKnobs) {\n\t\treturn f.dialer.UserDial\n\t}\n\treturn f.dialer.SystemDial\n}" to """
+                func (f *forwarder) getDialerType() netx.DialFunc {
+                    dial := f.dialer.SystemDial
+                    if ShouldUseRoutes(f.controlKnobs) {
+                        dial = f.dialer.UserDial
+                    }
+                    return func(ctx context.Context, network, address string) (net.Conn, error) {
+                        if ipp, err := netip.ParseAddrPort(address); err == nil {
+                            ipp = netip.AddrPortFrom(ipp.Addr().Unmap(), ipp.Port())
+                            if f.dialer.UseNetstackForIP != nil && f.dialer.UseNetstackForIP(ipp.Addr()) {
+                                if f.dialer.NetstackDialTCP == nil {
+                                    return nil, errors.New("dialer not initialized correctly: no NetstackDialTCP")
+                                }
+                                return f.dialer.NetstackDialTCP(ctx, ipp)
+                            }
+                        }
+                        return dial(ctx, network, address)
+                    }
+                }
+            """.trimIndent())
+        // Control can supply mixed-case split-DNS routes; wire query names are lowercased.
+        patch("util/dnsname/dnsname.go", "5608189341565036e81b5d09c808034dd2f44e9d9cd8c7c9b7cd90764a7cdf3c",
+            "func (f FQDN) Contains(other FQDN) bool {\n\tif f == other {\n\t\treturn true\n\t}\n" +
+                "\tcmp := f.WithTrailingDot()\n\tif cmp != \".\" {\n\t\tcmp = \".\" + cmp\n\t}\n" +
+                "\treturn strings.HasSuffix(other.WithTrailingDot(), cmp)\n}" to """
+                func (f FQDN) Contains(other FQDN) bool {
+                    if len(f) > len(other) { return false }
+                    offset := len(other) - len(f)
+                    if offset > 0 && f != "." && other[offset-1] != '.' { return false }
+                    // DNS folds ASCII letters only; other label bytes remain distinct.
+                    for i := range len(f) {
+                        if tolower(f[i]) != tolower(other[offset+i]) { return false }
+                    }
+                    return true
+                }
+            """.trimIndent(),
+            // tailscale/tailscale#22107: also validate the last label after removing the trailing dot.
+            "\tfor i := range len(s) {\n\t\tif s[i] != '.' {" to
+                "\tfor i := range len(s) + 1 {\n\t\tif i < len(s) && s[i] != '.' {")
+        // tailscale/tailscale#22292: an AAAA Service record must not overwrite its A record.
+        patch("ipn/ipnlocal/node_backend.go", "872efabb907356dd3305342b01f849654e65916e927384b39b896233e9113a07",
+            "extraDNS map[string]netip.Addr" to "extraDNS map[string][]netip.Addr",
+            "\t\tmak.Set(&nb.extraDNS, strings.ToLower(strings.TrimSuffix(rec.Name, \".\")), ip)" to
+                "\t\tname := strings.ToLower(strings.TrimSuffix(rec.Name, \".\"))\n\t\tmak.Set(&nb.extraDNS, name, append(nb.extraDNS[name], ip))",
+            "// ExtraDNSByName returns the IP for a DNS.ExtraRecords entry (e.g. service VIPs)." to
+                "// ExtraDNSByName returns all IPs for a DNS.ExtraRecords entry (e.g. service VIPs).",
+            "func (nb *nodeBackend) ExtraDNSByName(hostname string) (_ netip.Addr, ok bool)" to
+                "func (nb *nodeBackend) ExtraDNSByName(hostname string) (_ []netip.Addr, ok bool)")
+        patch("ipn/ipnlocal/resolve.go", "1a072fd225a45c548606bbad0f7188a1b124eb95f63de77be3e2e4a77e276814",
+            "\tif ip, ok := nb.ExtraDNSByName(hostname); ok && addrFamilyMatch(ip, network) {\n\t\treturn ip, true" to
+                "\tif ips, ok := nb.ExtraDNSByName(hostname); ok {\n\t\tfor _, ip := range ips {\n" +
+                    "\t\t\tif addrFamilyMatch(ip, network) { return ip, true }\n\t\t}")
+        workspace.resolve("tailscale/ipn/ipnlocal/resolve.go").appendText("""
+
+            // ResolveMagicDNSAll returns every address from the map, including short peer names
+            // when MagicDNS is disabled and multiple Service records in the same family.
+            func (b *LocalBackend) ResolveMagicDNSAll(hostname string) []netip.Addr {
+                hostname = strings.ToLower(strings.TrimSuffix(hostname, "."))
+                nb := b.currentNode()
+                if id, ok := nb.NodeByName(hostname); ok {
+                    node, ok := nb.NodeByID(id)
+                    if !ok { return nil }
+                    addresses := make([]netip.Addr, 0, node.Addresses().Len())
+                    for _, prefix := range node.Addresses().All() { addresses = append(addresses, prefix.Addr()) }
+                    return addresses
+                }
+                addresses, _ := nb.ExtraDNSByName(hostname)
+                return append([]netip.Addr(nil), addresses...)
+            }
+
+        """.trimIndent())
+        if (debug.get()) {
+            patch("tstest/integration/testcontrol/testcontrol.go", "e8f952ff2ea480a7e52dc95faeb824f13b3e7102ef0b8afedd5f14077e890a53",
+                "\t\tif isFollowup {" to "\t\tif isFollowup || !s.RequireAuth {")
+            workspace.resolve("tailscale/wgengine/magicsock/klethron_rebind_probe.go")
+                .writeText(source.resolve("testsupport/magicsock_rebind.go").readText())
+            workspace.resolve("tailscale/net/portmapper/klethron_roots_probe.go")
+                .writeText(source.resolve("testsupport/portmapper_roots.go").readText())
+            workspace.resolve("tailscale/ipn/ipnlocal/klethron_tailnet_lock_sync_probe.go")
+                .writeText(source.resolve("testsupport/tailnet_lock_sync.go").readText())
+        }
+        val tsnetSource = upstream.resolve("tsnet/tsnet.go").readText()
+        val hostnameSetup = "\texe, err := os.Executable()" + tsnetSource.substringAfter("\texe, err := os.Executable()")
+            .substringBefore("\n\ts.rootPath =")
+        val directorySetup = "\tif s.rootPath == \"\" {" + tsnetSource.substringAfter("\tif s.rootPath == \"\" {")
+            .substringBefore("\n\ttsLogf :=")
+        val fileStoreSetup = "\tif s.Store == nil {" + tsnetSource.substringAfter("\tif s.Store == nil {")
+            .substringBefore("\n\tsys.Set(s.Store)")
+        patch("tsnet/tsnet.go", "c37b19724de27737147f427e4a6e81e947736244848d55d6425a966cdbf24125",
+            "\tgo s.printAuthURLLoop()\n" to "",
+            hostnameSetup to "\tvar err error\n\ts.hostname = s.Hostname\n",
+            "\ts.rootPath = s.Dir" to "\ts.rootPath = \"\"",
+            directorySetup to "\tif s.Store == nil { return errors.New(\"StateStore is required\") }\n",
+            fileStoreSetup to "",
+            "\t\"tailscale.com/ipn/store\"\n" to "",
+            "\t\"runtime\"\n" to "")
+        workspace.resolve("tailscale/tsnet/tsnet.go").appendText("""
+
+            // Status reads directly from the backend; call only between Start and Close.
+            func (s *Server) Status() *ipnstate.Status {
+                status := s.lb.Status()
+                // Upstream Status reads profiles frozen at the last full map. Include later deltas.
+                if self := status.Self; self != nil {
+                    if profile, ok := s.lb.UserProfile(self.UserID); ok {
+                        mak.Set(&status.User, self.UserID, *profile.AsStruct())
+                    }
+                }
+                return status
+            }
+
+            // Logout waits for backend completion even when ctx is cancelled.
+            func (s *Server) Logout(ctx context.Context) error { return s.lb.Logout(ctx, ipnauth.Self) }
+
+            // LookupIPForDial preserves all map and DNS candidates. Call only between Start and Close.
+            func (s *Server) LookupIPForDial(ctx context.Context, host string) ([]netip.Addr, error) {
+                if ip, err := netip.ParseAddr(host); err == nil { return []netip.Addr{ip}, nil }
+                if addresses := s.lb.ResolveMagicDNSAll(host); len(addresses) != 0 { return addresses, nil }
+                return s.LookupIP(ctx, "ip", host)
+            }
+
+        """.trimIndent())
+        val tailnetSource = upstream.resolve("ipn/ipnlocal/tailnet-lock.go").readText()
+        val loadTailnet = "\troot := b.TailscaleVarRoot()" + tailnetSource.substringAfter("\troot := b.TailscaleVarRoot()")
+            .substringBefore("\n\treturn nil\n}")
+        val createTailnet = "\troot := b.TailscaleVarRoot()" + tailnetSource.substringAfterLast("\troot := b.TailscaleVarRoot()")
+            .substringBefore("\n\tauthority, err := tka.Bootstrap")
+        val tailnetDirectory = "// chonkPathLocked returns" + tailnetSource.substringAfter("// chonkPathLocked returns")
+            .substringBefore("// tkaBootstrapFromGenesisLocked")
+        val memoryWarning = "// noTailnetLockStateDirWarnable" + tailnetSource.substringAfter("// noTailnetLockStateDirWarnable")
+            .substringBefore("// tkaFilterDeltaMutsLocked")
+        patch("ipn/ipnlocal/tailnet-lock.go", "8d4e038c7e5d377fa3e734ccaa911d1715b7fadcfb8c0364365f4ccce67b2862",
+            "\t\"tailscale.com/envknob\"\n" to "\t\"tailscale.com/control/controlclient\"\n\t\"tailscale.com/envknob\"\n",
+            "\t\"path/filepath\"\n" to "",
+            "\t\"tailscale.com/health\"\n" to "",
+            memoryWarning to "",
+            loadTailnet to """
+                    authority, storage, err := b.openTailnetLock()
+                    if err != nil { return err }
+                    if authority != nil {
+                        b.tka = &tkaState{profile: cp.ID(), authority: authority, storage: storage}
+                    }
+            """.trimIndent().prependIndent("\t"),
+            createTailnet to "\t_, storage, err := b.openTailnetLock()\n\tif err != nil { return err }\n",
+            tailnetDirectory to "",
+            "tkaSyncIfNeeded(nm *netmap.NetworkMap, prefs ipn.PrefsView)" to
+                "tkaSyncIfNeeded(client controlclient.Client, nm *netmap.NetworkMap, prefs ipn.PrefsView)",
+            "\tdidJustEnable := false\n" to """
+                // Queued maps and successful RPCs can outlive logout, profile changes or key rotation.
+                // Check the caller's client and node key before using the map, then recheck all
+                // authority ownership after each unlocked RPC. This closure runs with b.mu held.
+                profile, state := b.pm.CurrentProfile().ID(), b.tka
+                current := func() bool {
+                    now := b.pm.CurrentPrefs()
+                    if !now.Valid() || !now.Persist().Valid() { return false }
+                    return !b.shutdownCalled && now.Persist().PrivateNodeKey().Equal(prefs.Persist().PrivateNodeKey()) && b.cc == client &&
+                        b.pm.CurrentProfile().ID() == profile && b.tka == state
+                }
+                if !current() { return errTKAStateChanged }
+
+                didJustEnable := false
+
+            """.trimIndent().prependIndent("\t") + "\n",
+            "\t\tbs, err := b.tkaFetchBootstrap(ourNodeKey, ourHead)\n\t\tb.mu.Lock()\n" to
+                "\t\tbs, err := b.tkaFetchBootstrap(ourNodeKey, ourHead)\n\t\tb.mu.Lock()\n" +
+                    "\t\tif !current() { return errTKAStateChanged }\n",
+            "\t// We always transmit the sync RPCs if TKA was just enabled." to
+                "\tstate = b.tka // Bootstrap or disablement above legitimately changes the authority.\n\n" +
+                    "\t// We always transmit the sync RPCs if TKA was just enabled.",
+            "b.tkaSyncLocked(ourNodeKey)" to "b.tkaSyncLocked(ourNodeKey, current)",
+            "tkaSyncLocked(ourNodeKey key.NodePublic)" to "tkaSyncLocked(ourNodeKey key.NodePublic, current func() bool)",
+            "\tofferResp, err := b.tkaDoSyncOffer(ourNodeKey, offer)\n\tb.mu.Lock()\n" to
+                "\tofferResp, err := b.tkaDoSyncOffer(ourNodeKey, offer)\n\tb.mu.Lock()\n" +
+                    "\tif !current() { return errTKAStateChanged }\n",
+            "\tsendResp, err := b.tkaDoSyncSend(ourNodeKey, head, toSendAUMs, false)\n\tb.mu.Lock()\n" to
+                "\tsendResp, err := b.tkaDoSyncSend(ourNodeKey, head, toSendAUMs, false)\n\tb.mu.Lock()\n" +
+                    "\tif !current() { return errTKAStateChanged }\n")
+        patch("ipn/ipnlocal/tailnetlock_disabled.go", "1e2f3e3fcb402a71d3f2cb07081d181b9010bc690e0e7308168628c414c28f94",
+            "\t\"tailscale.com/ipn\"\n" to "\t\"tailscale.com/control/controlclient\"\n\t\"tailscale.com/ipn\"\n",
+            "tkaSyncIfNeeded(nm *netmap.NetworkMap, prefs ipn.PrefsView)" to
+                "tkaSyncIfNeeded(client controlclient.Client, nm *netmap.NetworkMap, prefs ipn.PrefsView)")
+        workspace.resolve("tailscale/ipn/ipnlocal/tailnet-lock.go").appendText("""
+
+            // openTailnetLock uses caller-owned persistence. Plain memory stores are used by test fixtures.
+            func (b *LocalBackend) openTailnetLock() (*tka.Authority, tka.CompactableChonk, error) {
+                if store, ok := b.store.(interface {
+                    OpenTailnetLock(ipn.ProfileID) (*tka.Authority, tka.CompactableChonk, error)
+                }); ok { return store.OpenTailnetLock(b.pm.CurrentProfile().ID()) }
+                return nil, tka.ChonkMem(), nil
+            }
+
+        """.trimIndent())
+        patch("ipn/ipnlocal/profiles.go", "4e6a67d855b82e492123bc18f7b3cdc6075ceaf2176476057eff419281b6b585",
+            "pm.store.WriteState(p.Key(), nil)" to "pm.deleteProfileState(p)",
+            "pm.WriteState(profile.Key(), nil)" to "pm.deleteProfileState(profile)",
+            "pm.WriteState(kp.Key(), nil)" to "pm.deleteProfileState(kp)")
+        workspace.resolve("tailscale/ipn/ipnlocal/profiles.go").appendText("""
+
+            // Delete authority history as well as credentials, including on logout and profile deduplication.
+            func (pm *profileManager) deleteProfileState(profile ipn.LoginProfileView) error {
+                // Keep pinned trust if deleting credentials fails or the process dies between writes.
+                if err := pm.WriteState(profile.Key(), nil); err != nil { return err }
+                if store, ok := pm.store.(interface { DeleteTailnetLock(ipn.ProfileID) error }); ok {
+                    return store.DeleteTailnetLock(profile.ID())
+                }
+                return nil
+            }
+
+        """.trimIndent())
+        // Android supplies gateway information; absent routes must not fall back to /proc.
+        val androidInterfaces = upstream.resolve("net/netmon/interfaces_android.go").readText()
+        val gatewayDiscovery = "var procNetRoutePath =" + androidInterfaces.substringAfter("var procNetRoutePath =")
+            .substringBefore("// UpdateLastKnownDefaultGateway")
+        patch("net/netmon/interfaces_android.go", "864304c989a46028ce753f560d45328ea152c9b3c1ec932796c66a1517320a85",
+            "\t\"sync/atomic\"\n" to "",
+            "\t\"go4.org/mem\"\n" to "",
+            "\t\"golang.org/x/sys/unix\"\n" to "",
+            "\t\"tailscale.com/net/netaddr\"\n" to "",
+            "\t\"tailscale.com/util/lineiter\"\n" to "",
+            gatewayDiscovery to """
+                func init() { likelyHomeRouterIP = likelyHomeRouterIPAndroid }
+
+                func likelyHomeRouterIPAndroid() (netip.Addr, netip.Addr, bool) {
+                    gateway, err := netip.ParseAddr(lastKnownDefaultGateway.Load())
+                    return gateway, netip.Addr{}, err == nil
+                }
+
+            """.trimIndent())
+        // UPnP locations, redirects and SOAP control URLs can use HTTPS too.
+        patch("net/portmapper/upnp.go", "246d99b9bf187cf43799ab3ea0799d4abf453365c38318dfd75676d8dbeda48c",
+            "\t\"context\"\n" to "\t\"context\"\n\t\"crypto/tls\"\n",
+            "\t\"tailscale.com/net/netns\"\n" to "\t\"tailscale.com/net/netns\"\n\t\"tailscale.com/net/tlsdial\"\n",
+            "type upnpClient interface {\n" to "type upnpClient interface {\n\tGetServiceClient() *goupnp.ServiceClient\n",
+            "\t// If we have no clients, then return right now; if we only have one,\n" to """
+                    // Retain this transport for SOAP, including releases with a different context.
+                    if httpClient := upnpHTTPClientKey.Value(ctx); httpClient != nil {
+                        for _, client := range clients {
+                            client.GetServiceClient().SOAPClient.HTTPClient = *httpClient
+                        }
+                    }
+
+                    // If we have no clients, then return right now; if we only have one,
+
+            """.trimIndent().prependIndent("\t"),
+            "\t\t\t\tIdleConnTimeout: 2 * time.Second, // LAN is cheap\n" to
+                "\t\t\t\tIdleConnTimeout: 2 * time.Second, // LAN is cheap\n" +
+                    "\t\t\t\tTLSClientConfig: &tls.Config{RootCAs: tlsdial.SystemRoots},\n")
+        patch("net/tlsdial/tlsdial.go", "49adc77dc68cf066fa695037cc41164509949dfa8a97e96a9c4fd334cd3b7e1e",
+            "\t\t\tDNSName:       dialedHost," to "\t\t\tDNSName:       dialedHost,\n\t\t\tRoots: SystemRoots,",
+            "\t\t\tDNSName:       certDNSName," to "\t\t\tDNSName:       certDNSName,\n\t\t\tRoots: SystemRoots,")
+        workspace.resolve("tailscale/net/tlsdial/tlsdial.go").appendText(
+            "\n// SystemRoots is supplied by Android before TLS is used.\nvar SystemRoots *x509.CertPool\n")
+        workspace.resolve("go.mod").appendText("\nreplace tailscale.com => ./tailscale\n")
+        if (debug.get()) applyDebugTiming(workspace, upstream)
+    }
+}

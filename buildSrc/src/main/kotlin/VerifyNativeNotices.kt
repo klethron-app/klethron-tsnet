@@ -1,4 +1,3 @@
-import java.io.ByteArrayOutputStream
 import java.io.File
 import java.util.zip.ZipFile
 import javax.inject.Inject
@@ -97,17 +96,12 @@ abstract class VerifyNativeNotices @Inject constructor(private val exec: ExecOpe
             for (entry in libraries) {
                 val library = temporaryDir.resolve("libklethron_tsnet.so")
                 zip.getInputStream(entry).use { input -> library.outputStream().use { input.copyTo(it) } }
-                val output = ByteArrayOutputStream()
-                exec.exec {
-                    commandLine("go", "version", "-m", library.absolutePath)
-                    environment("GOTOOLCHAIN", "local")
-                    standardOutput = output
-                }
-                val fields = output.toString(Charsets.UTF_8).lines().drop(1).map { it.trim().split(Regex("\\s+")) }
-                // BuildGoLibrary verifies the upstream checksum before patching; allow only its patched copy.
+                val fields = exec.go(temporaryDir, "version", "-m", library.absolutePath)
+                    .lineSequence().drop(1).filter { it.isNotBlank() }.map { it.trim().split(Regex("\\s+")) }.toList()
+                // PrepareGoSources verifies the upstream checksum before patching; allow only its patched copy.
                 val replacements = fields.indices.filter { fields[it].first() == "=>" }.map { fields[it - 1].take(2) + fields[it] }
                 requireNotice(replacements == listOf(listOf("dep", "tailscale.com", "=>", "./tailscale", "(devel)")),
-                    "Unexpected Go module replacement; only BuildGoLibrary's patched tailscale.com is allowed")
+                    "Unexpected Go module replacement; only the prepared tailscale.com copy is allowed")
                 val actual = fields.filter { it.first() == "dep" }.map { it.drop(1) }
                     .map { if (it == upstreamTailscale.take(2)) upstreamTailscale else it }.toSet()
                 requireNotice(actual == expected,

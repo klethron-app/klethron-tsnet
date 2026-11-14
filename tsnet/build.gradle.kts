@@ -43,9 +43,15 @@ val javadoc = tasks.register<Javadoc>("releaseJavadoc") {
 
 androidComponents.onVariants { variant ->
     val debug = variant.name == "debug"
+    val prepareGo = tasks.register<PrepareGoSources>(variant.computeTaskName("prepare", "GoSources")) {
+        sources = layout.projectDirectory.dir("src/main/go")
+        goVersion = libs.versions.go
+        this.debug = debug
+        outputDirectory = layout.buildDirectory.dir("go/${variant.name}")
+    }
     for ((abi, name) in mapOf("arm64-v8a" to "Arm64", "x86_64" to "X86_64")) {
         val buildGo = tasks.register<BuildGoLibrary>("buildGo$name" + if (debug) "Debug" else "") {
-            sources = layout.projectDirectory.dir("src/main/go")
+            sources = prepareGo.flatMap { it.outputDirectory }
             sdkDirectory = androidComponents.sdkComponents.sdkDirectory
             ndkVersion = libs.versions.ndk
             goVersion = libs.versions.go

@@ -81,7 +81,7 @@ It also already checks UDP DNS reply sources and transaction IDs, covering
   retires them when authorization is unnecessary; `SecurityTest` covers the rotation.
 - **A failed logout cannot be retried** ([#22248](https://github.com/tailscale/tailscale/issues/22248);
   fix [PR #22249](https://github.com/tailscale/tailscale/pull/22249)). `TryLogout` forgets the node key
-  even on failure. `BuildGoLibrary.kt` patches a hash-checked copy of `control/controlclient/direct.go`
+  even on failure. `PrepareGoSources.kt` patches a hash-checked copy of `control/controlclient/direct.go`
   to forget it only on success. See `TAILSCALE-MODIFICATIONS` and `LoginTest.failedLogoutKeepsTheLoginForRetries`.
 - **Names outside the tailnet's DNS go to the device's resolver.** When no tailnet DNS route covers a
   name and its tailnet queries fail, `tsnet` `dnsResolver.lookupCandidate` asks `net.DefaultResolver`,
