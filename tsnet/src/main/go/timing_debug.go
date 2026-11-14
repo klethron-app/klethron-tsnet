@@ -6,6 +6,7 @@ package main
 import "C"
 
 import (
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -33,23 +34,14 @@ func configureTiming(n *node) {
 		if !strings.HasSuffix(format, klethrontiming.Marker) || len(args) != 3 {
 			return
 		}
-		phase, ok := args[0].(string)
-		if !ok {
+		phase, validPhase := args[0].(string)
+		event, validEvent := args[1].(int)
+		span, validSpan := args[2].(uint64)
+		if !validPhase || !validEvent || !validSpan || event < 0 || event > 2 {
 			return
 		}
-		event, ok := args[1].(int)
-		if !ok || event < 0 || event > 2 {
-			return
-		}
-		span, ok := args[2].(uint64)
-		if !ok {
-			return
-		}
-		for index, allowed := range timingPhases {
-			if phase == allowed {
-				C.klethron_timing_event(C.longlong(id), C.longlong(span), C.int(index), C.int(event))
-				return
-			}
+		if index := slices.Index(timingPhases, phase); index >= 0 {
+			C.klethron_timing_event(C.longlong(id), C.longlong(span), C.int(index), C.int(event))
 		}
 	}
 }

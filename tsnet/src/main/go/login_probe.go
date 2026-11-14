@@ -25,9 +25,8 @@ import (
 	"tailscale.com/util/set"
 )
 
-// A loopback test control server for tests of the public Java API, which start nodes. With
-// interactive login, LoginTest completes it in place of a browser. Otherwise nodes join at once,
-// with MagicDNS, and DialTest adds an in-memory peer. No real tailnet is involved.
+// Loopback control for Java API tests. LoginTest approves interactive logins; other nodes join
+// automatically with MagicDNS. DialTest adds an in-memory peer.
 var loginProbe struct {
 	sync.Mutex
 	control  *testcontrol.Server
@@ -113,12 +112,9 @@ func probeNonInteractiveRotation(string) string {
 	return "rotation did not retire the previous node key"
 }
 
-// startPeer starts an in-memory peer that echoes on port 7070. On port 7071
-// it sends a greeting, closes its side, then reports how many bytes it received until the dialer
-// closed. On port 7073 it writes floodBytes of the probe pattern, counting progress, then closes.
-// On port 7074 it reads nothing until released, then reports how many bytes of the probe pattern
-// it received until the dialer closed, or -3 at the first other byte. It returns the peer's
-// tailnet IPv4 address, or a diagnostic on failure. Mode "dns" also starts the split-DNS fixture.
+// startPeer returns an in-memory peer's IPv4 address. Ports: 7070 echoes; 7071 greets and half-closes;
+// 7073 floods; 7074 waits for release. The latter two use the probe pattern; 7071/7074 report bytes
+// received until close. Mode "dns" also starts split DNS.
 func startPeer(mode string) string {
 	loginProbe.Lock()
 	defer loginProbe.Unlock()
@@ -236,8 +232,7 @@ func awaitReceived(string) string {
 	}
 }
 
-// withControl calls probe with the started control server under the probe lock, or returns
-// "not started".
+// withControl holds the probe lock and requires a started control server.
 func withControl(probe func(control *testcontrol.Server, argument string) string) func(string) string {
 	return func(argument string) string {
 		loginProbe.Lock()
@@ -278,9 +273,7 @@ func setLoginName(control *testcontrol.Server, name string) string {
 	return strconv.Itoa(updated)
 }
 
-// addPeers registers three unreachable devices: an offline Linux device named klethron-other, with
-// addresses 100.101.0.1 and fd7a:115c:a1e0::101:1 and an OpenSSH host key and one containing a
-// comma, a sharee node and a Mullvad exit node.
+// Register an offline peer with valid/invalid SSH keys, a sharee and a Mullvad exit node.
 func addPeers(control *testcontrol.Server, _ string) string {
 	add := func(id int, name string, hostinfo *tailcfg.Hostinfo, addresses ...string) {
 		node := &tailcfg.Node{
@@ -321,8 +314,7 @@ func completeLogin(control *testcontrol.Server, url string) string {
 	return "ok"
 }
 
-// expireNodes expires the node keys of all registered nodes, as when their key expiry passes or
-// an administrator expires them. It returns the number of devices, as approveMachines counts them.
+// Expire every node key and count distinct devices, as approveMachines does.
 func expireNodes(control *testcontrol.Server, _ string) string {
 	loginProbe.expired.Make()
 	devices := make(set.Set[key.MachinePublic])
@@ -335,7 +327,6 @@ func expireNodes(control *testcontrol.Server, _ string) string {
 	return strconv.Itoa(len(devices))
 }
 
-// renameNodes renames all registered nodes to name, as an administrator renames a device.
 func renameNodes(control *testcontrol.Server, name string) string {
 	for _, node := range control.AllNodes() {
 		node.Name = name
@@ -344,16 +335,13 @@ func renameNodes(control *testcontrol.Server, name string) string {
 	return ""
 }
 
-// removeNodes makes control answer map requests as for nodes deleted from the tailnet if removed
-// is "true", or no longer. A running node notices once it starts a new map request.
+// Running nodes notice removal on their next map request.
 func removeNodes(removed string) string {
 	loginProbe.removed.Store(removed == "true")
 	return ""
 }
 
-// rejectRegistrations makes control reject every registration request, including logouts, with an
-// error if reject is "true", or no longer. Stopping the server would not: nodes keep their hijacked
-// Noise connection.
+// Reject registration and logout. Stopping the server would leave hijacked Noise connections alive.
 func rejectRegistrations(reject string) string {
 	loginProbe.rejected.Store(reject == "true")
 	return ""
@@ -366,10 +354,8 @@ func requireMachineAuth(control *testcontrol.Server, _ string) string {
 	return ""
 }
 
-// approveMachines acts as a tailnet administrator, approving all registered devices. It returns
-// the number of devices approved. testcontrol records a node for each key's first registration
-// request, so one device can have several: its first key, abandoned if Start's interactive login
-// begins before that registration completes, and a rotation's staged key. They share a machine key.
+// Approve and count distinct devices. testcontrol can retain abandoned or staged node keys for
+// one device; their shared machine key identifies it.
 func approveMachines(control *testcontrol.Server, _ string) string {
 	approved := make(set.Set[key.MachinePublic])
 	url := control.HTTPTestServer.URL
@@ -381,9 +367,7 @@ func approveMachines(control *testcontrol.Server, _ string) string {
 	return strconv.Itoa(len(approved))
 }
 
-// hostnames returns the sorted hostnames that registered devices last reported to control,
-// separated by newlines. Like approveMachines, it counts devices by machine key, but keeps a
-// device's conflicting hostnames visible to assertions.
+// Sorted hostnames, deduplicated by device while retaining conflicting names for assertions.
 func hostnames(control *testcontrol.Server, _ string) string {
 	names := make(map[string]string) // By machine key and hostname.
 	for _, node := range control.AllNodes() {

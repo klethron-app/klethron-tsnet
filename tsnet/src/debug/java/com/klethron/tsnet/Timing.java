@@ -39,15 +39,12 @@ final class Timing {
 
     // Called only by the debug JNI bridge; phase/event indices come from the fixed Go allowlist.
     private static void nativeEvent(long node, long span, int phase, int event) {
-        long timestamp = SystemClock.elapsedRealtimeNanos();
         if (event == 3) {
-            write(timestamp, "tsnet_node", node, 0, "identity", "link",
-                    " related_scope=tsnet_handle related_id=" + span);
+            link("tsnet_node", node, "tsnet_handle", span);
         } else if (event == 4) {
-            write(timestamp, "tsnet_dial", node, 0, "identity", "link",
-                    " related_scope=fd related_id=" + span);
+            link("tsnet_dial", node, "fd", span);
         } else if (phase >= 0 && phase < PHASES.length && event >= 0 && event < 3) {
-            write(timestamp, "tsnet_node", node, span, PHASES[phase], EVENTS[event], "");
+            event("tsnet_node", node, span, PHASES[phase], EVENTS[event], "");
         }
     }
 

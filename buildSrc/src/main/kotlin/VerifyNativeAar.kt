@@ -1,4 +1,5 @@
-import java.io.DataInputStream
+import java.lang.classfile.ClassFile
+import java.lang.classfile.constantpool.MemberRefEntry
 import java.util.zip.ZipFile
 import java.util.zip.ZipInputStream
 import org.gradle.api.DefaultTask
@@ -52,29 +53,8 @@ abstract class VerifyNativeAar : DefaultTask() {
 
     // javac retains an unused Class constant for a folded ENABLED reference. Reject executable
     // dependencies: method/field constants, including references used by invokedynamic handles.
-    private fun referencesTiming(bytes: ByteArray): Boolean {
-        DataInputStream(bytes.inputStream()).use { input ->
-            if (input.readInt() != 0xcafebabe.toInt()) return false
-            input.readInt() // Minor/major version.
-            val count = input.readUnsignedShort()
-            val names = arrayOfNulls<String>(count)
-            val classes = IntArray(count)
-            val owners = mutableListOf<Int>()
-            var index = 1
-            while (index < count) {
-                when (val tag = input.readUnsignedByte()) {
-                    1 -> names[index] = input.readUTF()
-                    7 -> classes[index] = input.readUnsignedShort()
-                    9, 10, 11 -> { owners += input.readUnsignedShort(); input.readUnsignedShort() }
-                    3, 4, 12, 17, 18 -> input.skipNBytes(4)
-                    5, 6 -> { input.skipNBytes(8); index++ }
-                    8, 16, 19, 20 -> input.skipNBytes(2)
-                    15 -> input.skipNBytes(3)
-                    else -> throw GradleException("Unknown class constant $tag; update VerifyNativeAar and rerun ./gradlew :tsnet:verifyNativeAar")
-                }
-                index++
-            }
-            return owners.any { names[classes[it]] == "com/klethron/tsnet/Timing" }
+    private fun referencesTiming(bytes: ByteArray): Boolean =
+        ClassFile.of().parse(bytes).constantPool().any {
+            it is MemberRefEntry && it.owner().asInternalName() == "com/klethron/tsnet/Timing"
         }
-    }
 }

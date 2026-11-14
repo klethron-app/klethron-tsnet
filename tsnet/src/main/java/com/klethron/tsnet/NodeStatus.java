@@ -77,7 +77,7 @@ public final class NodeStatus {
         dnsName = emptyToNull(fields[6]);
         tailnetName = emptyToNull(fields[7]);
         loginName = emptyToNull(fields[8]);
-        peers = fields.length == 9 ? List.of() : Arrays.stream(fields, 9, fields.length).map(line -> {
+        peers = Arrays.stream(fields, 9, fields.length).map(line -> {
             String[] peer = line.split("\t", -1);
             return new Peer(peer[0], peer[1], Boolean.parseBoolean(peer[2]), addresses(peer[3]),
                     peer[4].isEmpty() ? List.of() : List.of(peer[4].split(",")));

@@ -23,19 +23,6 @@ import (
 
 // Probe the real selection helper with no private key, so it cannot contact a relay.
 func probeRelayHint(mode string) string {
-	count := 1
-	if mode == "race" {
-		count = 32
-	}
-	for range count {
-		if result := checkRelayHint(mode); result != "ok" {
-			return result
-		}
-	}
-	return "ok"
-}
-
-func checkRelayHint(mode string) string {
 	bus := eventbus.New()
 	defer bus.Close()
 	monitor := netmon.NewStatic()

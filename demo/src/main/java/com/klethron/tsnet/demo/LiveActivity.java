@@ -131,12 +131,9 @@ public final class LiveActivity extends Activity {
     private void pickPeer() {
         if (status == null) return;
         List<NodeStatus.Peer> peers = status.peers();
-        String[] labels = new String[peers.size()];
-        for (int i = 0; i < labels.length; i++) {
-            NodeStatus.Peer peer = peers.get(i);
-            labels[i] = getString(peer.online() ? R.string.peer_online : R.string.peer_offline, peer.dnsName(), peer.operatingSystem())
-                    + (peer.sshHostKeys().isEmpty() ? "" : getString(R.string.peer_tailscale_ssh));
-        }
+        String[] labels = peers.stream().map(peer ->
+                getString(peer.online() ? R.string.peer_online : R.string.peer_offline, peer.dnsName(), peer.operatingSystem())
+                        + (peer.sshHostKeys().isEmpty() ? "" : getString(R.string.peer_tailscale_ssh))).toArray(String[]::new);
         new AlertDialog.Builder(this).setTitle(R.string.pick_peer).setItems(labels, (dialog, which) ->
                 ((EditText) findViewById(R.id.peer_host)).setText(peers.get(which).dnsName())).show();
     }

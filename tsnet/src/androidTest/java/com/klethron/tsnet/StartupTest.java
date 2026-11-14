@@ -27,7 +27,9 @@ public final class StartupTest {
 
     @Test(timeout = 60000)
     public void doesNotOverwriteAConcurrentHomeSelection() {
-        assertEquals("ok", Probe.call("relayHint", "race"));
+        for (int i = 0; i < 32; i++) {
+            assertEquals("ok", Probe.call("relayHint", "race"));
+        }
     }
 
     @Test(timeout = 90000)
