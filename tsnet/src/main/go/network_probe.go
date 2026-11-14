@@ -17,6 +17,15 @@ func probeDefaultRoute(string) string {
 	return name
 }
 
+func probeGateway(string) string {
+	// The candidate is retained even without a matching local address. No traffic is sent.
+	gateway, _, _ := netmon.LikelyHomeRouterIP()
+	if gateway.IsValid() {
+		return gateway.String()
+	}
+	return ""
+}
+
 // probeInterfaces returns Go's own discovery error, then a line per address from the registered
 // getter, or the getter's error. It does not start a node or contact any endpoint.
 func probeInterfaces(string) string {

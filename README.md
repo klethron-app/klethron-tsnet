@@ -93,6 +93,7 @@ The app controls node lifetime and services.
 Nodes follow the best non-VPN network across Wi-Fi and mobile changes, including while another VPN
 is active. TLS uses Android's system CA store minus user-disabled roots; user-added CAs and the app's
 network security configuration do not apply.
+Port mapping uses the gateway reported by Android; without one, gateway probing is skipped.
 On restart, a previous relay supplied by fresh control state can connect while network probing
 continues. Missing or unavailable relay hints fall back to ordinary selection. The first `RUNNING`
 snapshot includes fresh peer metadata.

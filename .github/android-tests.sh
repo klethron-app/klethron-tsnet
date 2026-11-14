@@ -20,7 +20,9 @@ adb shell svc wifi enable
 adb shell svc data enable
 
 status=0
-./gradlew --continue :tsnet:connectedDebugAndroidTest :demo:connectedReleaseAndroidTest || status=$?
+# The timing experiment is opt-in and runs separately; its assumption is otherwise a skipped test.
+./gradlew --continue :tsnet:connectedDebugAndroidTest :demo:connectedReleaseAndroidTest \
+    -Pandroid.testInstrumentationRunnerArguments.notClass=com.klethron.tsnet.StartupTimingTest || status=$?
 for module in tsnet demo; do
     mkdir -p "$reports/$module"
     if [[ -d $module/build/reports/androidTests ]]; then

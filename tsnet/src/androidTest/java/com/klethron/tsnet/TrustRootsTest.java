@@ -23,6 +23,11 @@ public final class TrustRootsTest {
         assertEquals("ok", Probe.call("dnsRoots"));
     }
 
+    @Test(timeout = 30000)
+    public void upnpDiscoveryAndSoapUseTheSuppliedRoots() {
+        assertEquals("ok", Probe.call("portmapperRoots"));
+    }
+
     @Test
     public void goTrustsExactlyAndroidSystemRoots() throws Exception {
         Set<String> expected = systemRootFingerprints();

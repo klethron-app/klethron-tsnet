@@ -25,6 +25,11 @@ public final class StartupTest {
         assertEquals("ok", Probe.call("relayHint", "validation"));
     }
 
+    @Test(timeout = 30000)
+    public void freshControlConnectsTheHomeRelayBeforeNetcheckFinishes() {
+        assertEquals("ok", Probe.call("freshRelayHint"));
+    }
+
     @Test(timeout = 60000)
     public void doesNotOverwriteAConcurrentHomeSelection() {
         for (int i = 0; i < 32; i++) {

@@ -27,6 +27,12 @@ It also already checks UDP DNS reply sources and transaction IDs, covering
 
 ## Patched
 
+- **Android gateway discovery falls back to reading `/proc/net/route`.** When Android reports no
+  gateway, upstream tries a filesystem lookup that Android apps cannot use. Retain only the
+  `LinkProperties` gateway supplied through `UpdateLastKnownDefaultGateway`; missing or malformed
+  reports skip gateway probing until Android supplies a valid one. Control, DERP and direct UDP
+  remain available. `NetworkCallbackTest` covers gateway replacement and clearing, and the release
+  artifact audit rejects the filesystem fallback in both ABIs.
 - **Direct peer UDP denials have no embedder notification.** Add an atomic per-connection hook at
   the discovery-ping and WireGuard data send sites in `magicsock/endpoint.go`. Only Android
   `EPERM`/`EACCES` failures with a known peer and a direct destination reach it; STUN and UDP relays
@@ -51,6 +57,7 @@ It also already checks UDP DNS reply sources and transaction IDs, covering
   backend observes ordered old/new regions even when probing races the hint. Cached maps retain their
   upstream behavior; this does not cache authorization or bypass `Running`. `StartupTest` covers
   validation, selection races, missing/unreachable hints and complete first-`Running` peer snapshots.
+  A regression that holds netcheck requires a fresh control hint to establish DERP before probing finishes.
   The wrapper serializes metadata reads through publication and includes a fresh read with `Running`;
   a background read cannot later overwrite that snapshot with pre-startup peer data.
 - **Test control keeps old keys after noninteractive rotation.** It deletes them only after a
@@ -109,9 +116,12 @@ It also already checks UDP DNS reply sources and transaction IDs, covering
   required chain history; this is not a hard byte cap. Profile deletion and logout remove it entirely.
   Invalid saved history and callback errors stop the node. No authority directory is used.
 - **TLS discovers roots through filesystem reads.** Android supplies enabled system certificates via
-  `AndroidCAStore`; patch both `tlsdial` verification paths and the DNS-over-HTTPS transport to use
+  `AndroidCAStore`; patch both `tlsdial` verification paths, DNS-over-HTTPS and UPnP transports to use
   that explicit pool. This includes DERP relays whose `CertName` differs from their TLS server name.
   `TrustRootsTest` checks acceptance, untrusted-root and wrong-name rejection, and DoH trust and routing.
+  HTTPS UPnP discovery and SOAP calls use the same explicit roots and HTTP transport,
+  including mapping release after the original context ends. The local UPnP probe checks discovery,
+  SOAP and certificate rejection.
   `bakedroots` is omitted.
   This also fixes Go missing Android 14's updatable Conscrypt store and user-disabled roots
   ([golang/go#71258](https://github.com/golang/go/issues/71258)).

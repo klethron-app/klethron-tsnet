@@ -13,6 +13,20 @@ import java.util.Objects;
 import org.junit.Test;
 
 public final class NetworkCallbackTest {
+    @Test
+    public void gatewayFollowsAndroidReportsAndClearsWhenAbsent() throws Exception {
+        Method report = TailnetNode.class.getDeclaredMethod("nativeSetDefaultNetwork", byte[].class, long.class);
+        report.setAccessible(true);
+        try {
+            for (String gateway : new String[] {"", "192.0.2.1", "", "invalid", "192.0.2.2", ""}) {
+                report.invoke(null, ("lo\0" + gateway).getBytes(StandardCharsets.UTF_8), 0L);
+                assertEquals(gateway.isEmpty() || gateway.equals("invalid") ? "" : gateway, Probe.call("gateway"));
+            }
+        } finally {
+            report.invoke(null, new byte[0], 0L);
+        }
+    }
+
     @Test(timeout = 30000)
     public void ignoresCallbacksFromAClosedRegistration() throws Exception {
         Network physical = Objects.requireNonNull(CONTEXT.getSystemService(ConnectivityManager.class).getActiveNetwork());

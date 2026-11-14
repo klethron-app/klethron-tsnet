@@ -185,7 +185,7 @@ abstract class BuildGoLibrary @Inject constructor(
             }
 
             func (de *endpoint) reportUDPDenied(address epAddr, err error) {
-                if runtime.GOOS != "android" || !address.isDirect() || !de.nodeAddr.IsValid() ||
+                if err == nil || runtime.GOOS != "android" || !address.isDirect() || !de.nodeAddr.IsValid() ||
                     (!errors.Is(err, syscall.EPERM) && !errors.Is(err, syscall.EACCES)) {
                     return
                 }
@@ -267,6 +267,8 @@ abstract class BuildGoLibrary @Inject constructor(
                 "\t\tif isFollowup {" to "\t\tif isFollowup || !s.RequireAuth {")
             workspace.resolve("tailscale/wgengine/magicsock/klethron_rebind_probe.go")
                 .writeText(source.resolve("testsupport/magicsock_rebind.go").readText())
+            workspace.resolve("tailscale/net/portmapper/klethron_roots_probe.go")
+                .writeText(source.resolve("testsupport/portmapper_roots.go").readText())
         }
         val tsnetSource = upstream.resolve("tsnet/tsnet.go").readText()
         val hostnameSetup = "\texe, err := os.Executable()" + tsnetSource.substringAfter("\texe, err := os.Executable()")
@@ -358,6 +360,44 @@ abstract class BuildGoLibrary @Inject constructor(
             }
 
         """.trimIndent())
+        // Android supplies gateway information; absent routes must not fall back to /proc.
+        val androidInterfaces = upstream.resolve("net/netmon/interfaces_android.go").readText()
+        val gatewayDiscovery = "var procNetRoutePath =" + androidInterfaces.substringAfter("var procNetRoutePath =")
+            .substringBefore("// UpdateLastKnownDefaultGateway")
+        patch("net/netmon/interfaces_android.go", "864304c989a46028ce753f560d45328ea152c9b3c1ec932796c66a1517320a85",
+            "\t\"sync/atomic\"\n" to "",
+            "\t\"go4.org/mem\"\n" to "",
+            "\t\"golang.org/x/sys/unix\"\n" to "",
+            "\t\"tailscale.com/net/netaddr\"\n" to "",
+            "\t\"tailscale.com/util/lineiter\"\n" to "",
+            gatewayDiscovery to """
+                func init() { likelyHomeRouterIP = likelyHomeRouterIPAndroid }
+
+                func likelyHomeRouterIPAndroid() (netip.Addr, netip.Addr, bool) {
+                    gateway, err := netip.ParseAddr(lastKnownDefaultGateway.Load())
+                    return gateway, netip.Addr{}, err == nil
+                }
+
+            """.trimIndent())
+        // UPnP locations, redirects and SOAP control URLs can use HTTPS too.
+        patch("net/portmapper/upnp.go", "246d99b9bf187cf43799ab3ea0799d4abf453365c38318dfd75676d8dbeda48c",
+            "\t\"context\"\n" to "\t\"context\"\n\t\"crypto/tls\"\n",
+            "\t\"tailscale.com/net/netns\"\n" to "\t\"tailscale.com/net/netns\"\n\t\"tailscale.com/net/tlsdial\"\n",
+            "type upnpClient interface {\n" to "type upnpClient interface {\n\tGetServiceClient() *goupnp.ServiceClient\n",
+            "\t// If we have no clients, then return right now; if we only have one,\n" to """
+                    // Retain this transport for SOAP, including releases with a different context.
+                    if httpClient := upnpHTTPClientKey.Value(ctx); httpClient != nil {
+                        for _, client := range clients {
+                            client.GetServiceClient().SOAPClient.HTTPClient = *httpClient
+                        }
+                    }
+
+                    // If we have no clients, then return right now; if we only have one,
+
+            """.trimIndent().prependIndent("\t"),
+            "\t\t\t\tIdleConnTimeout: 2 * time.Second, // LAN is cheap\n" to
+                "\t\t\t\tIdleConnTimeout: 2 * time.Second, // LAN is cheap\n" +
+                    "\t\t\t\tTLSClientConfig: &tls.Config{RootCAs: tlsdial.SystemRoots},\n")
         patch("net/tlsdial/tlsdial.go", "49adc77dc68cf066fa695037cc41164509949dfa8a97e96a9c4fd334cd3b7e1e",
             "\t\t\tDNSName:       dialedHost," to "\t\t\tDNSName:       dialedHost,\n\t\t\tRoots: SystemRoots,",
             "\t\t\tDNSName:       certDNSName," to "\t\t\tDNSName:       certDNSName,\n\t\t\tRoots: SystemRoots,")

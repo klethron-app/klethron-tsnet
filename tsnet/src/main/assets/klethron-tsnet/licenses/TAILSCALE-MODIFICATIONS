@@ -1,9 +1,11 @@
-Klethron tsnet modifies thirteen tailscale.com source files in an isolated build copy.
+Klethron tsnet modifies sixteen tailscale.com source files in an isolated build copy.
 Debug builds also patch testcontrol and add timing hooks, as described below.
 Upstream revision: e0d532cca9beeb8ed235bf30b9198a7c0e0afa02
 Original file SHA-256:
 net/tlsdial/tlsdial.go: 49adc77dc68cf066fa695037cc41164509949dfa8a97e96a9c4fd334cd3b7e1e
 net/dns/resolver/forwarder.go: 804a86c6264a7fcb3d2795e33d047a88502836ca74f5eaa516331acc8e0e4b94
+net/netmon/interfaces_android.go: 864304c989a46028ce753f560d45328ea152c9b3c1ec932796c66a1517320a85
+net/portmapper/upnp.go: 246d99b9bf187cf43799ab3ea0799d4abf453365c38318dfd75676d8dbeda48c
 util/dnsname/dnsname.go: 5608189341565036e81b5d09c808034dd2f44e9d9cd8c7c9b7cd90764a7cdf3c
 ipn/ipnlocal/node_backend.go: 872efabb907356dd3305342b01f849654e65916e927384b39b896233e9113a07
 ipn/ipnlocal/resolve.go: 1a072fd225a45c548606bbad0f7188a1b124eb95f63de77be3e2e4a77e276814
@@ -23,6 +25,17 @@ derp/derphttp/derphttp_client.go (debug only): 38dbd3eb7b9c55d62e6c3386a5d3ce665
 
 Binary build metadata records the copy as "tailscale.com => ./tailscale"; the
 GO-MODULES.tsv checksum identifies the upstream module before these changes:
+
+In net/netmon/interfaces_android.go, use only lastKnownDefaultGateway supplied
+by Android's LinkProperties. Remove the /proc/net/route fallback and its parser.
+Missing or malformed gateway reports return no candidate until Android supplies
+a valid gateway; normal control, DERP and direct UDP networking are unaffected.
+
+In net/portmapper/upnp.go, set the existing HTTP transport's TLS RootCAs to
+tlsdial.SystemRoots. Retain that HTTP client in each selected SOAP service so
+HTTPS device discovery, mapping and release use Android roots and the same
+dialer, including calls with a later context. No filesystem certificate
+discovery is needed for HTTPS UPnP locations, control URLs or redirects.
 
 In ipn/ipnlocal/local.go, apply OnlyTCP443 before installing the DERP map or
 starting network probing. After installing a live control response's DERP map,
@@ -52,9 +65,10 @@ klethron_permission.go. In endpoint.go, report errors from direct discovery
 pings and WireGuard data sends. Only Android EPERM/EACCES errors with a known
 peer address and a direct (non-DERP, non-Geneve-relay) destination reach the
 callback. STUN and other background probing do not report peer denials. The
-wrapper checks the current network and Android permission before consulting a
-fixed startup handler on the main thread. The handler checks the app's selected
-peer, visibility and offer state before presenting a caller-owned offer.
+helper returns immediately for successful sends. The wrapper checks the current
+network and Android permission before consulting a fixed startup handler on the
+main thread. The handler checks the app's selected peer, visibility and offer
+state before presenting a caller-owned offer.
 
 In debug builds, testcontrol retires an old node key after either an interactive
 followup or a registration that requires no authorization. Upstream retires it
