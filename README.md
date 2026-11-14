@@ -94,3 +94,21 @@ network security configuration do not apply.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) to build, test or use a checkout. Original code is
 [Apache-2.0 licensed](LICENSE); dependencies' [own licences](THIRD-PARTY-NOTICES.md) ship in the AAR.
+
+### Startup timings
+
+Run the isolated startup experiment on one connected device:
+
+```sh
+ANDROID_SERIAL=<serial> ./gradlew :tsnet:connectedDebugAndroidTest \
+  -Pandroid.testInstrumentationRunnerArguments.class=com.klethron.tsnet.StartupTimingTest \
+  -Pandroid.testInstrumentationRunnerArguments.startupTiming=true --no-build-cache
+adb -s <serial> logcat -d -s TsnetStartupTiming:I '*:S'
+```
+
+This opt-in test uses a temporary SQLite store and local control, STUN, DERP and echo servers.
+It records class initialization, local startup, waiting for `RUNNING` and the peer map, first and warm
+TCP connections, first echo and close. Iteration 0 creates the identity; iterations 1–9 restart it from
+saved state. Logs contain only phase labels and durations. Run the class alone in a new instrumentation
+process to measure native loading and system certificate initialization. These local timings exclude
+real control-plane latency, restrictive NATs and the consuming app's lifecycle and SSH setup.
