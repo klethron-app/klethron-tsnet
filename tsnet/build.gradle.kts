@@ -11,6 +11,7 @@ android {
     namespace = "com.klethron.tsnet"
     sourceSets.named("androidTest") { java.srcDir("../demo/src/main/java/com/klethron/tsnet/demo/store") }
     defaultConfig.consumerProguardFiles("consumer-rules.pro")
+    buildTypes.named("debug") { consumerProguardFiles("consumer-rules-debug.pro") }
     publishing { singleVariant("release") { withSourcesJar() } }
 }
 
@@ -32,7 +33,7 @@ val omittedFeatures = listOf(
 
 // AGP's Dokka-based Javadoc drops the code spans and links of Markdown doc comments; the JDK renders them.
 val javadoc = tasks.register<Javadoc>("releaseJavadoc") {
-    source("src/main/java")
+    source("src/main/java", "src/release/java")
     (options as StandardJavadocDocletOptions).apply {
         addBooleanOption("-no-fonts", true)
         addBooleanOption("Xdoclint:all,-missing", true) // Parameters are described in the prose.

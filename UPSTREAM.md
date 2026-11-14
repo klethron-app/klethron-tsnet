@@ -3,6 +3,18 @@
 Pinned: Tailscale [`e0d532cca9be`](https://github.com/tailscale/tailscale/commit/e0d532cca9beeb8ed235bf30b9198a7c0e0afa02)
 with Go 1.27.4. Reviewed 2026-11-13. Remove patches when equivalent fixes reach the pin.
 
+Debug builds additionally apply `DebugTimingPatches.kt` to six hash-checked upstream files:
+`control/controlclient/direct.go`, `control/controlhttp/client.go`, `net/netcheck/netcheck.go`,
+`derp/derphttp/derphttp_client.go`, `wgengine/magicsock/derp.go` and `wgengine/magicsock/magicsock.go`.
+The build copy adds `util/klethrontiming`, which carries only fixed phase codes and unique span IDs
+through existing component loggers. The native receiver allows only that marker and known typed
+arguments; it never formats or forwards ordinary upstream logs. Static logger prefixes preserve the
+marker, and these paths do not use rate-limited loggers. Java timestamps synchronous JNI callbacks.
+Local native startup, storage, state and dial hooks are also injected only into the debug build copy;
+production has no tracing counters, calls, callback bridge or timing package. The release artifact
+audit checks this on every `check`. Phase coverage and remaining composite spans are in
+[README.md](README.md#startup-timings). No upstream behavior changes are made by these timing hooks.
+
 The update from `59064619a0f4` extracts the network-map cache's file store and gates home-DERP
 cache writes on `CacheNetworkMaps`. `ts_omit_cachenetmap` still disables cache creation, loading,
 writes and clearing; the new close calls return immediately because no cache exists. All patched

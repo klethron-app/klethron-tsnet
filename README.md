@@ -100,13 +100,44 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) to build, test or use a checkout. Origina
 
 ### Startup timings
 
+Debug variants emit structured `ConnectTiming` logcat records by default. Release variants compile out
+the Java call sites, JNI bridge and Go hooks. Use a local checkout's debug variant when diagnosing an
+app; the published release AAR does not emit these events.
+
+```text
+v=1 source=tsnet scope=tsnet_node id=1 span=8 phase=control_keys event=begin t_ns=123456789
+v=1 source=tsnet scope=tsnet_node id=1 span=8 phase=control_keys event=end t_ns=125456789
+```
+
+Java samples `SystemClock.elapsedRealtimeNanos()` at each logger entry, including synchronous native
+callbacks. Subtract `t_ns` values to measure spans; wall-clock adjustments do not affect them. JNI
+attachment and logcat add diagnostic overhead. Native spans have unique IDs, including retries and
+overlapping attempts. Sort by `t_ns`: concurrent callbacks can reach logcat out of timestamp order.
+`end` means completion, including failure or cancellation; only events with an
+explicit `result=ok` report success.
+
+Phases cover native loading, Android certificates, local startup, caller storage, backend state,
+control keys/registration/connection, HTTP and HTTPS attempts, the first decoded non-keepalive map of
+each request, netcheck/STUN/portmapper waits, relay hint/selection/connection, socket rebinding, loopback
+bridge creation, waiting for `RUNNING`, peer lookup and TCP connection. Control and relay connection
+spans include DNS, TCP, TLS and protocol negotiation together. `peer_tcp` includes path discovery and
+WireGuard establishment; those are not separate events. Events contain fixed labels and opaque IDs,
+never endpoints, state keys/values, login URLs or exception text. Ordinary upstream logs stay discarded.
+
+`event=link phase=identity` records connect native node IDs to handles and Java `node`/`channel` IDs
+(unsigned `System.identityHashCode`), which a consuming app can log without a new library API. Native
+dial IDs equal their `native_dial` span IDs. Channel-to-`fd` and dial-to-`fd` links apply only within that
+invocation: descriptor numbers are reused. Native span pairing uses `(scope,id,span,phase)`; sequential
+Java spans use `(scope,id,phase)` with `span=0`. Object identities are process-local and may collide or
+be reused after collection; use the process, lifecycle and event time when joining records.
+
 Run the isolated startup experiment on one connected device:
 
 ```sh
 ANDROID_SERIAL=<serial> ./gradlew :tsnet:connectedDebugAndroidTest \
   -Pandroid.testInstrumentationRunnerArguments.class=com.klethron.tsnet.StartupTimingTest \
   -Pandroid.testInstrumentationRunnerArguments.startupTiming=true --no-build-cache
-adb -s <serial> logcat -d -s TsnetStartupTiming:I '*:S'
+adb -s <serial> logcat -d -s ConnectTiming:I TsnetStartupTiming:I '*:S'
 ```
 
 This opt-in test uses a temporary SQLite store and local control, STUN, DERP and echo servers.

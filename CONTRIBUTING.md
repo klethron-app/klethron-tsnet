@@ -36,8 +36,13 @@ Device tests require SELinux Enforcing and internet access. The network-change t
 needs cellular fallback; use USB ADB on hardware. Debug builds include local control-server and peer
 fixtures. Demo tests exercise an R8-minified release consumer.
 
-The AAR is `tsnet/build/outputs/aar/tsnet-release.aar`. `verifyNativeAar` checks for debug-only test code
-and writes sizes to `tsnet/build/reports/native/sizes.tsv`.
+The AAR is `tsnet/build/outputs/aar/tsnet-release.aar`. `verifyNativeAar`, included in `check`, checks the
+packaged native binaries and Java classes for debug test/timing code, logging strings and logging call
+dependencies, and writes sizes to `tsnet/build/reports/native/sizes.tsv`. Debug upstream timing hooks
+are hash-checked build-copy edits in `DebugTimingPatches.kt`; release builds never apply them. JNI
+timing sources have the debug build tag, and guarded Java calls use variant-specific constant values.
+Keep both variants building when adding phases and run the [isolated startup test](README.md#startup-timings)
+to check actual callback propagation. Capture only the two documented tags, without general native logs.
 
 For a live check, install and open the demo (`:demo:installRelease`). Authorize the node in your
 tailnet and wait for **RUNNING / Login saved**. Echo against a peer you control, such as one running

@@ -310,6 +310,7 @@ abstract class BuildGoLibrary @Inject constructor(
         workspace.resolve("tailscale/net/tlsdial/tlsdial.go").appendText(
             "\n// SystemRoots is supplied by Android before TLS is used.\nvar SystemRoots *x509.CertPool\n")
         workspace.resolve("go.mod").appendText("\nreplace tailscale.com => ./tailscale\n")
+        if ("klethron_test" in buildTags.get()) applyDebugTiming(workspace, upstream)
         val flags = arrayOf("-mod=readonly", "-trimpath", "-buildvcs=false", "-tags=" + buildTags.get().joinToString(","))
         val target = mapOf("GOOS" to "android", "GOARCH" to arch, "CGO_ENABLED" to "1", "CC" to compiler.absolutePath)
         // Check the exact configuration we ship; matching flags share the build cache with go build.

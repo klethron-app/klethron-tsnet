@@ -44,7 +44,13 @@ import org.jspecify.annotations.Nullable;
 /// First use loads the native library.
 public final class TailnetNode implements AutoCloseable {
     static {
+        if (Timing.ENABLED) Timing.event("process", 0, 0, "native_load", "begin", "");
         System.loadLibrary("klethron_tsnet");
+        if (Timing.ENABLED) {
+            Timing.event("process", 0, 0, "native_load", "end", "");
+            Timing.initialize();
+            Timing.event("process", 0, 0, "certificates", "begin", "");
+        }
         try {
             KeyStore roots = KeyStore.getInstance("AndroidCAStore");
             roots.load(null);
@@ -55,7 +61,9 @@ public final class TailnetNode implements AutoCloseable {
                 if (certificate != null) certificates.writeBytes(certificate.getEncoded());
             }
             nativeSetRoots(certificates.toByteArray());
+            if (Timing.ENABLED) Timing.event("process", 0, 0, "certificates", "end", "ok");
         } catch (GeneralSecurityException | IOException failure) {
+            if (Timing.ENABLED) Timing.event("process", 0, 0, "certificates", "end", "error");
             throw new ExceptionInInitializerError(failure);
         }
     }
@@ -103,6 +111,10 @@ public final class TailnetNode implements AutoCloseable {
     private TailnetNode(long handle, StateStore store) {
         this.handle = handle;
         this.store = store;
+        if (Timing.ENABLED) {
+            Timing.link("tsnet_handle", handle, "node", Timing.identity(this));
+            Timing.link("node", Timing.identity(this), "store", Timing.identity(store));
+        }
     }
 
     /// Starts with the saved login or browser authorization. Returns after local initialization;
@@ -132,9 +144,12 @@ public final class TailnetNode implements AutoCloseable {
             stores.add(store);
         }
         long handle = -1;
+        if (Timing.ENABLED) Timing.event("store", Timing.identity(store), 0, "java_start", "begin", "");
         try {
             handle = nativeStart(new Store(store), (hostname + '\0' + controlUrl).getBytes(StandardCharsets.UTF_8));
         } finally {
+            if (Timing.ENABLED) Timing.event("store", Timing.identity(store), 0, "java_start", "end",
+                    handle < 0 ? "error" : "ok");
             if (handle < 0) release(store);
         }
         check(handle);
@@ -245,13 +260,20 @@ public final class TailnetNode implements AutoCloseable {
         if (timeoutNanos <= 0) throw new SocketTimeoutException("Timed out");
         long started = System.nanoTime();
         SocketChannel connection = SocketChannel.open();
+        if (Timing.ENABLED) {
+            Timing.link("node", Timing.identity(this), "channel", Timing.identity(connection));
+            Timing.event("channel", Timing.identity(connection), 0, "java_connect", "begin", "");
+        }
         try {
             try (ParcelFileDescriptor socket = localBridge(connection)) {
+                if (Timing.ENABLED) Timing.link("channel", Timing.identity(connection), "fd", socket.getFd());
                 check(nativeDial(handle, name, port, socket.detachFd(),
                         Math.max(0, timeoutNanos - (System.nanoTime() - started))));
             }
+            if (Timing.ENABLED) Timing.event("channel", Timing.identity(connection), 0, "java_connect", "end", "ok");
             return connection;
         } catch (IOException | RuntimeException | Error failure) {
+            if (Timing.ENABLED) Timing.event("channel", Timing.identity(connection), 0, "java_connect", "end", "error");
             try {
                 connection.close();
             } catch (IOException closeFailure) {
@@ -263,6 +285,7 @@ public final class TailnetNode implements AutoCloseable {
 
     /// Android cannot adopt a Unix socket into a SocketChannel. Keep the loopback pair private.
     private static ParcelFileDescriptor localBridge(SocketChannel connection) throws IOException {
+        if (Timing.ENABLED) Timing.event("channel", Timing.identity(connection), 0, "loopback_bridge", "begin", "");
         try (ServerSocketChannel listener = ServerSocketChannel.open()) {
             listener.bind(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 1);
             connection.socket().setTcpNoDelay(true);
@@ -280,6 +303,8 @@ public final class TailnetNode implements AutoCloseable {
                 connection.configureBlocking(true);
                 return ParcelFileDescriptor.fromSocket(accepted.socket());
             }
+        } finally {
+            if (Timing.ENABLED) Timing.event("channel", Timing.identity(connection), 0, "loopback_bridge", "end", "");
         }
     }
 
