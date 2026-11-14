@@ -4,7 +4,7 @@
 struct state_store {
     JavaVM *vm;
     jobject callback;
-    jmethodID read, write;
+    jmethodID read, write, local_network_denied;
 };
 
 state_store *state_new(JNIEnv *env, jobject callback) {
@@ -16,9 +16,10 @@ state_store *state_new(JNIEnv *env, jobject callback) {
     if (store->callback != NULL && type != NULL) {
         store->read = (*env)->GetMethodID(env, type, "read", "([B)[B");
         if (store->read != NULL) store->write = (*env)->GetMethodID(env, type, "write", "([B[B)V");
+        if (store->write != NULL) store->local_network_denied = (*env)->GetMethodID(env, type, "localNetworkDenied", "([B[B)V");
     }
     if (type != NULL) (*env)->DeleteLocalRef(env, type);
-    if (store->write != NULL) return store;
+    if (store->local_network_denied != NULL) return store;
     if (store->callback != NULL) (*env)->DeleteGlobalRef(env, store->callback);
     free(store);
     return NULL;
@@ -88,6 +89,18 @@ int state_write(state_store *store, const char *key, int key_length, const void 
     if (name != NULL) {
         jbyteArray value = length < 0 ? NULL : bytes(env, data, length);
         if (!(*env)->ExceptionCheck(env)) (*env)->CallVoidMethod(env, store->callback, store->write, name, value);
+    }
+    return end(store, env, attached, 0);
+}
+
+int state_local_network_denied(state_store *store, const void *peer, int peer_length, const void *destination, int destination_length) {
+    int attached;
+    JNIEnv *env = begin(store, &attached);
+    if (env == NULL) return -1;
+    jbyteArray source = bytes(env, peer, peer_length);
+    if (source != NULL) {
+        jbyteArray target = bytes(env, destination, destination_length);
+        if (target != NULL) (*env)->CallVoidMethod(env, store->callback, store->local_network_denied, source, target);
     }
     return end(store, env, attached, 0);
 }

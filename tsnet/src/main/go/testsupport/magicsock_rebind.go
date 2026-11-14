@@ -24,6 +24,8 @@ import (
 	"tailscale.com/derp/derpserver"
 	"tailscale.com/health"
 	"tailscale.com/net/netmon"
+	"tailscale.com/net/packet"
+	"tailscale.com/net/stun"
 	"tailscale.com/tailcfg"
 	"tailscale.com/tstime/mono"
 	"tailscale.com/types/key"
@@ -215,8 +217,9 @@ func receivePermissionPacket(receiver *derphttp.Client, source key.NodePublic, w
 var deniedUDP = netip.MustParseAddrPort("192.0.2.1:9")
 
 type permissionPacketListener struct {
-	binds atomic.Int32
-	errno syscall.Errno
+	binds  atomic.Int32
+	errno  syscall.Errno
+	target netip.AddrPort
 }
 
 func (p *permissionPacketListener) ListenPacket(ctx context.Context, network, address string) (net.PacketConn, error) {
@@ -226,17 +229,72 @@ func (p *permissionPacketListener) ListenPacket(ctx context.Context, network, ad
 		return nil, err
 	}
 	p.binds.Add(1)
-	return &permissionPacketConn{UDPConn: packet.(*net.UDPConn), errno: p.errno}, nil
+	target := p.target
+	if !target.IsValid() {
+		target = deniedUDP
+	}
+	return &permissionPacketConn{UDPConn: packet.(*net.UDPConn), errno: p.errno, target: target}, nil
 }
 
 type permissionPacketConn struct {
 	*net.UDPConn
-	errno syscall.Errno
+	errno  syscall.Errno
+	target netip.AddrPort
 }
 
 func (p *permissionPacketConn) WriteToUDPAddrPort(packet []byte, address netip.AddrPort) (int, error) {
-	if address == deniedUDP {
+	if address == p.target {
+		if p.errno == 0 {
+			return len(packet), nil
+		}
 		return 0, &net.OpError{Op: "write", Net: "udp", Err: p.errno}
 	}
 	return p.UDPConn.WriteToUDPAddrPort(packet, address)
+}
+
+// Exercise the real discovery and WireGuard send paths with a socket-level injected error.
+func KlethronProbePeerUDPDenied(mode string, peerIP, destination netip.Addr, callback func(netip.Addr, netip.Addr)) string {
+	bus := eventbus.New()
+	defer bus.Close()
+	monitor := netmon.NewStatic()
+	defer monitor.Close()
+	target := netip.AddrPortFrom(destination, 9)
+	listener := &permissionPacketListener{errno: syscall.EPERM, target: target}
+	switch mode {
+	case "success":
+		listener.errno = 0
+	case "access":
+		listener.errno = syscall.EACCES
+	case "unreachable":
+		listener.errno = syscall.ENETUNREACH
+	}
+	c, err := NewConn(Options{EventBus: bus, Logf: logger.Discard, NetMon: monitor,
+		HealthTracker: health.NewTracker(bus), Metrics: new(usermetric.Registry),
+		DisablePortMapper: true, TestOnlyPacketListener: listener})
+	if err != nil {
+		return "connection creation failed"
+	}
+	defer c.Close()
+	c.netChecker.SkipExternalNetwork = true
+	// Suppress recovery side effects; reporting must work even inside its throttle window.
+	c.lastErrRebind.Store(time.Now())
+	c.SetPeerUDPDeniedCallback(callback)
+	ep := &endpoint{c: c, nodeID: 1, publicKey: key.NewNode().Public(), nodeAddr: peerIP,
+		bestAddr: addrQuality{epAddr: epAddr{ap: target}}, trustBestAddrUntil: mono.Now().Add(time.Minute),
+		heartbeatDisabled: true}
+	discoKey := key.NewDisco().Public()
+	ep.updateDiscoKey(discoKey)
+	c.peerMap.upsertEndpoint(ep, key.DiscoPublic{}, false)
+	if mode == "relay" {
+		ep.bestAddr.vni.Set(123)
+	}
+	switch mode {
+	case "disco":
+		ep.sendDiscoPing(ep.bestAddr.epAddr, discoKey, stun.NewTxID(), 0, discoLog)
+	case "stun":
+		_, _ = c.sendUDPNetcheck([]byte{1}, target)
+	default:
+		_ = ep.send(0, [][]byte{make([]byte, packet.GeneveFixedHeaderLength+32)}, packet.GeneveFixedHeaderLength)
+	}
+	return "ok"
 }

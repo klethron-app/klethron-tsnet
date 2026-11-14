@@ -144,6 +144,7 @@ abstract class BuildGoLibrary @Inject constructor(
             """.trimIndent())
         // Android can deny a speculative LAN packet without invalidating the relay's TCP socket.
         patch("wgengine/magicsock/magicsock.go", "c501a422c108fd57e6e8f2b6b90ec9a07786cd6f0b2d75a3b8b33fd150aafba1",
+            "type Conn struct {" to "type Conn struct {\n\tpeerUDPDenied atomic.Pointer[func(netip.Addr, netip.Addr)]",
             "\t\tc.Rebind()\n\t\tgo c.ReSTUN(reason)" to """
                     if runtime.GOOS == "android" && reason == "operation-not-permitted" {
                         c.rebindAndReset(false)
@@ -161,6 +162,38 @@ abstract class BuildGoLibrary @Inject constructor(
             """.trimIndent(),
             "\tif len(ifIPs) > 0 {\n\t\tc.maybeCloseDERPsOnRebind(ifIPs)" to
                 "\tif resetDERP && len(ifIPs) > 0 {\n\t\tc.maybeCloseDERPsOnRebind(ifIPs)")
+        // Attribute only direct peer discovery/data sends, excluding STUN and UDP relay traffic.
+        patch("wgengine/magicsock/endpoint.go", "90e54e1945f08f18ac4bb29872f72233eed39133db199d84d06a216adad0828f",
+            "\t\t_, err = de.c.sendUDPBatch(flow, udpAddr, buffs, offset)" to
+                "\t\t_, err = de.c.sendUDPBatch(flow, udpAddr, buffs, offset)\n\t\tde.reportUDPDenied(udpAddr, err)",
+            "\tsent, _ := de.c.sendDiscoMessage(ep, de.publicKey, discoKey, &disco.Ping{" to
+                "\tsent, err := de.c.sendDiscoMessage(ep, de.publicKey, discoKey, &disco.Ping{",
+            "\t}, logLevel)\n\tif !sent {" to "\t}, logLevel)\n\tde.reportUDPDenied(ep, err)\n\tif !sent {")
+        workspace.resolve("tailscale/wgengine/magicsock/klethron_permission.go").writeText("""
+            package magicsock
+
+            import (
+                "errors"
+                "net/netip"
+                "runtime"
+                "syscall"
+            )
+
+            // SetPeerUDPDeniedCallback installs a notification hook for direct peer sends.
+            func (c *Conn) SetPeerUDPDeniedCallback(callback func(peer, destination netip.Addr)) {
+                c.peerUDPDenied.Store(&callback)
+            }
+
+            func (de *endpoint) reportUDPDenied(address epAddr, err error) {
+                if runtime.GOOS != "android" || !address.isDirect() || !de.nodeAddr.IsValid() ||
+                    (!errors.Is(err, syscall.EPERM) && !errors.Is(err, syscall.EACCES)) {
+                    return
+                }
+                if callback := de.c.peerUDPDenied.Load(); callback != nil {
+                    (*callback)(de.nodeAddr, address.ap.Addr())
+                }
+            }
+        """.trimIndent() + "\n")
         // Names that the tailnet's DNS does not answer must not reach the device's resolver.
         patch("tsnet/dns_lookup.go", "b49ecd66f1b9f4de7e7ef20061148a0e903de2e847627db38c88715c6964dc93",
             "return c.hostLookup(ctx, network, hostFB)" to "return candidateResult{servfail: true, err: firstErr}")

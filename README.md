@@ -15,6 +15,7 @@ consumers need no Go compiler or NDK.
 `SocketChannel` operations, IPv6, peer listing, DNS address fallback, split DNS, TLS certificate trust,
 network replacement and Tailnet Lock persistence.
 UDP permission recovery preserves established and connecting relay transports and queued packets.
+An optional selected-peer callback offers local-network permission after a denied direct UDP attempt.
 Live tests cover login, logout, revocation, TCP transport and Wi-Fi/cellular switches; switches have
 only been tested with Tailscale's VPN active. Tailnet Lock status and signing APIs are not exposed.
 See [limitations](UPSTREAM.md#limits) and [Javadoc](https://javadoc.io/doc/com.klethron/tsnet/latest/).
@@ -62,7 +63,7 @@ try (TailnetNode node = TailnetNode.start(context, store, "my-device")) {
 Whoever opens a login URL can claim the node. Wait for it to clear before closing so the login reaches
 the store. Restarting with those values resumes that identity.
 
-Callbacks are serialized. Node operations on a callback thread throw `IllegalStateException`;
+Storage callbacks are serialized. Node operations on a storage callback thread throw `IllegalStateException`;
 callbacks must not wait for node operations on other threads. A returned write must be visible to later
 reads. The caller chooses durability: it can handle a disk failure, retain state in memory and return
 normally. An exception escaping a callback stops the node and makes node operations throw `IOException`.
@@ -95,6 +96,29 @@ network security configuration do not apply.
 On restart, a previous relay supplied by fresh control state can connect while network probing
 continues. Missing or unavailable relay hints fall back to ordinary selection. The first `RUNNING`
 snapshot includes fresh peer metadata.
+
+For apps targeting Android 17/API 37 or later, declare `android.permission.ACCESS_LOCAL_NETWORK`
+in the app's manifest if you want to offer direct LAN access. See Android's
+[local-network permission guidance](https://developer.android.com/privacy-and-security/local-network-permission).
+On the main thread, register an offer for the selected peer **only while its terminal is visible and
+the user has not dismissed the offer**:
+
+```java
+node.setLocalNetworkPermissionCallback(selectedPeer, () -> {
+    // Show the app's rationale or request ACCESS_LOCAL_NETWORK with the Activity Result API.
+    // Remember dismissal in the app; do not register again while dismissed.
+});
+// When hidden, dismissed, or changing selection:
+node.setLocalNetworkPermissionCallback(null, null);
+```
+
+The callback runs on the main thread, once per registration, only after that peer's direct UDP
+discovery or data send returns `EPERM`/`EACCES` for an address in a directly connected prefix of the
+current physical network, with permission still missing. Other peers, off-link private addresses,
+STUN and relay traffic do not trigger it. Replacing or clearing the registration, closing the node,
+or a network update cancels queued delivery. Register again explicitly to offer another attempt.
+The library owns no terminal visibility or dismissal state and never requests permission itself.
+Existing relay connections remain available when the offer is ignored or permission is denied.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) to build, test or use a checkout. Original code is
 [Apache-2.0 licensed](LICENSE); dependencies' [own licences](THIRD-PARTY-NOTICES.md) ship in the AAR.

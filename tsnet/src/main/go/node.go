@@ -85,6 +85,9 @@ func (n *node) start(config string) int {
 	if n.store != nil && n.store.failed.Load() {
 		return resultStoreFailed
 	}
+	if n.store != nil {
+		n.server.Sys().MagicSock.Get().SetPeerUDPDeniedCallback(n.store.localNetworkDenied)
+	}
 	refresh := make(chan struct{}, 1)
 	n.watchers.Go(func() { n.watchStatus(refresh) })
 	n.watchers.Go(func() { n.refreshStatus(refresh) })

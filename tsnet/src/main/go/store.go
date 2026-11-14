@@ -7,6 +7,7 @@ import "C"
 import (
 	"errors"
 	"math"
+	"net/netip"
 	"sync"
 	"sync/atomic"
 	"unsafe"
@@ -82,5 +83,19 @@ func (s *javaStore) close() {
 	if s.handle != nil {
 		C.state_close(s.handle)
 		s.handle = nil
+	}
+}
+
+// This JNI method only posts work; app code runs later on Android's main thread.
+func (s *javaStore) localNetworkDenied(peer, destination netip.Addr) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.failed.Load() || s.handle == nil || s.node.ctx.Err() != nil {
+		return
+	}
+	p, d := peer.Unmap().AsSlice(), destination.Unmap().AsSlice()
+	if C.state_local_network_denied(s.handle, unsafe.Pointer(unsafe.SliceData(p)), C.int(len(p)),
+		unsafe.Pointer(unsafe.SliceData(d)), C.int(len(d))) != 0 {
+		_ = s.fail()
 	}
 }

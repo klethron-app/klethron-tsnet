@@ -4,6 +4,7 @@ import static java.util.concurrent.TimeUnit.NANOSECONDS;
 
 import android.content.Context;
 import android.net.ConnectivityManager;
+import android.net.IpPrefix;
 import android.net.LinkProperties;
 import android.net.Network;
 import android.net.NetworkCapabilities;
@@ -12,6 +13,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.os.ParcelFileDescriptor;
 import androidx.annotation.AnyThread;
+import androidx.annotation.MainThread;
 import androidx.annotation.WorkerThread;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -31,6 +33,7 @@ import java.security.KeyStore;
 import java.time.Duration;
 import java.util.Collections;
 import java.util.IdentityHashMap;
+import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 import org.jspecify.annotations.Nullable;
@@ -38,7 +41,8 @@ import org.jspecify.annotations.Nullable;
 /// An embedded [tailnet](https://tailscale.com/kb/1136/tailnet) device with caller-owned keys and
 /// outbound TCP. [Start][#start], [#awaitStatus] until [NodeStatus.State#RUNNING] without a
 /// [NodeStatus#loginUrl()], then [#connect]. Follows the best non-VPN network, even with another VPN active.
-/// Methods are thread-safe; `@WorkerThread` methods block. [#close] cancels blocked calls with
+/// Methods are thread-safe except main-thread [#setLocalNetworkPermissionCallback]; `@WorkerThread`
+/// methods block. [#close] cancels blocked calls with
 /// [ClosedChannelException]. Non-positive timeouts return immediately from [#awaitStatus] and fail
 /// [#connect] and [#logout]. Operations from a [StateStore] callback throw [IllegalStateException].
 /// First use loads the native library.
@@ -84,18 +88,23 @@ public final class TailnetNode implements AutoCloseable {
                     .filter(route -> route.isDefaultRoute() && route.hasGateway() && route.getGateway() instanceof Inet4Address)
                     .map(route -> route.getGateway().getHostAddress()).findFirst().orElse("");
             String name = Objects.toString(properties.getInterfaceName(), "");
-            report(this, (name + '\0' + gateway).getBytes(StandardCharsets.UTF_8), network.getNetworkHandle());
+            report(this, (name + '\0' + gateway).getBytes(StandardCharsets.UTF_8), network.getNetworkHandle(), properties);
         }
 
         @Override
         public void onLost(Network network) {
-            report(this, new byte[0], 0);
+            report(this, new byte[0], 0, null);
         }
     }
 
-    private static synchronized void report(NetworkMonitor monitor, byte[] value, long handle) {
+    private static synchronized void report(NetworkMonitor monitor, byte[] value, long handle, @Nullable LinkProperties properties) {
         // Unregistering cannot cancel a callback already dispatched on the main thread.
-        if (network == monitor) nativeSetDefaultNetwork(value, handle);
+        if (network == monitor) {
+            // Prefixes of the chosen physical link, excluding VPNs and unrelated interfaces.
+            LocalNetworkPermission.report(properties == null ? List.of() : properties.getLinkAddresses().stream()
+                    .map(address -> new IpPrefix(address.getAddress(), address.getPrefixLength())).toList());
+            nativeSetDefaultNetwork(value, handle);
+        }
     }
     /// Following a VPN would hide changes to the underlying network.
     static final NetworkRequest PHYSICAL_NETWORK = new NetworkRequest.Builder()
@@ -106,11 +115,13 @@ public final class TailnetNode implements AutoCloseable {
 
     private final long handle;
     private final StateStore store;
+    private final LocalNetworkPermission localNetworkPermission;
     private volatile boolean closed;
 
-    private TailnetNode(long handle, StateStore store) {
+    private TailnetNode(long handle, StateStore store, LocalNetworkPermission localNetworkPermission) {
         this.handle = handle;
         this.store = store;
+        this.localNetworkPermission = localNetworkPermission;
         if (Timing.ENABLED) {
             Timing.link("tsnet_handle", handle, "node", Timing.identity(this));
             Timing.link("node", Timing.identity(this), "store", Timing.identity(store));
@@ -144,24 +155,34 @@ public final class TailnetNode implements AutoCloseable {
             stores.add(store);
         }
         long handle = -1;
+        LocalNetworkPermission permission = new LocalNetworkPermission(
+                Objects.requireNonNullElse(context.getApplicationContext(), context));
         if (Timing.ENABLED) Timing.event("store", Timing.identity(store), 0, "java_start", "begin", "");
         try {
-            handle = nativeStart(new Store(store), (hostname + '\0' + controlUrl).getBytes(StandardCharsets.UTF_8));
+            handle = nativeStart(new Store(store, permission), (hostname + '\0' + controlUrl).getBytes(StandardCharsets.UTF_8));
         } finally {
             if (Timing.ENABLED) Timing.event("store", Timing.identity(store), 0, "java_start", "end",
                     handle < 0 ? "error" : "ok");
             if (handle < 0) release(store);
         }
         check(handle);
-        return new TailnetNode(handle, store);
+        return new TailnetNode(handle, store, permission);
     }
 
     // Byte arrays preserve standard UTF-8 keys across JNI; only these callback names are kept by R8.
     private static final class Store {
         private static final ThreadLocal<Boolean> inCallback = new ThreadLocal<>();
         final StateStore delegate;
+        final LocalNetworkPermission permission;
 
-        Store(StateStore delegate) { this.delegate = delegate; }
+        Store(StateStore delegate, LocalNetworkPermission permission) {
+            this.delegate = delegate;
+            this.permission = permission;
+        }
+
+        private void localNetworkDenied(byte[] peer, byte[] destination) {
+            permission.denied(peer, destination);
+        }
 
         static void checkNotInCallback() {
             if (Boolean.TRUE.equals(inCallback.get())) {
@@ -196,6 +217,7 @@ public final class TailnetNode implements AutoCloseable {
             try {
                 previous.connectivity.unregisterNetworkCallback(previous);
             } finally {
+                LocalNetworkPermission.report(List.of());
                 nativeSetDefaultNetwork(new byte[0], 0); // Unknown until the next start reports it.
             }
         }
@@ -345,6 +367,21 @@ public final class TailnetNode implements AutoCloseable {
         return nativeTailscaleVersion();
     }
 
+    /// Offers local-network permission after a direct UDP attempt to `peer` fails with a permission
+    /// error on the current physical network. Delivery is on the main thread, once per registration,
+    /// and only when Android 17's `ACCESS_LOCAL_NETWORK` permission is missing for a target-37+ app.
+    /// Discovery pings and WireGuard sends qualify; STUN, relays and other peers do not.
+    ///
+    /// Register only while the selected peer's terminal is visible and the user has not dismissed
+    /// the offer. Pass `(null, null)` when it hides, the selection changes, or the offer is dismissed.
+    /// Replacing or clearing a registration cancels queued delivery. The callback may show a rationale
+    /// or request permission; the app owns its manifest permission, UI and dismissal persistence.
+    /// Closing the node cancels pending delivery. Callback exceptions follow normal main-thread rules.
+    @MainThread
+    public void setLocalNetworkPermissionCallback(NodeStatus.@Nullable Peer peer, @Nullable Runnable callback) {
+        localNetworkPermission.set(peer, callback);
+    }
+
     /// Closes connections and waits for shutdown, keeping the identity for the next [#start].
     /// Pending calls throw [ClosedChannelException]. Repeated or concurrent calls are safe.
     @WorkerThread
@@ -355,6 +392,7 @@ public final class TailnetNode implements AutoCloseable {
         synchronized (this) {
             if (closed) return;
             closed = true;
+            localNetworkPermission.close();
             nativeClose(handle);
             release(store);
         }

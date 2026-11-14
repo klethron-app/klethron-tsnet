@@ -11,6 +11,7 @@ control/controlclient/direct.go: ccdcc186decb2efe76c98af7e4914b77f15a7d7eda9406b
 ipn/ipnlocal/local.go: 82e9dc779055ea2697285785a1c1b5056057c35e4af0f91845a6ff7990ff5695
 wgengine/magicsock/derp.go: 2a733a8eabdcee27b80b7f1e325da1171ced39b7742a56965a41c564bb632a07
 wgengine/magicsock/magicsock.go: c501a422c108fd57e6e8f2b6b90ec9a07786cd6f0b2d75a3b8b33fd150aafba1
+wgengine/magicsock/endpoint.go: 90e54e1945f08f18ac4bb29872f72233eed39133db199d84d06a216adad0828f
 tsnet/dns_lookup.go: b49ecd66f1b9f4de7e7ef20061148a0e903de2e847627db38c88715c6964dc93
 tsnet/tsnet.go: c37b19724de27737147f427e4a6e81e947736244848d55d6425a966cdbf24125
 ipn/ipnlocal/tailnet-lock.go: 8d4e038c7e5d377fa3e734ccaa911d1715b7fadcfb8c0364365f4ccce67b2862
@@ -45,6 +46,14 @@ still reopens UDP sockets and resets endpoint trust, but does not recycle the
 independent DERP TCP transport or discard its queued writes. Existing error
 classification, five-second throttling and re-STUN remain unchanged. Other
 platforms and other send errors retain the full-rebind behavior.
+
+Add an atomic per-connection peer UDP denial callback to magicsock.Conn and
+klethron_permission.go. In endpoint.go, report errors from direct discovery
+pings and WireGuard data sends. Only Android EPERM/EACCES errors with a known
+peer address and a direct (non-DERP, non-Geneve-relay) destination reach the
+callback. STUN and other background probing do not report peer denials. The
+wrapper applies selected-peer, current-network and Android permission filters
+before delivering a one-shot caller-owned offer on the main thread.
 
 In debug builds, testcontrol retires an old node key after either an interactive
 followup or a registration that requires no authorization. Upstream retires it
