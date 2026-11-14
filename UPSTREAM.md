@@ -3,7 +3,7 @@
 Pinned: Tailscale [`e0d532cca9be`](https://github.com/tailscale/tailscale/commit/e0d532cca9beeb8ed235bf30b9198a7c0e0afa02)
 with Go 1.27.4. Reviewed 2026-11-14. Remove patches when equivalent fixes reach the pin.
 
-The review compared upstream through [`0d822c9d3ab0`](https://github.com/tailscale/tailscale/commit/0d822c9d3ab06465e95868fe63c6a26fff55e170)
+The review compared upstream through [`9d5313662a59`](https://github.com/tailscale/tailscale/commit/9d5313662a594ad9b595483153301941ae75e808)
 and relevant TailSocks, Haven, Tailcat and [tailmix changes](https://github.com/maisem/tailmix/blob/main/tsnet/README.md).
 None replaces the current patches. In particular, upstream's
 [extra-root support](https://github.com/tailscale/tailscale/pull/19280) still tries filesystem roots
@@ -68,7 +68,9 @@ It also already checks UDP DNS reply sources and transaction IDs, covering
   a relay-capable region in that response's DERP map which is not avoided or excluded from home
   selection, and only while no home is selected. Ordinary network probing continues and can replace
   an unreachable or suboptimal hint. Publish home changes under magicsock's selection lock so the
-  backend observes ordered old/new regions even when probing races the hint. Cached maps retain their
+  backend observes ordered old/new regions even when probing races the hint. This relies on the
+  pinned eventbus's [unbounded subscriber queues](https://github.com/tailscale/tailscale/pull/18020):
+  a subscriber waiting for that lock cannot block delivery to its queue. Cached maps retain their
   upstream behavior; this does not cache authorization or bypass `Running`. `StartupTest` covers
   validation, selection races, missing/unreachable hints and complete first-`Running` peer snapshots.
   A regression that holds netcheck requires a fresh control hint to establish DERP before probing finishes.
@@ -122,14 +124,16 @@ It also already checks UDP DNS reply sources and transaction IDs, covering
 - **The login logger polls even with logging discarded.** Remove the `printAuthURLLoop` launch;
   our IPN watcher already receives login URLs. This saves two goroutines and five-second status polls
   while awaiting initial login.
-- **A custom store still requires a directory.** Patch `tsnet/tsnet.go` to require an injected
-  `StateStore`, skip directory and executable discovery, and leave the backend var-root empty.
+- **A custom store still requires a directory** ([#16556](https://github.com/tailscale/tailscale/issues/16556)).
+  Patch `tsnet/tsnet.go` to require an injected `StateStore`, skip directory and executable discovery,
+  and leave the backend var-root empty.
   Java callbacks own persistence; no directory lock or file-store fallback remains.
 - **Tailnet Lock authority storage bypasses `StateStore`.** Patch authority loading and bootstrap
   to use `javaStore`'s callback-backed storage. Each profile has one atomic snapshot containing
   signed updates, their original commit times and the compaction ancestor. Upstream compaction
   removes old updates from the snapshot, retaining at least 24 updates, the last 14 days and
-  required chain history; this is not a hard byte cap. Profile deletion and logout remove it entirely.
+  required chain history; this is not a hard byte cap. Profile deletion and logout remove it entirely,
+  unlike the [upstream per-profile authority store](https://github.com/tailscale/tailscale/pull/6315).
   Invalid saved history and callback errors stop the node. No authority directory is used.
 - **Late Tailnet Lock responses can outlive logout.** Upstream checks for a stale control client
   only after authority synchronization. A successful delayed bootstrap can therefore recreate
@@ -257,6 +261,7 @@ It also already checks UDP DNS reply sources and transaction IDs, covering
    just accept new ones), and recheck every entry.
 2. Re-audit environment reads, filesystem access, `os/exec` reachability, storage callbacks and
    `tailcfg.PeerChange` fields (`watchStatus` refreshes peers only for online changes), and check that
-   existing state still loads.
+   existing state still loads. Recheck eventbus queue behavior before retaining relay-change
+   publication under the selection lock.
 3. Update the notice inventories (THIRD-PARTY-NOTICES.md), rebuild both ABIs and run the device tests.
 4. When the omitted feature set changes, revalidate it on a real tailnet.
