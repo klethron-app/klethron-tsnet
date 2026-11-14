@@ -70,8 +70,8 @@ func (c delayedDialConn) Close() error {
 	return err
 }
 
-// Delay successful connections until their cancellation, reproducing successful losing/late
-// attempts. With mode "loser" only IPv6 is delayed; "cancel" delays both families.
+// Return in-memory connections after cancellation to reproduce successful losing/late attempts
+// without waiting for peer transport setup. In "loser" mode IPv4 still dials the real echo peer.
 func probeDialRace(argument string) string {
 	n, mode := probeDialNode(argument)
 	state := new(dialRaceState)
@@ -79,17 +79,19 @@ func probeDialRace(argument string) string {
 	dialer := n.server.Sys().Dialer.Get()
 	dial := dialer.NetstackDialTCP
 	dialer.NetstackDialTCP = func(ctx context.Context, address netip.AddrPort) (net.Conn, error) {
-		conn, err := dial(ctx, address)
-		if err != nil {
-			return conn, err
-		}
 		if mode == "loser" && address.Addr().Is4() {
+			conn, err := dial(ctx, address)
+			if err != nil {
+				return conn, err
+			}
 			// Ensure the other family has produced a connection before allowing a winner.
 			for state.started.Load() == 0 && ctx.Err() == nil {
 				time.Sleep(time.Millisecond)
 			}
 			return conn, nil
 		}
+		conn, peer := net.Pipe()
+		defer peer.Close()
 		state.started.Add(1)
 		<-ctx.Done()
 		return delayedDialConn{conn, state}, nil
