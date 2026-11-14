@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -115,7 +116,43 @@ func KlethronProbePermissionRecovery(mode string) string {
 		Name: "1", RegionID: 1, HostName: "127.0.0.1", IPv4: "127.0.0.1", IPv6: "none",
 		DERPPort: httpServer.Listener.Addr().(*net.TCPAddr).Port, STUNPort: -1, InsecureForTests: true,
 	}}}
-	connection.SetDERPMapWithoutReSTUN(&tailcfg.DERPMap{Regions: map[tailcfg.DERPRegionID]*tailcfg.DERPRegion{1: region}})
+	regions := map[tailcfg.DERPRegionID]*tailcfg.DERPRegion{1: region}
+	netcheckMode := strings.HasPrefix(mode, "netcheck-")
+	var sent4, sent6 atomic.Int32
+	if netcheckMode {
+		// Probe a separate STUN-only node so failed sends cannot start HTTPS/ICMP checks.
+		// An IPv6-only DERP map exercises the same empty IPv4 plan as an IPv6-only link.
+		connection.myDerp = 1 // Keep relay selection independent of the synthetic probe map.
+		region.NoMeasureNoHome = true
+		probe := &tailcfg.DERPNode{Name: "stun", RegionID: 2, IPv4: "127.0.0.1", IPv6: "none",
+			STUNPort: 3478, STUNOnly: true, STUNTestIP: "127.0.0.1"}
+		if mode == "netcheck-no-v4" {
+			probe.IPv4, probe.IPv6, probe.STUNTestIP = "none", "::1", "::1"
+		}
+		regions[2] = &tailcfg.DERPRegion{RegionID: 2, Nodes: []*tailcfg.DERPNode{probe}}
+		connection.netChecker.SendPacket = func(packet []byte, address netip.AddrPort) (int, error) {
+			if address.Addr().Is4() {
+				sent4.Add(1)
+			} else {
+				sent6.Add(1)
+			}
+			if mode == "netcheck-failed" || mode == "netcheck-denied" {
+				errno := syscall.ENETUNREACH
+				if mode == "netcheck-denied" {
+					errno = syscall.EPERM
+				}
+				return 0, &net.OpError{Op: "write", Net: "udp", Err: errno}
+			}
+			transaction, err := stun.ParseBindingRequest(packet)
+			if err != nil {
+				return 0, err
+			}
+			// Receiving before SendPacket returns must continue proving that the socket works.
+			connection.netChecker.ReceiveSTUNPacket(stun.Response(transaction, address), address)
+			return len(packet), nil
+		}
+	}
+	connection.SetDERPMapWithoutReSTUN(&tailcfg.DERPMap{Regions: regions})
 	peer := &endpoint{c: connection, nodeID: 1, publicKey: receiverKey.Public(),
 		bestAddr: addrQuality{epAddr: epAddr{ap: deniedUDP}}, trustBestAddrUntil: mono.Now().Add(time.Minute)}
 	info := newPeerInfo(peer)
@@ -154,7 +191,19 @@ func KlethronProbePermissionRecovery(mode string) string {
 	}
 
 	before := listener.binds.Load()
-	if mode == "network-change" {
+	if netcheckMode {
+		if _, err := connection.updateNetInfo(ctx); err != nil {
+			return "netcheck failed"
+		}
+		if mode == "netcheck-no-v4" {
+			if sent4.Load() != 0 || sent6.Load() == 0 {
+				return "IPv6-only netcheck did not omit IPv4 sends"
+			}
+		} else if sent4.Load() == 0 {
+			return "netcheck did not attempt IPv4"
+		}
+		connection.updateEndpoints("netcheck-rebind-test")
+	} else if mode == "network-change" {
 		connection.Rebind()
 	} else {
 		sent, err := connection.sendUDP(deniedUDP, []byte{1}, true, false)
@@ -162,19 +211,20 @@ func KlethronProbePermissionRecovery(mode string) string {
 			return "UDP denial was hidden"
 		}
 	}
-	if listener.binds.Load() <= before {
-		return "UDP sockets were not reopened"
+	wantRebind := !netcheckMode || mode == "netcheck-failed" || mode == "netcheck-denied"
+	if (listener.binds.Load() > before) != wantRebind {
+		return "UDP socket recovery did not match actual send failure"
 	}
 	peer.mu.Lock()
 	trusted := peer.bestAddr.ap.IsValid() || peer.trustBestAddrUntil != 0
 	peer.mu.Unlock()
-	if trusted {
-		return "UDP endpoint trust survived recovery"
+	if trusted == wantRebind {
+		return "UDP endpoint trust did not match socket recovery"
 	}
 	connection.mu.Lock()
 	current := connection.activeDerp[1]
 	connection.mu.Unlock()
-	if mode == "network-change" || mode == "broken-pipe" {
+	if mode == "network-change" || mode == "broken-pipe" || (netcheckMode && wantRebind) {
 		if current.c == original.c {
 			return "full rebind retained the pending relay"
 		}
@@ -186,10 +236,12 @@ func KlethronProbePermissionRecovery(mode string) string {
 	if mode != "connected" && len(queue) != 1 {
 		return "UDP permission recovery discarded the queued packet"
 	}
-	before, last := listener.binds.Load(), connection.lastErrRebind.Load()
-	_, _ = connection.sendUDP(deniedUDP, []byte{1}, true, false)
-	if listener.binds.Load() != before || connection.lastErrRebind.Load() != last {
-		return "UDP permission recovery bypassed the throttle"
+	if !netcheckMode {
+		before, last := listener.binds.Load(), connection.lastErrRebind.Load()
+		_, _ = connection.sendUDP(deniedUDP, []byte{1}, true, false)
+		if listener.binds.Load() != before || connection.lastErrRebind.Load() != last {
+			return "UDP permission recovery bypassed the throttle"
+		}
 	}
 	if mode == "connected" {
 		queue <- derpWriteRequest{pubKey: receiverKey.Public(), b: packet}

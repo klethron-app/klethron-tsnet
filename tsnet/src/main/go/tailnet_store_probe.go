@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"tailscale.com/ipn"
+	"tailscale.com/ipn/ipnlocal"
 	"tailscale.com/tailcfg"
 	"tailscale.com/tailcfg/nodecap"
 	"tailscale.com/tka"
@@ -84,6 +85,9 @@ func probeTailnetStore(argument string) string {
 	n := lookupNode(C.longlong(id))
 	n.lifecycle.RLock()
 	defer n.lifecycle.RUnlock()
+	if strings.Contains(action, "/") {
+		return ipnlocal.KlethronProbeTailnetLockSync(n.store, action)
+	}
 	signer := key.NewTLPrivate()
 	trusted := tka.Key{Kind: tka.Key25519, Public: signer.Public().Verifier(), Votes: 1}
 	const profile ipn.ProfileID = "probe-authority"

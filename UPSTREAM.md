@@ -3,6 +3,13 @@
 Pinned: Tailscale [`e0d532cca9be`](https://github.com/tailscale/tailscale/commit/e0d532cca9beeb8ed235bf30b9198a7c0e0afa02)
 with Go 1.27.4. Reviewed 2026-11-14. Remove patches when equivalent fixes reach the pin.
 
+The review compared upstream through [`0d822c9d3ab0`](https://github.com/tailscale/tailscale/commit/0d822c9d3ab06465e95868fe63c6a26fff55e170)
+and relevant TailSocks, Haven, Tailcat and [tailmix changes](https://github.com/maisem/tailmix/blob/main/tsnet/README.md).
+None replaces the current patches. In particular, upstream's
+[extra-root support](https://github.com/tailscale/tailscale/pull/19280) still tries filesystem roots
+first, and its [cached-map relay retention](https://github.com/tailscale/tailscale/pull/19491)
+does not seed a relay from fresh control state. The dependency pin remains unchanged.
+
 Debug builds additionally apply `DebugTimingPatches.kt` to six hash-checked upstream files:
 `control/controlclient/direct.go`, `control/controlhttp/client.go`, `net/netcheck/netcheck.go`,
 `derp/derphttp/derphttp_client.go`, `wgengine/magicsock/derp.go` and `wgengine/magicsock/magicsock.go`.
@@ -49,6 +56,13 @@ It also already checks UDP DNS reply sources and transaction IDs, covering
   the full rebind. `PermissionRecoveryTest` holds the initial DERP upgrade, injects a wrapped `EPERM`
   through the UDP send path, and verifies the same relay and queued initiation-sized packet survive;
   it also covers an established relay, the recovery throttle, and full-rebind controls.
+- **Skipped IPv4 probes are mistaken for failed sends.** On an IPv6-only network, netcheck can
+  send no IPv4 probes, leaving `IPv4CanSend` false. Magicsock then unnecessarily rebinds sockets,
+  potentially interrupting DERP. Following [PR #20722](https://github.com/tailscale/tailscale/pull/20722),
+  record whether an IPv4 STUN send completed and require an actual failed attempt before setting
+  `noV4Send`. Preserve the existing successful-send evidence from received IPv4 STUN responses,
+  including replies that race the send callback. Real send errors retain recovery. The held-relay
+  regression covers skipped, successful and failed probes and verifies queued packet delivery.
 - **Saved nodes wait for network probing before connecting to their home relay.** Seed the initial
   home DERP from the self node in a fresh control response, after applying `OnlyTCP443`. Accept only
   a relay-capable region in that response's DERP map which is not avoided or excluded from home
@@ -117,6 +131,14 @@ It also already checks UDP DNS reply sources and transaction IDs, covering
   removes old updates from the snapshot, retaining at least 24 updates, the last 14 days and
   required chain history; this is not a hard byte cap. Profile deletion and logout remove it entirely.
   Invalid saved history and callback errors stop the node. No authority directory is used.
+- **Late Tailnet Lock responses can outlive logout.** Upstream checks for a stale control client
+  only after authority synchronization. A successful delayed bootstrap can therefore recreate
+  authority state under the new or empty profile; delayed synchronization can also use a replaced
+  authority. Reject queued work from an old client or node key, and recheck shutdown, control client,
+  profile, node key and authority identity after unlocked RPCs before applying their results.
+  A stale-state result also prevents the caller from installing that response's network map.
+  Tests deliver successful responses across logout, profile changes and key rotation and verify
+  that stale work cannot recreate authority state; queued stale work sends no RPC.
 - **TLS discovers roots through filesystem reads.** Android supplies enabled system certificates via
   `AndroidCAStore`; patch both `tlsdial` verification paths, DNS-over-HTTPS and UPnP transports to use
   that explicit pool. This includes DERP relays whose `CertName` differs from their TLS server name.

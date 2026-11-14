@@ -70,6 +70,27 @@ public final class TailnetLockTest {
     }
 
     @Test(timeout = 60000)
+    public void successfulSyncResponsesCannotRestoreAuthorityAfterProfileChanges() throws Exception {
+        try (TailnetNode node = start(new MemoryStore())) {
+            for (String phase : new String[] {"bootstrap", "offer", "send"}) {
+                for (String change : new String[] {"logout", "profile"}) {
+                    String mode = phase + "/" + change;
+                    assertEquals(mode, "ok", probe("tailnetStore", node, mode));
+                }
+            }
+            assertEquals("ok", probe("tailnetStore", node, "bootstrap/key"));
+        }
+    }
+
+    @Test(timeout = 60000)
+    public void queuedSyncRejectsReplacedClientsAndNodeKeys() throws Exception {
+        try (TailnetNode node = start(new MemoryStore())) {
+            assertEquals("ok", probe("tailnetStore", node, "queued/logout"));
+            assertEquals("ok", probe("tailnetStore", node, "queued/key"));
+        }
+    }
+
+    @Test(timeout = 60000)
     public void authorityCallbackFailuresStopTheNode() throws Exception {
         for (boolean failRead : new boolean[] {true, false}) {
             AtomicBoolean failing = new AtomicBoolean();

@@ -1,10 +1,11 @@
-Klethron tsnet modifies sixteen tailscale.com source files in an isolated build copy.
+Klethron tsnet modifies eighteen tailscale.com source files in an isolated build copy.
 Debug builds also patch testcontrol and add timing hooks, as described below.
 Upstream revision: e0d532cca9beeb8ed235bf30b9198a7c0e0afa02
 Original file SHA-256:
 net/tlsdial/tlsdial.go: 49adc77dc68cf066fa695037cc41164509949dfa8a97e96a9c4fd334cd3b7e1e
 net/dns/resolver/forwarder.go: 804a86c6264a7fcb3d2795e33d047a88502836ca74f5eaa516331acc8e0e4b94
 net/netmon/interfaces_android.go: 864304c989a46028ce753f560d45328ea152c9b3c1ec932796c66a1517320a85
+net/netcheck/netcheck.go: 15857e228e9ba2449ca5cf9bad3223e4c96e593df80d3b8dcb0d40dd54506bcb
 net/portmapper/upnp.go: 246d99b9bf187cf43799ab3ea0799d4abf453365c38318dfd75676d8dbeda48c
 util/dnsname/dnsname.go: 5608189341565036e81b5d09c808034dd2f44e9d9cd8c7c9b7cd90764a7cdf3c
 ipn/ipnlocal/node_backend.go: 872efabb907356dd3305342b01f849654e65916e927384b39b896233e9113a07
@@ -17,10 +18,10 @@ wgengine/magicsock/endpoint.go: 90e54e1945f08f18ac4bb29872f72233eed39133db199d84
 tsnet/dns_lookup.go: b49ecd66f1b9f4de7e7ef20061148a0e903de2e847627db38c88715c6964dc93
 tsnet/tsnet.go: c37b19724de27737147f427e4a6e81e947736244848d55d6425a966cdbf24125
 ipn/ipnlocal/tailnet-lock.go: 8d4e038c7e5d377fa3e734ccaa911d1715b7fadcfb8c0364365f4ccce67b2862
+ipn/ipnlocal/tailnetlock_disabled.go: 1e2f3e3fcb402a71d3f2cb07081d181b9010bc690e0e7308168628c414c28f94
 ipn/ipnlocal/profiles.go: 4e6a67d855b82e492123bc18f7b3cdc6075ceaf2176476057eff419281b6b585
 tstest/integration/testcontrol/testcontrol.go (debug only): e8f952ff2ea480a7e52dc95faeb824f13b3e7102ef0b8afedd5f14077e890a53
 control/controlhttp/client.go (debug only): 21e8c159a30e2c3afea5d6641116e0ee73df5118f062a24ccc89705d4e0d7ab9
-net/netcheck/netcheck.go (debug only): 15857e228e9ba2449ca5cf9bad3223e4c96e593df80d3b8dcb0d40dd54506bcb
 derp/derphttp/derphttp_client.go (debug only): 38dbd3eb7b9c55d62e6c3386a5d3ce665defbab2373b454fc8dc31e3953d2ce0
 
 Binary build metadata records the copy as "tailscale.com => ./tailscale"; the
@@ -59,6 +60,15 @@ still reopens UDP sockets and resets endpoint trust, but does not recycle the
 independent DERP TCP transport or discard its queued writes. Existing error
 classification, five-second throttling and re-STUN remain unchanged. Other
 platforms and other send errors retain the full-rebind behavior.
+
+In net/netcheck/netcheck.go, record whether an IPv4 STUN send completed in
+Report.IPv4SendAttempted. Publish it under the report mutex together with the
+existing send outcome. In wgengine/magicsock/magicsock.go, set noV4Send only
+when an IPv4 send was attempted and none succeeded. An IPv6-only probe plan
+therefore does not trigger full socket recovery or discard a relay queue.
+The existing successful-response handling still protects replies that race
+the send callback. Actual failed sends retain the upstream recovery behavior.
+This follows https://github.com/tailscale/tailscale/pull/20722.
 
 Add an atomic per-connection peer UDP denial callback to magicsock.Conn and
 klethron_permission.go. In endpoint.go, report errors from direct discovery
@@ -201,6 +211,23 @@ returning the restored authority and its CompactableChonk. Remove chonkPathLocke
 the memory-only-storage warning and unused imports. Stores without this method retain in-memory storage
 for the local test fixtures. The library's javaStore implements the method using
 the existing Java callbacks, and stops the node on invalid state or storage failure.
+
+Pass the originating control client from local.go to tkaSyncIfNeeded, including
+the matching disabled-feature stub signature. Reject queued work whose client
+or node key is no longer current. After bootstrap, sync/offer and sync/send RPCs
+reacquire the backend mutex, recheck the client, profile, node key and authority
+identity, also rejecting shutdown or missing credentials, before using their responses.
+Bootstrap and disablement intentionally
+update the saved authority identity before further synchronization. This stops
+late successful responses from recreating deleted history, modifying a new
+profile's authority or dereferencing an authority cleared by logout.
+Return a distinct stale-state error so local.go also discards the associated
+network map after reacquiring the mutex, even if the client itself is unchanged.
+
+Debug builds add an in-package Tailnet Lock synchronization probe that supplies
+successful bootstrap, offer and send responses while changing backend identity.
+It uses the real JNI store callbacks and checks that stale responses cannot
+persist authority history. Queued stale maps are rejected before any request.
 
 In ipn/ipnlocal/profiles.go, route profile credential deletion through a helper
 that deletes credentials before calling optional StateStore.DeleteTailnetLock(ProfileID).

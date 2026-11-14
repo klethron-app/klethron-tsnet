@@ -108,6 +108,15 @@ abstract class BuildGoLibrary @Inject constructor(
         // Bootstrap a relay from the fresh self node while ordinary network probing continues.
         val onlyTCP443 = "\t\tb.MagicConn().SetOnlyTCP443(st.NetMap.HasCap(nodecap.OnlyTCP443))\n"
         patch("ipn/ipnlocal/local.go", "82e9dc779055ea2697285785a1c1b5056057c35e4af0f91845a6ff7990ff5695",
+            "// SetControlClientStatus is the callback" to
+                "var errTKAStateChanged = errors.New(\"tailnet lock state changed\")\n\n// SetControlClientStatus is the callback",
+            "b.tkaSyncIfNeeded(st.NetMap, prefs.View())" to "b.tkaSyncIfNeeded(c, st.NetMap, prefs.View())",
+            "\t\tif err := b.tkaSyncIfNeeded(c, st.NetMap, prefs.View()); err != nil {\n" +
+                "\t\t\tb.logf(\"[v1] TKA sync error: %v\", err)\n\t\t}" to
+                "\t\ttkaErr := b.tkaSyncIfNeeded(c, st.NetMap, prefs.View())\n\t\tif tkaErr != nil {\n" +
+                    "\t\t\tb.logf(\"[v1] TKA sync error: %v\", tkaErr)\n\t\t}",
+            "\t\tif b.cc != c {\n\t\t\t// The client was replaced" to
+                "\t\tif b.cc != c || errors.Is(tkaErr, errTKAStateChanged) {\n\t\t\t// The client or Tailnet Lock state was replaced",
             onlyTCP443 to "",
             "\t\tvar cachedHome tailcfg.DERPRegionID" to onlyTCP443 + "\n\t\tvar cachedHome tailcfg.DERPRegionID",
             "\t\t\tb.MagicConn().SetDERPMap(st.NetMap.DERPMap)" to
@@ -142,9 +151,23 @@ abstract class BuildGoLibrary @Inject constructor(
                 func (c *Conn) setNearestDERPLocked(derpNum tailcfg.DERPRegionID) (wantDERP bool) {
 
             """.trimIndent())
+        // tailscale/tailscale#20722: no IPv4 probes is not evidence of a broken IPv4 socket.
+        patch("net/netcheck/netcheck.go", "15857e228e9ba2449ca5cf9bad3223e4c96e593df80d3b8dcb0d40dd54506bcb",
+            "\t// MappingVariesByDestIP is whether STUN results depend which" to
+                "\t// IPv4SendAttempted distinguishes an unsuccessful send from an empty IPv4 probe plan.\n" +
+                    "\tIPv4SendAttempted bool\n\n\t// MappingVariesByDestIP is whether STUN results depend which",
+            "\tn, err := rs.c.SendPacket(req, addr)\n" +
+                "\tif n == len(req) && err == nil || neterror.TreatAsLostUDP(err) {\n\t\trs.mu.Lock()" to
+                "\tn, err := rs.c.SendPacket(req, addr)\n\trs.mu.Lock()\n" +
+                    "\tif probe.proto == probeIPv4 { rs.report.IPv4SendAttempted = true }\n" +
+                    "\tif n == len(req) && err == nil || neterror.TreatAsLostUDP(err) {",
+            "\t\trs.mu.Unlock()\n\t}\n\n\tc.vlogf(\"sent to %v\", addr)" to
+                "\t}\n\trs.mu.Unlock()\n\n\tc.vlogf(\"sent to %v\", addr)")
         // Android can deny a speculative LAN packet without invalidating the relay's TCP socket.
         patch("wgengine/magicsock/magicsock.go", "c501a422c108fd57e6e8f2b6b90ec9a07786cd6f0b2d75a3b8b33fd150aafba1",
             "type Conn struct {" to "type Conn struct {\n\tpeerUDPDenied atomic.Pointer[func(netip.Addr, netip.Addr)]",
+            "\tc.noV4Send.Store(!report.IPv4CanSend)" to
+                "\tc.noV4Send.Store(report.IPv4SendAttempted && !report.IPv4CanSend)",
             "\t\tc.Rebind()\n\t\tgo c.ReSTUN(reason)" to """
                     if runtime.GOOS == "android" && reason == "operation-not-permitted" {
                         c.rebindAndReset(false)
@@ -280,6 +303,8 @@ abstract class BuildGoLibrary @Inject constructor(
                 .writeText(source.resolve("testsupport/magicsock_rebind.go").readText())
             workspace.resolve("tailscale/net/portmapper/klethron_roots_probe.go")
                 .writeText(source.resolve("testsupport/portmapper_roots.go").readText())
+            workspace.resolve("tailscale/ipn/ipnlocal/klethron_tailnet_lock_sync_probe.go")
+                .writeText(source.resolve("testsupport/tailnet_lock_sync.go").readText())
         }
         val tsnetSource = upstream.resolve("tsnet/tsnet.go").readText()
         val hostnameSetup = "\texe, err := os.Executable()" + tsnetSource.substringAfter("\texe, err := os.Executable()")
@@ -331,6 +356,7 @@ abstract class BuildGoLibrary @Inject constructor(
         val memoryWarning = "// noTailnetLockStateDirWarnable" + tailnetSource.substringAfter("// noTailnetLockStateDirWarnable")
             .substringBefore("// tkaFilterDeltaMutsLocked")
         patch("ipn/ipnlocal/tailnet-lock.go", "8d4e038c7e5d377fa3e734ccaa911d1715b7fadcfb8c0364365f4ccce67b2862",
+            "\t\"tailscale.com/envknob\"\n" to "\t\"tailscale.com/control/controlclient\"\n\t\"tailscale.com/envknob\"\n",
             "\t\"path/filepath\"\n" to "",
             "\t\"tailscale.com/health\"\n" to "",
             memoryWarning to "",
@@ -342,7 +368,43 @@ abstract class BuildGoLibrary @Inject constructor(
                     }
             """.trimIndent().prependIndent("\t"),
             createTailnet to "\t_, storage, err := b.openTailnetLock()\n\tif err != nil { return err }\n",
-            tailnetDirectory to "")
+            tailnetDirectory to "",
+            "tkaSyncIfNeeded(nm *netmap.NetworkMap, prefs ipn.PrefsView)" to
+                "tkaSyncIfNeeded(client controlclient.Client, nm *netmap.NetworkMap, prefs ipn.PrefsView)",
+            "\tdidJustEnable := false\n" to """
+                // Queued maps and successful RPCs can outlive logout, profile changes or key rotation.
+                // Check the caller's client and node key before using the map, then recheck all
+                // authority ownership after each unlocked RPC. This closure runs with b.mu held.
+                profile, state := b.pm.CurrentProfile().ID(), b.tka
+                current := func() bool {
+                    now := b.pm.CurrentPrefs()
+                    if !now.Valid() || !now.Persist().Valid() { return false }
+                    return !b.shutdownCalled && now.Persist().PrivateNodeKey().Equal(prefs.Persist().PrivateNodeKey()) && b.cc == client &&
+                        b.pm.CurrentProfile().ID() == profile && b.tka == state
+                }
+                if !current() { return errTKAStateChanged }
+
+                didJustEnable := false
+
+            """.trimIndent().prependIndent("\t") + "\n",
+            "\t\tbs, err := b.tkaFetchBootstrap(ourNodeKey, ourHead)\n\t\tb.mu.Lock()\n" to
+                "\t\tbs, err := b.tkaFetchBootstrap(ourNodeKey, ourHead)\n\t\tb.mu.Lock()\n" +
+                    "\t\tif !current() { return errTKAStateChanged }\n",
+            "\t// We always transmit the sync RPCs if TKA was just enabled." to
+                "\tstate = b.tka // Bootstrap or disablement above legitimately changes the authority.\n\n" +
+                    "\t// We always transmit the sync RPCs if TKA was just enabled.",
+            "b.tkaSyncLocked(ourNodeKey)" to "b.tkaSyncLocked(ourNodeKey, current)",
+            "tkaSyncLocked(ourNodeKey key.NodePublic)" to "tkaSyncLocked(ourNodeKey key.NodePublic, current func() bool)",
+            "\tofferResp, err := b.tkaDoSyncOffer(ourNodeKey, offer)\n\tb.mu.Lock()\n" to
+                "\tofferResp, err := b.tkaDoSyncOffer(ourNodeKey, offer)\n\tb.mu.Lock()\n" +
+                    "\tif !current() { return errTKAStateChanged }\n",
+            "\tsendResp, err := b.tkaDoSyncSend(ourNodeKey, head, toSendAUMs, false)\n\tb.mu.Lock()\n" to
+                "\tsendResp, err := b.tkaDoSyncSend(ourNodeKey, head, toSendAUMs, false)\n\tb.mu.Lock()\n" +
+                    "\tif !current() { return errTKAStateChanged }\n")
+        patch("ipn/ipnlocal/tailnetlock_disabled.go", "1e2f3e3fcb402a71d3f2cb07081d181b9010bc690e0e7308168628c414c28f94",
+            "\t\"tailscale.com/ipn\"\n" to "\t\"tailscale.com/control/controlclient\"\n\t\"tailscale.com/ipn\"\n",
+            "tkaSyncIfNeeded(nm *netmap.NetworkMap, prefs ipn.PrefsView)" to
+                "tkaSyncIfNeeded(client controlclient.Client, nm *netmap.NetworkMap, prefs ipn.PrefsView)")
         workspace.resolve("tailscale/ipn/ipnlocal/tailnet-lock.go").appendText("""
 
             // openTailnetLock uses caller-owned persistence. Plain memory stores are used by test fixtures.

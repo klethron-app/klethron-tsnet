@@ -25,4 +25,24 @@ public final class PermissionRecoveryTest {
     public void aBrokenUdpSocketKeepsTheExistingFullRecovery() {
         assertEquals("ok", Probe.call("permissionRecovery", "broken-pipe"));
     }
+
+    @Test(timeout = 30000)
+    public void ipv6OnlyNetcheckKeepsTheRelayAndPendingWrites() {
+        assertEquals("ok", Probe.call("permissionRecovery", "netcheck-no-v4"));
+    }
+
+    @Test(timeout = 30000)
+    public void successfulIpv4NetcheckKeepsTheRelayAndPendingWrites() {
+        assertEquals("ok", Probe.call("permissionRecovery", "netcheck-sent"));
+    }
+
+    @Test(timeout = 30000)
+    public void failedIpv4NetcheckStillRecoversTheSocket() {
+        assertEquals("ok", Probe.call("permissionRecovery", "netcheck-failed"));
+    }
+
+    @Test(timeout = 30000)
+    public void deniedIpv4NetcheckStillCountsAsAnAttemptOnAndroid() {
+        assertEquals("ok", Probe.call("permissionRecovery", "netcheck-denied"));
+    }
 }

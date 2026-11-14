@@ -34,7 +34,7 @@ abstract class VerifyNativeAar : DefaultTask() {
                 val text = bytes.toString(Charsets.ISO_8859_1)
                 requireNative(!text.contains("/proc/net/route"), "${entry.name} includes filesystem gateway discovery")
                 // The instrumentation test bridge exports klethron_probe and binds Probe.nativeCall.
-                requireNative(!Regex("klethron_probe|Probe_nativeCall|klethron_timing|klethrontiming|Timing_initialize|timing_debug.go|timing.c|KlethronProbePermissionRecovery|klethron_rebind_probe.go")
+                requireNative(!Regex("klethron_probe|Probe_nativeCall|klethron_timing|klethrontiming|Timing_initialize|timing_debug.go|timing.c|KlethronProbePermissionRecovery|klethron_rebind_probe.go|KlethronProbeTailnetLockSync|klethron_tailnet_lock_sync_probe.go")
                     .containsMatchIn(text), "${entry.name} includes debug instrumentation")
                 sizes.append("${entry.name}\t${entry.size}\t${entry.compressedSize}\n")
             }
