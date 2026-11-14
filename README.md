@@ -15,7 +15,7 @@ consumers need no Go compiler or NDK.
 `SocketChannel` operations, IPv6, peer listing, DNS address fallback, split DNS, TLS certificate trust,
 network replacement and Tailnet Lock persistence.
 UDP permission recovery preserves established and connecting relay transports and queued packets.
-An optional selected-peer callback offers local-network permission after a denied direct UDP attempt.
+An optional startup handler offers local-network permission after a denied direct UDP attempt.
 Live tests cover login, logout, revocation, TCP transport and Wi-Fi/cellular switches; switches have
 only been tested with Tailscale's VPN active. Tailnet Lock status and signing APIs are not exposed.
 See [limitations](UPSTREAM.md#limits) and [Javadoc](https://javadoc.io/doc/com.klethron/tsnet/latest/).
@@ -100,23 +100,32 @@ snapshot includes fresh peer metadata.
 For apps targeting Android 17/API 37 or later, declare `android.permission.ACCESS_LOCAL_NETWORK`
 in the app's manifest if you want to offer direct LAN access. See Android's
 [local-network permission guidance](https://developer.android.com/privacy-and-security/local-network-permission).
-On the main thread, register an offer for the selected peer **only while its terminal is visible and
-the user has not dismissed the offer**:
+Supply a `LocalNetworkPermissionHandler` when starting the node, alongside its `StateStore`.
+Both handler references are fixed for the node's lifetime. The permission handler reads the app's
+current selection and UI state on the main thread:
 
 ```java
-node.setLocalNetworkPermissionCallback(selectedPeer, () -> {
-    // Show the app's rationale or request ACCESS_LOCAL_NETWORK with the Activity Result API.
-    // Remember dismissal in the app; do not register again while dismissed.
-});
-// When hidden, dismissed, or changing selection:
-node.setLocalNetworkPermissionCallback(null, null);
+LocalNetworkPermissionHandler permissionHandler = new LocalNetworkPermissionHandler() {
+    @Override public boolean canOffer(InetAddress peer) {
+        return terminalVisible && !offerShown && !offerDismissed
+                && selectedPeer != null && selectedPeer.addresses().contains(peer);
+    }
+
+    @Override public void offer(InetAddress peer) {
+        offerShown = true; // Set before returning to prevent duplicate offers.
+        // Show a rationale or request ACCESS_LOCAL_NETWORK with the Activity Result API.
+        // Remember dismissal in the app; clear offerShown only when another offer is appropriate.
+    }
+};
+TailnetNode node = TailnetNode.start(context, store, "my-device", permissionHandler);
 ```
 
-The callback runs on the main thread, once per registration, only after that peer's direct UDP
+The handler is consulted only after a peer's direct UDP
 discovery or data send returns `EPERM`/`EACCES` for an address in a directly connected prefix of the
-current physical network, with permission still missing. Other peers, off-link private addresses,
-STUN and relay traffic do not trigger it. Replacing or clearing the registration, closing the node,
-or a network update cancels queued delivery. Register again explicitly to offer another attempt.
+current physical network, with permission still missing. Off-link private addresses, STUN and relay
+traffic do not trigger it. `canOffer` filters other peers, hidden terminals and dismissed or already
+shown offers using the app's state at delivery; `offer` runs immediately afterwards only if it returns
+`true`. Closing the node or a network update cancels queued delivery. Omit the handler to disable offers.
 The library owns no terminal visibility or dismissal state and never requests permission itself.
 Existing relay connections remain available when the offer is ignored or permission is denied.
 

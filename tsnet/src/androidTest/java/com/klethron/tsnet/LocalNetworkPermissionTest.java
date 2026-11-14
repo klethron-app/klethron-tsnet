@@ -3,7 +3,6 @@ package com.klethron.tsnet;
 import static com.klethron.tsnet.TestSupport.CONTEXT;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertSame;
-import static org.junit.Assert.assertThrows;
 
 import android.content.Context;
 import android.content.ContextWrapper;
@@ -15,6 +14,7 @@ import android.os.Build;
 import android.os.Looper;
 import androidx.test.platform.app.InstrumentationRegistry;
 import java.lang.reflect.Field;
+import java.net.InetAddress;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.jspecify.annotations.Nullable;
@@ -28,6 +28,24 @@ public final class LocalNetworkPermissionTest {
     private static final String PEER = "100.64.0.2";
     private static final String LAN = "192.0.2.9";
     private final AtomicInteger offers = new AtomicInteger();
+    private final AtomicInteger policyChecks = new AtomicInteger();
+    private String selectedPeer = PEER;
+    private boolean visible = true;
+    private boolean dismissed;
+    private boolean offered;
+    private final LocalNetworkPermissionHandler handler = new LocalNetworkPermissionHandler() {
+        @Override public boolean canOffer(InetAddress peer) {
+            assertSame(Looper.getMainLooper(), Looper.myLooper());
+            policyChecks.incrementAndGet();
+            return visible && !dismissed && !offered && peer.equals(InetAddresses.parseNumericAddress(selectedPeer));
+        }
+        @Override public void offer(InetAddress peer) {
+            assertSame(Looper.getMainLooper(), Looper.myLooper());
+            assertEquals(InetAddresses.parseNumericAddress(selectedPeer), peer);
+            offered = true;
+            offers.incrementAndGet();
+        }
+    };
     private volatile boolean granted;
     private volatile int targetSdk = 37;
     private TailnetNode node;
@@ -48,7 +66,7 @@ public final class LocalNetworkPermissionTest {
                 return granted ? PackageManager.PERMISSION_GRANTED : PackageManager.PERMISSION_DENIED;
             }
         };
-        node = TailnetNode.start(context, new MemoryStore(), "permission", "http://127.0.0.1:1");
+        node = TailnetNode.start(context, new MemoryStore(), "permission", "http://127.0.0.1:1", handler);
         handle = Probe.handle(node);
         // Ignore real reports while supplying synthetic LAN prefixes. Otherwise initial Android
         // network delivery can correctly invalidate an offer in the middle of these fixture tests.
@@ -70,7 +88,7 @@ public final class LocalNetworkPermissionTest {
     public void directDataAndDiscoveryDenialsOfferOnMainThread() {
         for (String mode : List.of("data", "disco", "access")) {
             main(() -> {
-                register(PEER);
+                select(PEER);
                 network("192.0.2.0/24");
                 attempt(mode, PEER, LAN);
             });
@@ -83,19 +101,20 @@ public final class LocalNetworkPermissionTest {
     public void ignoresSuccessOtherErrorsStunAndRelaySends() {
         for (String mode : List.of("success", "unreachable", "stun", "relay")) {
             main(() -> {
-                register(PEER);
+                select(PEER);
                 network("192.0.2.0/24");
                 attempt(mode, PEER, LAN);
             });
             drain();
         }
         assertEquals(0, offers.get());
+        assertEquals(0, policyChecks.get());
     }
 
     @Test(timeout = 30000)
     public void ignoresOtherPeersAndOffLinkDestinations() {
         main(() -> {
-            register(PEER);
+            select(PEER);
             network("192.0.2.0/24");
             attempt("data", "100.64.0.3", LAN);
             attempt("data", PEER, "192.168.20.1"); // Private does not mean on this LAN.
@@ -110,7 +129,7 @@ public final class LocalNetworkPermissionTest {
     @Test(timeout = 30000)
     public void ipv6AndMappedIpv4UseCurrentPrefixes() {
         main(() -> {
-            register("fd7a:115c:a1e0::2");
+            select("fd7a:115c:a1e0::2");
             network("2001:db8:1::/64");
             attempt("data", "fd7a:115c:a1e0::2", "2001:db8:2::9");
             attempt("data", "fd7a:115c:a1e0::2", "2001:db8:1::9");
@@ -118,7 +137,7 @@ public final class LocalNetworkPermissionTest {
         drain();
         assertEquals(supported() ? 1 : 0, offers.get());
         main(() -> {
-            register(PEER);
+            select(PEER);
             network("192.0.2.0/24");
             attempt("data", PEER, "::ffff:192.0.2.9");
         });
@@ -127,10 +146,10 @@ public final class LocalNetworkPermissionTest {
     }
 
     @Test(timeout = 30000)
-    public void offersOnceAndCanBeExplicitlyRearmed() {
+    public void fixedHandlerUsesAppStateToSuppressDuplicatesAndAllowRetries() {
         for (int i = 0; i < 2; i++) {
             main(() -> {
-                register(PEER);
+                select(PEER);
                 network("192.0.2.0/24");
                 attempt("data", PEER, LAN);
                 attempt("disco", PEER, LAN);
@@ -141,29 +160,39 @@ public final class LocalNetworkPermissionTest {
     }
 
     @Test(timeout = 30000)
-    public void hiddenDismissedAndReplacedOffersCancelQueuedDelivery() {
+    public void hiddenDismissedAndChangedSelectionPreventQueuedOffers() {
         main(() -> {
-            register(PEER);
+            select(PEER);
             network("192.0.2.0/24");
             attempt("data", PEER, LAN);
-            node.setLocalNetworkPermissionCallback(null, null); // Hidden or dismissed.
+            visible = false;
             attempt("data", PEER, LAN);
         });
         drain();
         main(() -> {
-            register(PEER);
+            visible = true;
+            dismissed = true;
+            attempt("data", PEER, LAN);
+        });
+        drain();
+        main(() -> {
+            dismissed = false;
+            select(PEER);
             network("192.0.2.0/24");
             attempt("data", PEER, LAN);
-            register("100.64.0.3");
+            select("100.64.0.3");
         });
         drain();
         assertEquals(0, offers.get());
+        main(() -> attempt("data", "100.64.0.3", LAN));
+        drain();
+        assertEquals(supported() ? 1 : 0, offers.get());
     }
 
     @Test(timeout = 30000)
     public void networkChangesAndLossCancelQueuedDelivery() {
         main(() -> {
-            register(PEER);
+            select(PEER);
             network("192.0.2.0/24");
             attempt("data", PEER, LAN);
             network("192.0.2.0/24"); // Replacement may reuse all addresses.
@@ -176,12 +205,13 @@ public final class LocalNetworkPermissionTest {
         });
         drain();
         assertEquals(0, offers.get());
+        assertEquals(0, policyChecks.get());
     }
 
     @Test(timeout = 30000)
     public void checksPermissionAndTargetSdkAtDelivery() {
         main(() -> {
-            register(PEER);
+            select(PEER);
             network("192.0.2.0/24");
             attempt("data", PEER, LAN);
             granted = true;
@@ -194,29 +224,40 @@ public final class LocalNetworkPermissionTest {
         });
         drain();
         assertEquals(0, offers.get());
+        assertEquals(0, policyChecks.get());
     }
 
     @Test(timeout = 30000)
-    public void closeCancelsQueuedDeliveryAndRegistrationRequiresMainThread() {
-        assertThrows(IllegalStateException.class, () -> node.setLocalNetworkPermissionCallback(null, null));
+    public void closeCancelsQueuedDelivery() {
         main(() -> {
-            register(PEER);
+            select(PEER);
             network("192.0.2.0/24");
             attempt("data", PEER, LAN);
             restoreNetwork();
             node.close();
-            assertThrows(IllegalStateException.class, () -> node.setLocalNetworkPermissionCallback(null, null));
         });
         drain();
         assertEquals(0, offers.get());
+        assertEquals(0, policyChecks.get());
     }
 
-    private void register(String address) {
-        node.setLocalNetworkPermissionCallback(new NodeStatus.Peer("peer", "linux", true,
-                List.of(InetAddresses.parseNumericAddress(address)), List.of()), () -> {
-            assertSame(Looper.getMainLooper(), Looper.myLooper());
-            offers.incrementAndGet();
-        });
+    @Test(timeout = 30000)
+    public void missingHandlerDisablesOffers() throws Exception {
+        try (TailnetNode other = TailnetNode.start(CONTEXT, new MemoryStore(), "no-handler", "http://127.0.0.1:1")) {
+            long otherHandle = Probe.handle(other);
+            main(() -> {
+                network("192.0.2.0/24");
+                assertEquals("ok", Probe.call("peerUDPDenied", otherHandle + "|data|" + PEER + "|" + LAN));
+            });
+            drain();
+            assertEquals(0, offers.get());
+            assertEquals(0, policyChecks.get());
+        }
+    }
+
+    private void select(String address) {
+        selectedPeer = address;
+        offered = false;
     }
 
     private void attempt(String mode, String peer, String destination) {

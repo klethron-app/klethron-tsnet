@@ -30,11 +30,12 @@ It also already checks UDP DNS reply sources and transaction IDs, covering
 - **Direct peer UDP denials have no embedder notification.** Add an atomic per-connection hook at
   the discovery-ping and WireGuard data send sites in `magicsock/endpoint.go`. Only Android
   `EPERM`/`EACCES` failures with a known peer and a direct destination reach it; STUN and UDP relays
-  are excluded. JNI posts a main-thread offer for the caller's selected peer, filtered by Android's
+  are excluded. JNI posts a main-thread notification, filtered by Android's
   current directly connected network prefixes and missing API-37 local-network permission.
-  Callers register only while visible and not dismissed; replacement, clearing, network changes
-  and close cancel queued delivery. `LocalNetworkPermissionTest` injects wrapped socket errors
-  through both send paths and covers peer, prefix, permission, lifecycle and one-shot filtering.
+  A fixed startup handler checks the app's current selected peer, visibility and offer state before
+  offering permission; network changes and close cancel queued delivery. `LocalNetworkPermissionTest`
+  injects wrapped socket errors through both send paths and covers peer, prefix, permission, lifecycle
+  and app-owned duplicate suppression. Storage and permission handler references remain final.
 - **Android UDP permission errors can interrupt an unrelated relay connection.** Android's local-network
   policy can reject a speculative LAN packet with `EPERM`. Keep the existing throttled UDP socket
   recovery, endpoint-trust reset and re-STUN, but leave DERP TCP connections and their queued writes

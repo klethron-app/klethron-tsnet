@@ -13,7 +13,6 @@ import android.os.Handler;
 import android.os.Looper;
 import android.os.ParcelFileDescriptor;
 import androidx.annotation.AnyThread;
-import androidx.annotation.MainThread;
 import androidx.annotation.WorkerThread;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -41,8 +40,7 @@ import org.jspecify.annotations.Nullable;
 /// An embedded [tailnet](https://tailscale.com/kb/1136/tailnet) device with caller-owned keys and
 /// outbound TCP. [Start][#start], [#awaitStatus] until [NodeStatus.State#RUNNING] without a
 /// [NodeStatus#loginUrl()], then [#connect]. Follows the best non-VPN network, even with another VPN active.
-/// Methods are thread-safe except main-thread [#setLocalNetworkPermissionCallback]; `@WorkerThread`
-/// methods block. [#close] cancels blocked calls with
+/// Methods are thread-safe; `@WorkerThread` methods block. [#close] cancels blocked calls with
 /// [ClosedChannelException]. Non-positive timeouts return immediately from [#awaitStatus] and fail
 /// [#connect] and [#logout]. Operations from a [StateStore] callback throw [IllegalStateException].
 /// First use loads the native library.
@@ -143,7 +141,22 @@ public final class TailnetNode implements AutoCloseable {
         return start(context, store, hostname, "");
     }
 
+    /// Starts with fixed storage and optional local-network permission handlers. The handler's
+    /// [LocalNetworkPermissionHandler#canOffer] checks the app's current selected peer, visibility
+    /// and dismissal state on the main thread before each offer. Passing `null` disables offers.
+    /// See [#start(Context, StateStore, String)] for startup and storage requirements.
+    @WorkerThread
+    public static TailnetNode start(Context context, StateStore store, String hostname,
+            @Nullable LocalNetworkPermissionHandler permissionHandler) throws IOException {
+        return start(context, store, hostname, "", permissionHandler);
+    }
+
     static TailnetNode start(Context context, StateStore store, String hostname, String controlUrl) throws IOException {
+        return start(context, store, hostname, controlUrl, null);
+    }
+
+    static TailnetNode start(Context context, StateStore store, String hostname, String controlUrl,
+            @Nullable LocalNetworkPermissionHandler permissionHandler) throws IOException {
         Store.checkNotInCallback();
         Objects.requireNonNull(store);
         if (hostname.isEmpty() || hostname.indexOf(0) >= 0) {
@@ -156,7 +169,7 @@ public final class TailnetNode implements AutoCloseable {
         }
         long handle = -1;
         LocalNetworkPermission permission = new LocalNetworkPermission(
-                Objects.requireNonNullElse(context.getApplicationContext(), context));
+                Objects.requireNonNullElse(context.getApplicationContext(), context), permissionHandler);
         if (Timing.ENABLED) Timing.event("store", Timing.identity(store), 0, "java_start", "begin", "");
         try {
             handle = nativeStart(new Store(store, permission), (hostname + '\0' + controlUrl).getBytes(StandardCharsets.UTF_8));
@@ -365,21 +378,6 @@ public final class TailnetNode implements AutoCloseable {
     @AnyThread
     public static String tailscaleVersion() {
         return nativeTailscaleVersion();
-    }
-
-    /// Offers local-network permission after a direct UDP attempt to `peer` fails with a permission
-    /// error on the current physical network. Delivery is on the main thread, once per registration,
-    /// and only when Android 17's `ACCESS_LOCAL_NETWORK` permission is missing for a target-37+ app.
-    /// Discovery pings and WireGuard sends qualify; STUN, relays and other peers do not.
-    ///
-    /// Register only while the selected peer's terminal is visible and the user has not dismissed
-    /// the offer. Pass `(null, null)` when it hides, the selection changes, or the offer is dismissed.
-    /// Replacing or clearing a registration cancels queued delivery. The callback may show a rationale
-    /// or request permission; the app owns its manifest permission, UI and dismissal persistence.
-    /// Closing the node cancels pending delivery. Callback exceptions follow normal main-thread rules.
-    @MainThread
-    public void setLocalNetworkPermissionCallback(NodeStatus.@Nullable Peer peer, @Nullable Runnable callback) {
-        localNetworkPermission.set(peer, callback);
     }
 
     /// Closes connections and waits for shutdown, keeping the identity for the next [#start].

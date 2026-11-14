@@ -52,8 +52,9 @@ klethron_permission.go. In endpoint.go, report errors from direct discovery
 pings and WireGuard data sends. Only Android EPERM/EACCES errors with a known
 peer address and a direct (non-DERP, non-Geneve-relay) destination reach the
 callback. STUN and other background probing do not report peer denials. The
-wrapper applies selected-peer, current-network and Android permission filters
-before delivering a one-shot caller-owned offer on the main thread.
+wrapper checks the current network and Android permission before consulting a
+fixed startup handler on the main thread. The handler checks the app's selected
+peer, visibility and offer state before presenting a caller-owned offer.
 
 In debug builds, testcontrol retires an old node key after either an interactive
 followup or a registration that requires no authorization. Upstream retires it
