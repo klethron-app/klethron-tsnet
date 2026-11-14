@@ -1,4 +1,4 @@
-Klethron tsnet modifies ten tailscale.com source files in an isolated build copy.
+Klethron tsnet modifies twelve tailscale.com source files in an isolated build copy.
 Debug builds also patch tstest/integration/testcontrol/testcontrol.go, as described below.
 Upstream revision: e0d532cca9beeb8ed235bf30b9198a7c0e0afa02
 Original file SHA-256:
@@ -8,6 +8,8 @@ util/dnsname/dnsname.go: 5608189341565036e81b5d09c808034dd2f44e9d9cd8c7c9b7cd907
 ipn/ipnlocal/node_backend.go: 872efabb907356dd3305342b01f849654e65916e927384b39b896233e9113a07
 ipn/ipnlocal/resolve.go: 1a072fd225a45c548606bbad0f7188a1b124eb95f63de77be3e2e4a77e276814
 control/controlclient/direct.go: ccdcc186decb2efe76c98af7e4914b77f15a7d7eda9406b1bb2b441c7fa1575a
+ipn/ipnlocal/local.go: 82e9dc779055ea2697285785a1c1b5056057c35e4af0f91845a6ff7990ff5695
+wgengine/magicsock/derp.go: 2a733a8eabdcee27b80b7f1e325da1171ced39b7742a56965a41c564bb632a07
 tsnet/dns_lookup.go: b49ecd66f1b9f4de7e7ef20061148a0e903de2e847627db38c88715c6964dc93
 tsnet/tsnet.go: c37b19724de27737147f427e4a6e81e947736244848d55d6425a966cdbf24125
 ipn/ipnlocal/tailnet-lock.go: 8d4e038c7e5d377fa3e734ccaa911d1715b7fadcfb8c0364365f4ccce67b2862
@@ -16,6 +18,21 @@ tstest/integration/testcontrol/testcontrol.go (debug only): e8f952ff2ea480a7e52d
 
 Binary build metadata records the copy as "tailscale.com => ./tailscale"; the
 GO-MODULES.tsv checksum identifies the upstream module before these changes:
+
+In ipn/ipnlocal/local.go, apply OnlyTCP443 before installing the DERP map or
+starting network probing. After installing a live control response's DERP map,
+pass a valid, uncached self node's HomeDERP to magicsock.SeedHomeDERP. Cached-map
+handling is unchanged. This lets a saved node connect to its previous relay
+while ordinary probing selects the best current home; authorization still
+requires the fresh map and the backend's normal Running state.
+
+In wgengine/magicsock/derp.go, add SeedHomeDERP, which holds the connection mutex
+and ignores closed connections, an already selected home, zero hints, missing
+maps/regions, STUN-only or empty regions, Avoid and NoMeasureNoHome. Split
+setNearestDERP into its locking wrapper and setNearestDERPLocked so the hint
+uses the same selection path atomically. Move HomeDERPChanged publication from
+maybeSetNearestDERP to the locked state change, preserving old/new event order
+when probing races the hint. Ordinary probing can replace the provisional home.
 
 In debug builds, testcontrol retires an old node key after either an interactive
 followup or a registration that requires no authorization. Upstream retires it

@@ -15,6 +15,16 @@ It also already checks UDP DNS reply sources and transaction IDs, covering
 
 ## Patched
 
+- **Saved nodes wait for network probing before connecting to their home relay.** Seed the initial
+  home DERP from the self node in a fresh control response, after applying `OnlyTCP443`. Accept only
+  a relay-capable region in that response's DERP map which is not avoided or excluded from home
+  selection, and only while no home is selected. Ordinary network probing continues and can replace
+  an unreachable or suboptimal hint. Publish home changes under magicsock's selection lock so the
+  backend observes ordered old/new regions even when probing races the hint. Cached maps retain their
+  upstream behavior; this does not cache authorization or bypass `Running`. `StartupTest` covers
+  validation, selection races, missing/unreachable hints and complete first-`Running` peer snapshots.
+  The wrapper serializes metadata reads through publication and includes a fresh read with `Running`;
+  a background read cannot later overwrite that snapshot with pre-startup peer data.
 - **Test control keeps old keys after noninteractive rotation.** It deletes them only after a
   browser followup, leaving duplicate peers when `RequireAuth` is false. A debug-only patch also
   retires them when authorization is unnecessary; `SecurityTest` covers the rotation.

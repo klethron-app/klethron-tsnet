@@ -105,6 +105,43 @@ abstract class BuildGoLibrary @Inject constructor(
         val forgetKey = "\tc.mu.Lock()\n\tc.persist = new(persist.Persist).View()\n\tc.mu.Unlock()\n"
         patch("control/controlclient/direct.go", "ccdcc186decb2efe76c98af7e4914b77f15a7d7eda9406b1bb2b441c7fa1575a",
             forgetKey to "\tif err == nil {\n" + forgetKey.replace("\t", "\t\t") + "\t}\n")
+        // Bootstrap a relay from the fresh self node while ordinary network probing continues.
+        val onlyTCP443 = "\t\tb.MagicConn().SetOnlyTCP443(st.NetMap.HasCap(nodecap.OnlyTCP443))\n"
+        patch("ipn/ipnlocal/local.go", "82e9dc779055ea2697285785a1c1b5056057c35e4af0f91845a6ff7990ff5695",
+            onlyTCP443 to "",
+            "\t\tvar cachedHome tailcfg.DERPRegionID" to onlyTCP443 + "\n\t\tvar cachedHome tailcfg.DERPRegionID",
+            "\t\t\tb.MagicConn().SetDERPMap(st.NetMap.DERPMap)" to
+                "\t\t\tb.MagicConn().SetDERPMap(st.NetMap.DERPMap)\n" +
+                    "\t\t\tif c != nil && !st.NetMap.Cached && st.NetMap.SelfNode.Valid() {\n" +
+                    "\t\t\t\tb.MagicConn().SeedHomeDERP(st.NetMap.SelfNode.HomeDERP())\n\t\t\t}")
+        patch("wgengine/magicsock/derp.go", "2a733a8eabdcee27b80b7f1e325da1171ced39b7742a56965a41c564bb632a07",
+            "\t\t\tc.myDerp, report.RegionLatency[myDerp]" to "\t\t\tmyDerp, report.RegionLatency[myDerp]",
+            "\t} else if preferredDERP != myDerp {\n\t\tc.homeDERPChangedPub.Publish(HomeDERPChanged{Old: myDerp, New: preferredDERP})" to "",
+            "\tc.myDerp = derpNum\n" to
+                "\tprevious := c.myDerp\n\tc.myDerp = derpNum\n" +
+                    "\tc.homeDERPChangedPub.Publish(HomeDERPChanged{Old: previous, New: derpNum})\n",
+            "func (c *Conn) setNearestDERP(derpNum tailcfg.DERPRegionID) (wantDERP bool) {\n\tc.mu.Lock()\n\tdefer c.mu.Unlock()\n" to """
+                func (c *Conn) setNearestDERP(derpNum tailcfg.DERPRegionID) (wantDERP bool) {
+                    c.mu.Lock()
+                    defer c.mu.Unlock()
+                    return c.setNearestDERPLocked(derpNum)
+                }
+
+                // SeedHomeDERP accepts a region from a fresh self node after installing its DERP map.
+                // It cannot replace a selected home; ordinary netcheck may replace this initial hint.
+                func (c *Conn) SeedHomeDERP(regionID tailcfg.DERPRegionID) {
+                    c.mu.Lock()
+                    defer c.mu.Unlock()
+                    if c.closed || c.myDerp != 0 || regionID == 0 || c.derpMap == nil { return }
+                    region := c.derpMap.Regions[regionID]
+                    if region == nil || !region.CanServeDERP() || region.Avoid || region.NoMeasureNoHome { return }
+                    c.setNearestDERPLocked(regionID)
+                }
+
+                // c.mu must be held. Publish home changes under the same lock to preserve their order.
+                func (c *Conn) setNearestDERPLocked(derpNum tailcfg.DERPRegionID) (wantDERP bool) {
+
+            """.trimIndent())
         // Names that the tailnet's DNS does not answer must not reach the device's resolver.
         patch("tsnet/dns_lookup.go", "b49ecd66f1b9f4de7e7ef20061148a0e903de2e847627db38c88715c6964dc93",
             "return c.hostLookup(ctx, network, hostFB)" to "return candidateResult{servfail: true, err: firstErr}")

@@ -91,6 +91,9 @@ The app controls node lifetime and services.
 Nodes follow the best non-VPN network across Wi-Fi and mobile changes, including while another VPN
 is active. TLS uses Android's system CA store minus user-disabled roots; user-added CAs and the app's
 network security configuration do not apply.
+On restart, a previous relay supplied by fresh control state can connect while network probing
+continues. Missing or unavailable relay hints fall back to ordinary selection. The first `RUNNING`
+snapshot includes fresh peer metadata.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) to build, test or use a checkout. Original code is
 [Apache-2.0 licensed](LICENSE); dependencies' [own licences](THIRD-PARTY-NOTICES.md) ship in the AAR.

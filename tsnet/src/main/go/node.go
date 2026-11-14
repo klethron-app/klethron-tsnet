@@ -30,9 +30,10 @@ type node struct {
 	client *local.Client
 	store  *javaStore
 
-	lifecycle sync.RWMutex   // Held for reading by calls, and for writing by close.
-	watchers  sync.WaitGroup // Status goroutines, which use the server until ctx ends.
-	auth      chan struct{}  // Serializes login/logout, including their reads and network requests.
+	lifecycle    sync.RWMutex   // Held for reading by calls, and for writing by close.
+	watchers     sync.WaitGroup // Status goroutines, which use the server until ctx ends.
+	auth         chan struct{}  // Serializes login/logout, including their reads and network requests.
+	statusReadMu sync.Mutex     // Serializes metadata reads through publication, including entry to Running.
 
 	ctx    context.Context // Cancelled when the node closes.
 	cancel context.CancelFunc
@@ -113,6 +114,10 @@ func (n *node) watchStatus(refresh chan<- struct{}) {
 				if err != nil || (notify.ErrMessage != nil && *notify.ErrMessage == watchFellBehind) {
 					break
 				}
+				if notify.State != nil && *notify.State == ipn.Running {
+					n.publishStatus(notify)
+					continue
+				}
 				n.publish(notify, nil)
 				if notify.InitialStatus != nil || notify.State != nil || notify.SelfChange != nil ||
 					len(notify.PeersChanged)+len(notify.PeersRemoved)+len(notify.UserProfiles) > 0 ||
@@ -144,8 +149,16 @@ func (n *node) refreshStatus(refresh <-chan struct{}) {
 			return
 		case <-refresh:
 		}
-		n.publish(ipn.Notify{}, readStatus(n.server.Status()))
+		n.publishStatus(ipn.Notify{})
 	}
+}
+
+// Running must include fresh peer metadata. Other notifications do not take this lock, so background
+// metadata refreshes do not delay their publication.
+func (n *node) publishStatus(notify ipn.Notify) {
+	n.statusReadMu.Lock()
+	defer n.statusReadMu.Unlock()
+	n.publish(notify, readStatus(n.server.Status()))
 }
 
 func readStatus(status *ipnstate.Status) *statusRead {
