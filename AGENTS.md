@@ -9,6 +9,8 @@
 - Java package: `com.klethron.tsnet`. Maven coordinates: `com.klethron:tsnet`.
 - Android 14/API 34 minimum. Ship only arm64-v8a and x86_64, with 16 KiB ELF alignment.
 - Gradle is the build entry point. Keep native tasks incremental and configuration-cache compatible.
+- Format Java with `./gradlew spotlessApply`; `build` checks Palantir Java Format through Spotless.
+  Keep `///` Javadoc lines within 112 columns for the formatter.
 - Pin dependencies and toolchains. Never resolve a moving Tailscale branch during normal builds.
 - Keep the Java/JNI/Go boundary narrow. No SSH, UI, Android services or app lifecycle policy in the library.
 - No subprocesses, downloaded executables, hidden APIs or device-wide VPN in shipped code.

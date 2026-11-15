@@ -57,7 +57,7 @@ public final class TailnetNode implements AutoCloseable {
             KeyStore roots = KeyStore.getInstance("AndroidCAStore");
             roots.load(null);
             ByteArrayOutputStream certificates = new ByteArrayOutputStream();
-            for (var aliases = roots.aliases(); aliases.hasMoreElements();) {
+            for (var aliases = roots.aliases(); aliases.hasMoreElements(); ) {
                 String alias = aliases.nextElement();
                 var certificate = alias.startsWith("system:") ? roots.getCertificate(alias) : null;
                 if (certificate != null) certificates.writeBytes(certificate.getEncoded());
@@ -76,17 +76,24 @@ public final class TailnetNode implements AutoCloseable {
         NetworkMonitor(Context context) {
             connectivity = Objects.requireNonNullElse(context.getApplicationContext(), context)
                     .getSystemService(ConnectivityManager.class);
-            connectivity.registerBestMatchingNetworkCallback(PHYSICAL_NETWORK, this,
-                    new Handler(Looper.getMainLooper()));
+            connectivity.registerBestMatchingNetworkCallback(
+                    PHYSICAL_NETWORK, this, new Handler(Looper.getMainLooper()));
         }
 
         @Override
         public void onLinkPropertiesChanged(Network network, LinkProperties properties) {
             String gateway = properties.getRoutes().stream()
-                    .filter(route -> route.isDefaultRoute() && route.hasGateway() && route.getGateway() instanceof Inet4Address)
-                    .map(route -> route.getGateway().getHostAddress()).findFirst().orElse("");
+                    .filter(route ->
+                            route.isDefaultRoute() && route.hasGateway() && route.getGateway() instanceof Inet4Address)
+                    .map(route -> route.getGateway().getHostAddress())
+                    .findFirst()
+                    .orElse("");
             String name = Objects.toString(properties.getInterfaceName(), "");
-            report(this, (name + '\0' + gateway).getBytes(StandardCharsets.UTF_8), network.getNetworkHandle(), properties);
+            report(
+                    this,
+                    (name + '\0' + gateway).getBytes(StandardCharsets.UTF_8),
+                    network.getNetworkHandle(),
+                    properties);
         }
 
         @Override
@@ -95,19 +102,25 @@ public final class TailnetNode implements AutoCloseable {
         }
     }
 
-    private static synchronized void report(NetworkMonitor monitor, byte[] value, long handle, @Nullable LinkProperties properties) {
+    private static synchronized void report(
+            NetworkMonitor monitor, byte[] value, long handle, @Nullable LinkProperties properties) {
         // Unregistering cannot cancel a callback already dispatched on the main thread.
         if (network == monitor) {
             // Prefixes of the chosen physical link, excluding VPNs and unrelated interfaces.
-            LocalNetworkPermission.report(properties == null ? List.of() : properties.getLinkAddresses().stream()
-                    .map(address -> new IpPrefix(address.getAddress(), address.getPrefixLength())).toList());
+            LocalNetworkPermission.report(
+                    properties == null
+                            ? List.of()
+                            : properties.getLinkAddresses().stream()
+                                    .map(address -> new IpPrefix(address.getAddress(), address.getPrefixLength()))
+                                    .toList());
             nativeSetDefaultNetwork(value, handle);
         }
     }
     /// Following a VPN would hide changes to the underlying network.
     static final NetworkRequest PHYSICAL_NETWORK = new NetworkRequest.Builder()
             .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
-            .addCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN).build();
+            .addCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)
+            .build();
     private static final Set<StateStore> stores = Collections.newSetFromMap(new IdentityHashMap<>());
     private static @Nullable NetworkMonitor network;
 
@@ -146,8 +159,12 @@ public final class TailnetNode implements AutoCloseable {
     /// and dismissal state on the main thread before each offer. Passing `null` disables offers.
     /// See [#start(Context, StateStore, String)] for startup and storage requirements.
     @WorkerThread
-    public static TailnetNode start(Context context, StateStore store, String hostname,
-            @Nullable LocalNetworkPermissionHandler permissionHandler) throws IOException {
+    public static TailnetNode start(
+            Context context,
+            StateStore store,
+            String hostname,
+            @Nullable LocalNetworkPermissionHandler permissionHandler)
+            throws IOException {
         return start(context, store, hostname, "", permissionHandler);
     }
 
@@ -155,8 +172,13 @@ public final class TailnetNode implements AutoCloseable {
         return start(context, store, hostname, controlUrl, null);
     }
 
-    static TailnetNode start(Context context, StateStore store, String hostname, String controlUrl,
-            @Nullable LocalNetworkPermissionHandler permissionHandler) throws IOException {
+    static TailnetNode start(
+            Context context,
+            StateStore store,
+            String hostname,
+            String controlUrl,
+            @Nullable LocalNetworkPermissionHandler permissionHandler)
+            throws IOException {
         Store.checkNotInCallback();
         Objects.requireNonNull(store);
         if (hostname.isEmpty() || hostname.indexOf(0) >= 0) {
@@ -172,10 +194,11 @@ public final class TailnetNode implements AutoCloseable {
                 Objects.requireNonNullElse(context.getApplicationContext(), context), permissionHandler);
         if (Timing.ENABLED) Timing.event("store", Timing.identity(store), 0, "java_start", "begin", "");
         try {
-            handle = nativeStart(new Store(store, permission), (hostname + '\0' + controlUrl).getBytes(StandardCharsets.UTF_8));
+            handle = nativeStart(
+                    new Store(store, permission), (hostname + '\0' + controlUrl).getBytes(StandardCharsets.UTF_8));
         } finally {
-            if (Timing.ENABLED) Timing.event("store", Timing.identity(store), 0, "java_start", "end",
-                    handle < 0 ? "error" : "ok");
+            if (Timing.ENABLED)
+                Timing.event("store", Timing.identity(store), 0, "java_start", "end", handle < 0 ? "error" : "ok");
             if (handle < 0) release(store);
         }
         check(handle);
@@ -249,7 +272,8 @@ public final class TailnetNode implements AutoCloseable {
         if (previous != null && previous.owner != handle) {
             throw new IllegalArgumentException("Status belongs to another node");
         }
-        String record = nativeAwaitStatus(handle, previous == null ? -1 : previous.version, NANOSECONDS.convert(timeout));
+        String record =
+                nativeAwaitStatus(handle, previous == null ? -1 : previous.version, NANOSECONDS.convert(timeout));
         if (record == null) {
             throw new ClosedChannelException();
         }
@@ -279,7 +303,7 @@ public final class TailnetNode implements AutoCloseable {
     /// @throws IllegalArgumentException if the host is invalid or the port is not 1–65535
     /// @throws ClosedChannelException if the node is or becomes closed
     /// @throws UnknownHostException if the tailnet's DNS cannot resolve `host`
-    /// @throws NoRouteToHostException if the address is outside the tailnet; it never falls back to a local connection
+    /// @throws NoRouteToHostException if the address is outside the tailnet; no local fallback
     /// @throws SocketTimeoutException if the timeout elapses first
     /// @throws ConnectException if the connection fails or tailnet access ends while connecting
     /// @throws IOException if the connection cannot be opened
@@ -302,7 +326,11 @@ public final class TailnetNode implements AutoCloseable {
         try {
             try (ParcelFileDescriptor socket = localBridge(connection)) {
                 if (Timing.ENABLED) Timing.link("channel", Timing.identity(connection), "fd", socket.getFd());
-                check(nativeDial(handle, name, port, socket.detachFd(),
+                check(nativeDial(
+                        handle,
+                        name,
+                        port,
+                        socket.detachFd(),
                         Math.max(0, timeoutNanos - (System.nanoTime() - started))));
             }
             if (Timing.ENABLED) Timing.event("channel", Timing.identity(connection), 0, "java_connect", "end", "ok");
@@ -331,7 +359,8 @@ public final class TailnetNode implements AutoCloseable {
             try (SocketChannel accepted = listener.accept()) {
                 // Another app can race the listener. Never give it a tailnet connection.
                 // The client does not use SO_REUSEADDR, so its local address is unique.
-                if (accepted == null || !accepted.getRemoteAddress().equals(connection.getLocalAddress())
+                if (accepted == null
+                        || !accepted.getRemoteAddress().equals(connection.getLocalAddress())
                         || !connection.finishConnect()) {
                     throw new IOException("Local connection unavailable");
                 }

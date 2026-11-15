@@ -68,14 +68,17 @@ public final class CrashTest {
             ActivityManager activities = context.getSystemService(ActivityManager.class);
             int pid = Objects.requireNonNull(activities.getRunningAppProcesses()).stream()
                     .filter(process -> process.processName.equals(context.getPackageName() + ":crash"))
-                    .findFirst().orElseThrow().pid;
+                    .findFirst()
+                    .orElseThrow()
+                    .pid;
             Parcel data = Parcel.obtain();
             Parcel reply = Parcel.obtain();
             try {
                 data.writeString(directory.resolve("state.db").toString());
                 binder.transact(IBinder.LAST_CALL_TRANSACTION, data, reply, 0);
                 assertEquals("ok", reply.readString());
-                try (SqliteStore store = new SqliteStore(directory.resolve("state.db").toFile())) {
+                try (SqliteStore store =
+                        new SqliteStore(directory.resolve("state.db").toFile())) {
                     machineKey = Objects.requireNonNull(store.read("_machinekey"));
                 }
                 binder.transact(IBinder.FIRST_CALL_TRANSACTION + mode, data, null, IBinder.FLAG_ONEWAY);
@@ -89,9 +92,12 @@ public final class CrashTest {
             for (int i = 0; i < 100; i++) {
                 exits = activities.getHistoricalProcessExitReasons(null, pid, 1);
                 if (!exits.isEmpty() && exits.get(0).getReason() == reason) {
-                    try (SqliteStore store = new SqliteStore(directory.resolve("state.db").toFile());
+                    try (SqliteStore store = new SqliteStore(
+                                    directory.resolve("state.db").toFile());
                             TailnetNode node = TailnetNode.start(context, store, "recovered", "http://127.0.0.1:1")) {
-                        assertTrue("Machine identity changed after crash", Arrays.equals(machineKey, store.read("_machinekey")));
+                        assertTrue(
+                                "Machine identity changed after crash",
+                                Arrays.equals(machineKey, store.read("_machinekey")));
                     }
                     return exits.get(0);
                 }
@@ -105,7 +111,9 @@ public final class CrashTest {
     }
 
     private static List<String> goLog(ApplicationExitInfo exit) throws Exception {
-        return shell("logcat -d -b main -v raw -s Go --pid=" + exit.getPid()).lines()
-                .filter(line -> !line.startsWith("--------- beginning of ")).toList();
+        return shell("logcat -d -b main -v raw -s Go --pid=" + exit.getPid())
+                .lines()
+                .filter(line -> !line.startsWith("--------- beginning of "))
+                .toList();
     }
 }

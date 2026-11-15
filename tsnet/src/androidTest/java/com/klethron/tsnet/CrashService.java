@@ -1,15 +1,15 @@
 package com.klethron.tsnet;
 
-import android.app.Service;
 import android.annotation.SuppressLint;
+import android.app.Service;
 import android.content.Intent;
 import android.os.Binder;
 import android.os.IBinder;
 import android.os.Parcel;
 import com.klethron.tsnet.demo.store.SqliteStore;
-import java.util.Objects;
 import java.io.File;
 import java.io.IOException;
+import java.util.Objects;
 import org.jspecify.annotations.Nullable;
 
 /** Crashes its own process in Go on a transaction, so the test process can observe the crash. */

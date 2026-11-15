@@ -27,7 +27,8 @@ final class LocalNetworkPermission {
     }
 
     static void report(List<IpPrefix> prefixes) {
-        network = new Network(prefixes.stream().filter(prefix -> prefix.getPrefixLength() > 0).toList());
+        network = new Network(
+                prefixes.stream().filter(prefix -> prefix.getPrefixLength() > 0).toList());
     }
 
     @SuppressWarnings("ReferenceEquality") // A replacement network may reuse the same prefixes.
@@ -38,7 +39,9 @@ final class LocalNetworkPermission {
         try {
             peerAddress = InetAddress.getByAddress(peer);
             InetAddress address = InetAddress.getByAddress(destination);
-            if (address.isAnyLocalAddress() || address.isLoopbackAddress() || address.isMulticastAddress()
+            if (address.isAnyLocalAddress()
+                    || address.isLoopbackAddress()
+                    || address.isMulticastAddress()
                     || attempted.prefixes.stream().noneMatch(prefix -> prefix.contains(address))) return;
         } catch (java.net.UnknownHostException invalid) {
             return;
@@ -51,8 +54,10 @@ final class LocalNetworkPermission {
     }
 
     private boolean missing() {
-        return Build.VERSION.SDK_INT >= 37 && context.getApplicationInfo().targetSdkVersion >= 37
-                && context.checkSelfPermission(Manifest.permission.ACCESS_LOCAL_NETWORK) != PackageManager.PERMISSION_GRANTED;
+        return Build.VERSION.SDK_INT >= 37
+                && context.getApplicationInfo().targetSdkVersion >= 37
+                && context.checkSelfPermission(Manifest.permission.ACCESS_LOCAL_NETWORK)
+                        != PackageManager.PERMISSION_GRANTED;
     }
 
     void close() {

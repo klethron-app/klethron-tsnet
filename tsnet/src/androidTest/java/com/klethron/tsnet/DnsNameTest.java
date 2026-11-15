@@ -7,8 +7,9 @@ import org.junit.Test;
 public final class DnsNameTest {
     @Test
     public void validatesTheFinalLabel() {
-        for (String name : new String[] {"foo..", "..", "foo..com", "a".repeat(64), "com." + "a".repeat(64),
-                "com." + "a".repeat(64) + "."}) {
+        for (String name : new String[] {
+            "foo..", "..", "foo..com", "a".repeat(64), "com." + "a".repeat(64), "com." + "a".repeat(64) + "."
+        }) {
             assertEquals(name, "invalid", Probe.call("dnsName", name));
         }
         assertEquals(".", Probe.call("dnsName", ""));

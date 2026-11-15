@@ -16,19 +16,14 @@ import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import org.junit.Test;
 
-/**
- * Runs a loopback two-node tailnet while a node started through the public API follows the
- * network, then disables Wi-Fi so the network really changes. Both tailnet nodes must rebind and
- * keep exchanging data. Requires Wi-Fi with cellular behind it; another app's VPN, split or full
- * tunnel, may be active.
- */
+/// Switches two local nodes from Wi-Fi to cellular. Requires both networks; a VPN may be active.
 public final class NetworkChangeTest {
     @Test(timeout = 180000)
     public void rebindsWhenDefaultNetworkChanges() throws Exception {
         ConnectivityManager connectivity = CONTEXT.getSystemService(ConnectivityManager.class);
         assertTrue("The default network must be Wi-Fi", awaitWifiDefault(connectivity));
 
-        // Learns the interface names of the network the library follows; only it reports them to the nodes.
+        // Observe the same physical network as the library.
         LinkedBlockingQueue<String> names = new LinkedBlockingQueue<>();
         ConnectivityManager.NetworkCallback callback = new ConnectivityManager.NetworkCallback() {
             @Override
@@ -37,13 +32,16 @@ public final class NetworkChangeTest {
                 names.add(name == null ? "" : name);
             }
         };
-        connectivity.registerBestMatchingNetworkCallback(TailnetNode.PHYSICAL_NETWORK, callback,
-                new Handler(Looper.getMainLooper()));
+        connectivity.registerBestMatchingNetworkCallback(
+                TailnetNode.PHYSICAL_NETWORK, callback, new Handler(Looper.getMainLooper()));
         try {
             String wifi = nextName(names);
-            // Checks that, with no node running, Android netmon has no default route.
+            // Before a node starts, netmon must have no default route.
             assertEquals("ok", Probe.call("netchangeStart"));
-            try (TailnetNode node = TailnetNode.start(CONTEXT, new MemoryStore(), "klethron-netchange",
+            try (TailnetNode node = TailnetNode.start(
+                    CONTEXT,
+                    new MemoryStore(),
+                    "klethron-netchange",
                     "http://127.0.0.1:1")) { // Unreachable: the node only follows the default network.
                 assertEquals("ok", Probe.call("netchangeAwait", wifi));
                 shell("svc wifi disable");
@@ -54,12 +52,11 @@ public final class NetworkChangeTest {
                 assertEquals("ok", Probe.call("netchangeAwait", other));
             }
         } finally {
-            // Release the probe and Wi-Fi before cleanup that can throw: other tailnet probes wait
-            // for the probe's lock, and later tests need Wi-Fi.
+            // Restore Wi-Fi and release the probe lock before cleanup can throw.
             Probe.call("netchangeStop");
             shell("svc wifi enable");
             connectivity.unregisterNetworkCallback(callback);
-            boolean unused = awaitWifiDefault(connectivity); // Best effort, as found: must not mask a failure.
+            boolean unused = awaitWifiDefault(connectivity); // Best effort; preserve the test failure.
         }
     }
 

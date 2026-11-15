@@ -14,7 +14,7 @@ import org.junit.Test;
 
 public final class NetworkCallbackTest {
     @Test
-    public void gatewayFollowsAndroidReportsAndClearsWhenAbsent() throws Exception {
+    public void gatewayFollowsAndroidReports() throws Exception {
         Method report = TailnetNode.class.getDeclaredMethod("nativeSetDefaultNetwork", byte[].class, long.class);
         report.setAccessible(true);
         try {
@@ -28,8 +28,9 @@ public final class NetworkCallbackTest {
     }
 
     @Test(timeout = 30000)
-    public void ignoresCallbacksFromAClosedRegistration() throws Exception {
-        Network physical = Objects.requireNonNull(CONTEXT.getSystemService(ConnectivityManager.class).getActiveNetwork());
+    public void ignoresClosedRegistration() throws Exception {
+        Network physical = Objects.requireNonNull(
+                CONTEXT.getSystemService(ConnectivityManager.class).getActiveNetwork());
         ConnectivityManager.NetworkCallback previous;
         try (TailnetNode node = start()) {
             previous = currentCallback();
@@ -58,7 +59,7 @@ public final class NetworkCallbackTest {
     }
 
     @Test(timeout = 90000)
-    public void rebindsWhenAReplacementNetworkReusesTheInterface() throws Exception {
+    public void networkReplacementRebindsSameInterface() throws Exception {
         Method report = TailnetNode.class.getDeclaredMethod("nativeSetDefaultNetwork", byte[].class, long.class);
         report.setAccessible(true);
         assertEquals("ok", Probe.call("netchangeStart"));

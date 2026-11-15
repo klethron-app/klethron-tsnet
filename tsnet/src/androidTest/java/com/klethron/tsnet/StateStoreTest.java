@@ -4,6 +4,7 @@ import static com.klethron.tsnet.TestSupport.CONTEXT;
 import static com.klethron.tsnet.TestSupport.await;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
@@ -26,13 +27,17 @@ public final class StateStoreTest {
     private String control;
 
     @Before
-    public void startControl() { control = Probe.call("startControl", false); }
+    public void startControl() {
+        control = Probe.call("startControl", false);
+    }
 
     @After
-    public void stopControl() { Probe.call("stopControl"); }
+    public void stopControl() {
+        Probe.call("stopControl");
+    }
 
     @Test(timeout = 60000)
-    public void callbackFailuresAbortAndReleaseTheStore() throws Exception {
+    public void callbackFailureStopsNodeAndReleasesStore() throws Exception {
         for (boolean failRead : new boolean[] {true, false}) {
             AtomicBoolean failing = new AtomicBoolean(true);
             AtomicInteger calls = new AtomicInteger();
@@ -51,15 +56,18 @@ public final class StateStoreTest {
                     super.write(key, value);
                 }
             };
-            assertEquals("State store failed; close the node before retrying",
+            assertEquals(
+                    "State store failed; close the node before retrying",
                     assertThrows(IOException.class, () -> start(store)).getMessage());
             failing.set(false);
             try (TailnetNode node = start(store)) {
                 await(node, s -> s.state() == NodeStatus.State.RUNNING);
                 failing.set(true);
-                assertFalse(probe(node).equals("ok"));
-                assertEquals("State store failed; close the node before retrying",
-                        assertThrows(IOException.class, () -> node.awaitStatus(null, Duration.ZERO)).getMessage());
+                assertNotEquals("ok", probe(node));
+                assertEquals(
+                        "State store failed; close the node before retrying",
+                        assertThrows(IOException.class, () -> node.awaitStatus(null, Duration.ZERO))
+                                .getMessage());
                 assertThrows(IOException.class, node::login);
                 node.close();
                 int ended = calls.get();
@@ -72,7 +80,7 @@ public final class StateStoreTest {
     }
 
     @Test(timeout = 30000)
-    public void closeWaitsForAnActiveCallback() throws Exception {
+    public void closeWaitsForCallback() throws Exception {
         CountDownLatch entered = new CountDownLatch(1), release = new CountDownLatch(1);
         AtomicReference<TailnetNode> current = new AtomicReference<>();
         AtomicBoolean rejected = new AtomicBoolean();
@@ -148,14 +156,16 @@ public final class StateStoreTest {
             await(node, s -> s.state() == NodeStatus.State.RUNNING);
             assertEquals("ok", probe(node));
             assertEquals(6, checked.get());
-            assertEquals(NodeStatus.State.RUNNING, node.awaitStatus(null, Duration.ZERO).state());
+            assertEquals(
+                    NodeStatus.State.RUNNING,
+                    node.awaitStatus(null, Duration.ZERO).state());
         }
-        // The failed re-entrant close must not mark the node closed and leave its store reserved.
+        // Rejected reentrant close must not leave the store reserved.
         start(store).close();
     }
 
     @Test(timeout = 30000)
-    public void logoutWaitsForBackendWritesAfterItsDeadline() throws Exception {
+    public void logoutWaitsForWritesPastDeadline() throws Exception {
         CountDownLatch entered = new CountDownLatch(1), release = new CountDownLatch(1);
         AtomicBoolean pause = new AtomicBoolean();
         StateStore store = new MemoryStore() {
@@ -176,16 +186,18 @@ public final class StateStoreTest {
         try (TailnetNode node = start(store)) {
             await(node, s -> s.state() == NodeStatus.State.RUNNING);
             pause.set(true);
-            CompletableFuture<IOException> logout = CompletableFuture.supplyAsync(() ->
-                    assertThrows(IOException.class, () -> node.logout(Duration.ofMillis(100))));
+            CompletableFuture<IOException> logout = CompletableFuture.supplyAsync(
+                    () -> assertThrows(IOException.class, () -> node.logout(Duration.ofMillis(100))));
             try {
                 assertTrue(entered.await(5, TimeUnit.SECONDS));
                 Thread.sleep(250);
-                assertFalse("Logout returned while its backend could still mutate state", logout.isDone());
+                assertFalse("Logout returned before write finished", logout.isDone());
             } finally {
                 release.countDown();
             }
-            assertEquals(SocketTimeoutException.class, logout.get(10, TimeUnit.SECONDS).getClass());
+            assertEquals(
+                    SocketTimeoutException.class,
+                    logout.get(10, TimeUnit.SECONDS).getClass());
             node.login();
             await(node, s -> s.state() == NodeStatus.State.RUNNING);
         }
@@ -195,5 +207,7 @@ public final class StateStoreTest {
         return TailnetNode.start(CONTEXT, store, "store-test", control);
     }
 
-    private static String probe(TailnetNode node) throws Exception { return Probe.call("store", Probe.handle(node)); }
+    private static String probe(TailnetNode node) throws Exception {
+        return Probe.call("store", Probe.handle(node));
+    }
 }

@@ -45,7 +45,12 @@ public final class NodeStatus {
     /// @param sshHostKeys [Tailscale SSH](https://tailscale.com/kb/1193/tailscale-ssh) host keys from
     ///     control, in OpenSSH format; empty without Tailscale SSH. Accept them for [#dnsName()] and
     ///     [#addresses()] without trust-on-first-use.
-    public record Peer(String dnsName, String operatingSystem, boolean online, List<InetAddress> addresses, List<String> sshHostKeys) {
+    public record Peer(
+            String dnsName,
+            String operatingSystem,
+            boolean online,
+            List<InetAddress> addresses,
+            List<String> sshHostKeys) {
         public Peer {
             addresses = List.copyOf(addresses);
             sshHostKeys = List.copyOf(sshHostKeys);
@@ -77,11 +82,17 @@ public final class NodeStatus {
         dnsName = emptyToNull(fields[6]);
         tailnetName = emptyToNull(fields[7]);
         loginName = emptyToNull(fields[8]);
-        peers = Arrays.stream(fields, 9, fields.length).map(line -> {
-            String[] peer = line.split("\t", -1);
-            return new Peer(peer[0], peer[1], Boolean.parseBoolean(peer[2]), addresses(peer[3]),
-                    peer[4].isEmpty() ? List.of() : List.of(peer[4].split(",")));
-        }).toList();
+        peers = Arrays.stream(fields, 9, fields.length)
+                .map(line -> {
+                    String[] peer = line.split("\t", -1);
+                    return new Peer(
+                            peer[0],
+                            peer[1],
+                            Boolean.parseBoolean(peer[2]),
+                            addresses(peer[3]),
+                            peer[4].isEmpty() ? List.of() : List.of(peer[4].split(",")));
+                })
+                .toList();
     }
 
     private static @Nullable String emptyToNull(String field) {
@@ -89,8 +100,11 @@ public final class NodeStatus {
     }
 
     private static List<InetAddress> addresses(String commaSeparated) {
-        return commaSeparated.isEmpty() ? List.of()
-                : Arrays.stream(commaSeparated.split(",")).map(InetAddresses::parseNumericAddress).toList();
+        return commaSeparated.isEmpty()
+                ? List.of()
+                : Arrays.stream(commaSeparated.split(","))
+                        .map(InetAddresses::parseNumericAddress)
+                        .toList();
     }
 
     /// The node's connection and authorization state.

@@ -32,7 +32,8 @@ public final class NetworkInterfacesTest {
                             + "|" + iface.getIndex() + "|" + iface.getMTU()
                             + "|" + iface.isUp() + "|" + iface.isLoopback()
                             + "|" + iface.isPointToPoint() + "|" + iface.supportsMulticast()
-                            + "|" + HexFormat.of().formatHex(address.getAddress().getAddress())
+                            + "|"
+                            + HexFormat.of().formatHex(address.getAddress().getAddress())
                             + "/" + address.getNetworkPrefixLength());
                 }
             }

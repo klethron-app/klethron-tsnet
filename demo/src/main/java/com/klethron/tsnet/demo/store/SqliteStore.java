@@ -14,7 +14,8 @@ public final class SqliteStore implements StateStore, AutoCloseable {
     public SqliteStore(File file) {
         database = SQLiteDatabase.openOrCreateDatabase(file, null);
         try {
-            database.execSQL("CREATE TABLE IF NOT EXISTS state (key TEXT PRIMARY KEY, value BLOB NOT NULL) WITHOUT ROWID");
+            database.execSQL(
+                    "CREATE TABLE IF NOT EXISTS state (key TEXT PRIMARY KEY, value BLOB NOT NULL) WITHOUT ROWID");
         } catch (RuntimeException | Error failure) {
             database.close();
             throw failure;
@@ -35,5 +36,7 @@ public final class SqliteStore implements StateStore, AutoCloseable {
     }
 
     @Override
-    public void close() { database.close(); }
+    public void close() {
+        database.close();
+    }
 }

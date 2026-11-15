@@ -17,7 +17,8 @@ Open a failed check's **Details** to find the failing step. The run summary show
 download its `reports-api-*` artifact for HTML reports and JUnit XML. CI checks whitespace, shell scripts,
 workflows and Go formatting, then builds and tests API 34/4 KiB and API 37.2/16 KiB x86_64 emulators
 on separate runners. Each job builds independently, and both must pass before a release can proceed.
-For Go changes, run `gofmt -w tsnet/src/main/go`; `git diff --check` catches whitespace errors.
+Format Java with `./gradlew spotlessApply`; `build` enforces Palantir Java Format through Spotless.
+For Go, run `gofmt -w tsnet/src/main/go`; `git diff --check` catches whitespace errors.
 
 ## Build and test
 

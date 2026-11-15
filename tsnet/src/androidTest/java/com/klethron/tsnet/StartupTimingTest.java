@@ -6,6 +6,7 @@ import static com.klethron.tsnet.TestSupport.await;
 import static com.klethron.tsnet.TestSupport.deleteDirectory;
 import static com.klethron.tsnet.TestSupport.temporaryDirectory;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assume.assumeTrue;
 
@@ -29,7 +30,7 @@ public final class StartupTimingTest {
     public void persistedRestartsAndWarmConnections() throws Exception {
         assumeTrue("true".equals(InstrumentationRegistry.getArguments().getString("startupTiming")));
         long initialized = System.nanoTime();
-        assertTrue(!TailnetNode.tailscaleVersion().isEmpty());
+        assertFalse(TailnetNode.tailscaleVersion().isEmpty());
         report(-1, "class_init", System.nanoTime() - initialized);
         String control = Probe.call("startControl", false);
         assertTrue(control.startsWith("http://127.0.0.1:"));
@@ -43,9 +44,11 @@ public final class StartupTimingTest {
                 long localReady = System.nanoTime();
                 long running, connected, echoed, warmStarted, warmConnected, closing, closed;
                 try {
-                    NodeStatus status = await(node, current -> current.state() == NodeStatus.State.RUNNING
-                            && current.loginUrl() == null
-                            && current.peers().stream().anyMatch(peer -> PEER.equals(peer.dnsName())));
+                    NodeStatus status = await(
+                            node,
+                            current -> current.state() == NodeStatus.State.RUNNING
+                                    && current.loginUrl() == null
+                                    && current.peers().stream().anyMatch(peer -> PEER.equals(peer.dnsName())));
                     running = System.nanoTime();
                     if (iteration == 0) addresses = status.addresses();
                     else assertEquals("Restart must reuse the saved identity", addresses, status.addresses());
@@ -85,7 +88,9 @@ public final class StartupTimingTest {
     }
 
     private static void report(int iteration, String phase, long elapsed) {
-        Log.i(TAG, String.format(Locale.ROOT, "iteration=%d phase=%s elapsed_ms=%.3f",
-                iteration, phase, elapsed / 1_000_000.0));
+        Log.i(
+                TAG,
+                String.format(
+                        Locale.ROOT, "iteration=%d phase=%s elapsed_ms=%.3f", iteration, phase, elapsed / 1_000_000.0));
     }
 }

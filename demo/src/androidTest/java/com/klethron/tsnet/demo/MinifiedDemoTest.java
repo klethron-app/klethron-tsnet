@@ -27,7 +27,8 @@ public final class MinifiedDemoTest {
         var worker = Executors.newSingleThreadExecutor();
         try (ServerSocketChannel listener = ServerSocketChannel.open()) {
             listener.bind(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0));
-            try (SocketChannel client = SocketChannel.open(listener.getLocalAddress()); SocketChannel peer = listener.accept()) {
+            try (SocketChannel client = SocketChannel.open(listener.getLocalAddress());
+                    SocketChannel peer = listener.accept()) {
                 byte[] sent = {1, 2, 3, 4, 5, 6};
                 var trickle = worker.submit(() -> {
                     for (byte value : sent) {
@@ -36,7 +37,8 @@ public final class MinifiedDemoTest {
                     }
                     return null;
                 });
-                assertThrows(SocketTimeoutException.class, () -> LiveActivity.echo(client, sent, Duration.ofSeconds(1)));
+                assertThrows(
+                        SocketTimeoutException.class, () -> LiveActivity.echo(client, sent, Duration.ofSeconds(1)));
                 assertFalse("Peer stopped before the deadline", trickle.isDone());
             }
         } finally {
@@ -48,7 +50,8 @@ public final class MinifiedDemoTest {
     public void startsRotatesAndRestartsLiveNodeThroughMinifiedConsumer() {
         Instrumentation instrumentation = InstrumentationRegistry.getInstrumentation();
         var context = instrumentation.getTargetContext();
-        Intent intent = new Intent().setClassName(context, "com.klethron.tsnet.demo.LiveActivity")
+        Intent intent = new Intent()
+                .setClassName(context, "com.klethron.tsnet.demo.LiveActivity")
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         for (int i = 0; i < 2; i++) {
             Activity activity = instrumentation.startActivitySync(intent);
@@ -61,18 +64,23 @@ public final class MinifiedDemoTest {
                 for (long deadline = SystemClock.uptimeMillis() + 45000; !ready[0]; SystemClock.sleep(50)) {
                     assertTrue("No control-plane status from live demo", SystemClock.uptimeMillis() < deadline);
                     instrumentation.runOnMainSync(() -> {
-                        String text = ((TextView) activity.findViewById(status)).getText().toString();
+                        String text = ((TextView) activity.findViewById(status))
+                                .getText()
+                                .toString();
                         // Never open or inspect the authorization URL, or change an existing login.
                         ready[0] = activity.findViewById(authorize).isEnabled()
-                                || text.startsWith("RUNNING") || text.startsWith("NEEDS_APPROVAL");
+                                || text.startsWith("RUNNING")
+                                || text.startsWith("NEEDS_APPROVAL");
                     });
                 }
                 if (i == 0) {
                     // A configuration change must keep the screen, and with it the node and a pending login.
-                    instrumentation.runOnMainSync(() ->
-                            activity.setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE));
-                    for (long deadline = SystemClock.uptimeMillis() + 10000; context.getResources().getConfiguration()
-                            .orientation != Configuration.ORIENTATION_LANDSCAPE; SystemClock.sleep(50)) {
+                    instrumentation.runOnMainSync(
+                            () -> activity.setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE));
+                    for (long deadline = SystemClock.uptimeMillis() + 10000;
+                            context.getResources().getConfiguration().orientation
+                                    != Configuration.ORIENTATION_LANDSCAPE;
+                            SystemClock.sleep(50)) {
                         assertTrue("Live demo did not rotate", SystemClock.uptimeMillis() < deadline);
                     }
                     instrumentation.waitForIdleSync();

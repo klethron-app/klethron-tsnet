@@ -7,7 +7,12 @@ final class Timing {
     private Timing() {}
 
     static void event(String scope, long id, long span, String phase, String event, String result) {}
+
     static void link(String scope, long id, String relatedScope, long relatedId) {}
-    static long identity(Object value) { return 0; }
+
+    static long identity(Object value) {
+        return 0;
+    }
+
     static void initialize() {}
 }

@@ -38,14 +38,14 @@ public final class DnsTest {
     }
 
     @Test(timeout = 60000)
-    public void reachesASplitDnsResolverThroughTheTailnet() throws Exception {
+    public void splitDnsUsesTailnet() throws Exception {
         try (TailnetNode node = TailnetNode.start(CONTEXT, new MemoryStore(), "dns-test", controlUrl)) {
             echo(node, "udp.split.test");
         }
     }
 
     @Test(timeout = 90000)
-    public void retriesTruncatedAndUnansweredDnsOverTailnetTcp() throws Exception {
+    public void truncatedOrUnansweredDnsRetriesOverTcp() throws Exception {
         try (TailnetNode node = TailnetNode.start(CONTEXT, new MemoryStore(), "dns-test", controlUrl)) {
             echo(node, "tcp.split.test");
             echo(node, "timeout.split.test");
@@ -75,11 +75,12 @@ public final class DnsTest {
     }
 
     @Test(timeout = 60000)
-    public void triesLaterDnsAnswersWithinTheCallersDeadline() throws Exception {
+    public void addressFallbackSharesDeadline() throws Exception {
         try (TailnetNode node = startNode()) {
-            // Each first address is an actual network-map peer with no working endpoints.
-            for (String host : new String[] {"fallback4.split.test", "fallback6.split.test", "dual.split.test",
-                    "same-family.service.test"}) {
+            // Each first address belongs to an unreachable peer.
+            for (String host : new String[] {
+                "fallback4.split.test", "fallback6.split.test", "dual.split.test", "same-family.service.test"
+            }) {
                 echo(node, host, Duration.ofSeconds(5));
             }
         }
@@ -94,7 +95,7 @@ public final class DnsTest {
     }
 
     @Test(timeout = 60000)
-    public void retainsBothServiceAddressFamiliesRegardlessOfRecordOrder() throws Exception {
+    public void recordOrderPreservesBothAddressFamilies() throws Exception {
         try (TailnetNode node = startNode()) {
             for (String host : new String[] {"dual.service.test", "reverse.service.test"}) {
                 assertEquals("ok", Probe.call("dialCandidates", Probe.handle(node) + "," + host));
@@ -154,7 +155,10 @@ public final class DnsTest {
     private TailnetNode startNode() throws IOException {
         TailnetNode node = TailnetNode.start(CONTEXT, new MemoryStore(), "dns-test", controlUrl);
         try {
-            await(node, status -> status.state() == NodeStatus.State.RUNNING && !status.peers().isEmpty());
+            await(
+                    node,
+                    status -> status.state() == NodeStatus.State.RUNNING
+                            && !status.peers().isEmpty());
             return node;
         } catch (IOException | RuntimeException | Error failure) {
             node.close();

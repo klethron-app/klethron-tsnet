@@ -30,7 +30,8 @@ final class TestSupport {
     }
 
     @CanIgnoreReturnValue
-    static <T extends Throwable> T assertDialThrows(Class<T> expected, TailnetNode node, String host, int port, Duration timeout) {
+    static <T extends Throwable> T assertDialThrows(
+            Class<T> expected, TailnetNode node, String host, int port, Duration timeout) {
         return assertThrows(expected, () -> node.connect(host, port, timeout).close());
     }
 
@@ -46,10 +47,11 @@ final class TestSupport {
         }
     }
 
-    /// Returns the output of `command`, run as the shell user, once it completes.
+    /// Runs as the Android shell user and waits for output.
     @CanIgnoreReturnValue
     static String shell(String command) throws IOException {
-        ParcelFileDescriptor output = InstrumentationRegistry.getInstrumentation().getUiAutomation().executeShellCommand(command);
+        ParcelFileDescriptor output =
+                InstrumentationRegistry.getInstrumentation().getUiAutomation().executeShellCommand(command);
         try (var in = new ParcelFileDescriptor.AutoCloseInputStream(output)) {
             return new String(in.readAllBytes(), StandardCharsets.UTF_8);
         }

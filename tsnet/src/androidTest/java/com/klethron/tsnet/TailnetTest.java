@@ -4,18 +4,15 @@ import static org.junit.Assert.assertEquals;
 
 import org.junit.Test;
 
-/**
- * Two in-process nodes join a loopback test control server and DERP/STUN server, then exchange
- * TCP data over the tailnet. No real tailnet, credentials or external network are involved.
- */
+/// Two local nodes with loopback control, DERP and STUN servers.
 public final class TailnetTest {
     @Test(timeout = 90000)
-    public void exchangesDataOverDirectPath() throws Exception {
+    public void exchangesDataOverDirectPath() {
         assertEquals("ok", Probe.call("tailnet"));
     }
 
     @Test(timeout = 90000)
-    public void exchangesDataOverDerpRelayOnly() throws Exception {
+    public void exchangesDataOverDerp() {
         assertEquals("ok", Probe.call("tailnetDerp"));
     }
 }

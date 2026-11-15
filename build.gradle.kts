@@ -6,6 +6,17 @@ plugins {
     alias(libs.plugins.android.library) apply false
     alias(libs.plugins.android.application) apply false
     alias(libs.plugins.errorprone) apply false
+    alias(libs.plugins.spotless)
+}
+
+spotless {
+    java {
+        target(fileTree(projectDir) {
+            include("**/*.java")
+            exclude("**/build/**", "**/.gradle/**")
+        })
+        palantirJavaFormat(libs.versions.palantirJavaFormat.get())
+    }
 }
 
 subprojects {

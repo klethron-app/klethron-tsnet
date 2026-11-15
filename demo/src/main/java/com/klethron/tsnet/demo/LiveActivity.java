@@ -13,8 +13,8 @@ import android.widget.TextView;
 import androidx.annotation.AnyThread;
 import androidx.annotation.MainThread;
 import androidx.annotation.WorkerThread;
-import com.klethron.tsnet.TailnetNode;
 import com.klethron.tsnet.NodeStatus;
+import com.klethron.tsnet.TailnetNode;
 import com.klethron.tsnet.demo.store.SqliteStore;
 import java.io.File;
 import java.io.IOException;
@@ -67,14 +67,16 @@ public final class LiveActivity extends Activity {
                 result(getString(R.string.browser_missing));
             }
         });
-        findViewById(R.id.login).setOnClickListener(view -> runOperation(current -> {
-            current.login();
-            return getString(R.string.login_requested);
-        }));
-        findViewById(R.id.logout).setOnClickListener(view -> runOperation(current -> {
-            current.logout(TIMEOUT);
-            return getString(R.string.logged_out);
-        }));
+        findViewById(R.id.login)
+                .setOnClickListener(view -> runOperation(current -> {
+                    current.login();
+                    return getString(R.string.login_requested);
+                }));
+        findViewById(R.id.logout)
+                .setOnClickListener(view -> runOperation(current -> {
+                    current.logout(TIMEOUT);
+                    return getString(R.string.logged_out);
+                }));
         findViewById(R.id.pick_peer).setOnClickListener(view -> pickPeer());
         findViewById(R.id.exchange).setOnClickListener(view -> exchange());
         ((CheckBox) findViewById(R.id.keep_open)).setOnCheckedChangeListener((view, checked) -> {
@@ -131,16 +133,26 @@ public final class LiveActivity extends Activity {
     private void pickPeer() {
         if (status == null) return;
         List<NodeStatus.Peer> peers = status.peers();
-        String[] labels = peers.stream().map(peer ->
-                getString(peer.online() ? R.string.peer_online : R.string.peer_offline, peer.dnsName(), peer.operatingSystem())
-                        + (peer.sshHostKeys().isEmpty() ? "" : getString(R.string.peer_tailscale_ssh))).toArray(String[]::new);
-        new AlertDialog.Builder(this).setTitle(R.string.pick_peer).setItems(labels, (dialog, which) ->
-                ((EditText) findViewById(R.id.peer_host)).setText(peers.get(which).dnsName())).show();
+        String[] labels = peers.stream()
+                .map(peer -> getString(
+                                peer.online() ? R.string.peer_online : R.string.peer_offline,
+                                peer.dnsName(),
+                                peer.operatingSystem())
+                        + (peer.sshHostKeys().isEmpty() ? "" : getString(R.string.peer_tailscale_ssh)))
+                .toArray(String[]::new);
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.pick_peer)
+                .setItems(
+                        labels,
+                        (dialog, which) -> ((EditText) findViewById(R.id.peer_host))
+                                .setText(peers.get(which).dnsName()))
+                .show();
     }
 
     @MainThread
     private void exchange() {
-        String host = ((EditText) findViewById(R.id.peer_host)).getText().toString().trim();
+        String host =
+                ((EditText) findViewById(R.id.peer_host)).getText().toString().trim();
         String portText = ((EditText) findViewById(R.id.peer_port)).getText().toString();
         boolean keepOpen = ((CheckBox) findViewById(R.id.keep_open)).isChecked();
         runOperation(current -> {
@@ -240,7 +252,8 @@ public final class LiveActivity extends Activity {
         findViewById(R.id.login).setEnabled(!busy && started);
         findViewById(R.id.logout).setEnabled(!busy && started);
         findViewById(R.id.authorize).setEnabled(status != null && status.loginUrl() != null);
-        findViewById(R.id.pick_peer).setEnabled(status != null && !status.peers().isEmpty());
+        findViewById(R.id.pick_peer)
+                .setEnabled(status != null && !status.peers().isEmpty());
         // Also enabled when not RUNNING, to verify that access ends, e.g. after logout.
         findViewById(R.id.exchange).setEnabled(!busy && started);
         if (status != null) {

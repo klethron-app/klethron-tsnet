@@ -14,17 +14,17 @@ import org.junit.Test;
 
 public final class TrustRootsTest {
     @Test(timeout = 30000)
-    public void tlsAndDerpCertificateNamesUseTheSuppliedRoots() {
+    public void tlsAndDerpUseSuppliedRoots() {
         assertEquals("ok", Probe.call("tlsRoots"));
     }
 
     @Test(timeout = 30000)
-    public void dnsOverHttpsUsesTheSuppliedRoots() {
+    public void dnsOverHttpsUsesSuppliedRoots() {
         assertEquals("ok", Probe.call("dnsRoots"));
     }
 
     @Test(timeout = 30000)
-    public void upnpDiscoveryAndSoapUseTheSuppliedRoots() {
+    public void upnpUsesSuppliedRoots() {
         assertEquals("ok", Probe.call("portmapperRoots"));
     }
 
@@ -35,12 +35,12 @@ public final class TrustRootsTest {
         assertEquals(expected, new TreeSet<>(List.of(Probe.call("roots").split("\n"))));
     }
 
-    /// Contacts Tailscale's real control plane without credentials, so this needs a working internet
-    /// connection. The node stops at an unauthorized login request; the URL never leaves native code.
+    /// Needs internet. Stops at login; the URL stays in native code.
     @Test(timeout = 60000)
-    public void reachesRealControlPlaneUntilLoginWithoutWritingFiles() throws Exception {
+    public void controlLoginUsesAndroidRootsWithoutFiles() throws Exception {
         String root = Probe.call("control");
-        assertTrue("The verified control chain must end at an Android system root, not " + root,
+        assertTrue(
+                "Control root missing from Android store: " + root,
                 systemRootFingerprints().contains(root));
     }
 
@@ -52,7 +52,8 @@ public final class TrustRootsTest {
         for (String alias : Collections.list(store.aliases())) {
             if (alias.startsWith("system:")) {
                 byte[] der = store.getCertificate(alias).getEncoded();
-                fingerprints.add(HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(der)));
+                fingerprints.add(HexFormat.of()
+                        .formatHex(MessageDigest.getInstance("SHA-256").digest(der)));
             }
         }
         return fingerprints;

@@ -8,6 +8,7 @@ import static com.klethron.tsnet.TestSupport.deleteDirectory;
 import static com.klethron.tsnet.TestSupport.temporaryDirectory;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertThrows;
@@ -25,7 +26,7 @@ import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 
-/// Public-API login tests using loopback control in place of the browser.
+/// Loopback control completes logins in place of a browser.
 public final class LoginTest {
     private static final String HOSTNAME = "klethron-login-test";
 
@@ -83,7 +84,9 @@ public final class LoginTest {
             firstUrl = Objects.requireNonNull(status.loginUrl());
             node.logout(WAIT); // Not logged in: no effect, so the pending login completes.
             complete(status);
-            assertFalse(await(node, s -> s.state() == NodeStatus.State.RUNNING).addresses().isEmpty());
+            assertFalse(await(node, s -> s.state() == NodeStatus.State.RUNNING)
+                    .addresses()
+                    .isEmpty());
 
             assertThrows(SocketTimeoutException.class, () -> node.logout(Duration.ZERO));
             node.logout(WAIT);
@@ -100,7 +103,9 @@ public final class LoginTest {
             assertFalse("Login URL was reused", firstUrl.equals(status.loginUrl()));
             // Logout reset the prefs, including control URL and hostname; login restores both.
             complete(status);
-            assertFalse(await(node, s -> s.state() == NodeStatus.State.RUNNING).addresses().isEmpty());
+            assertFalse(await(node, s -> s.state() == NodeStatus.State.RUNNING)
+                    .addresses()
+                    .isEmpty());
             assertEquals(HOSTNAME, Probe.call("hostnames"));
             // Logout discards a pending re-authentication URL with the key it would authorize.
             node.login();
@@ -113,23 +118,27 @@ public final class LoginTest {
 
         try (TailnetNode node = start()) {
             NodeStatus status = await(node, s -> {
-                assertTrue("Logged-out node resumed", s.state() != NodeStatus.State.RUNNING);
+                assertNotEquals("Logged-out node resumed", NodeStatus.State.RUNNING, s.state());
                 return s.loginUrl() != null;
             });
             assertFalse("Login URL was reused", firstUrl.equals(status.loginUrl()));
             complete(status);
-            assertFalse(await(node, s -> s.state() == NodeStatus.State.RUNNING).addresses().isEmpty());
+            assertFalse(await(node, s -> s.state() == NodeStatus.State.RUNNING)
+                    .addresses()
+                    .isEmpty());
         }
     }
 
     @Test(timeout = 120000)
-    public void failedLogoutKeepsTheLoginForRetries() throws Exception {
+    public void failedLogoutPreservesLoginForRetry() throws Exception {
         List<InetAddress> addresses;
         try (TailnetNode node = start()) {
             complete(await(node, s -> s.loginUrl() != null));
             addresses = await(node, s -> s.state() == NodeStatus.State.RUNNING).addresses();
             Probe.call("rejectRegistrations", true);
-            assertEquals("Logout failed", assertThrows(IOException.class, () -> node.logout(WAIT)).getMessage());
+            assertEquals(
+                    "Logout failed",
+                    assertThrows(IOException.class, () -> node.logout(WAIT)).getMessage());
             NodeStatus status = await(node, s -> s.state() == NodeStatus.State.STOPPED);
             assertEquals(addresses, status.addresses());
         }
@@ -139,7 +148,9 @@ public final class LoginTest {
         try (TailnetNode node = start()) {
             awaitResumed(node, addresses);
             Probe.call("rejectRegistrations", true);
-            assertEquals("Logout failed", assertThrows(IOException.class, () -> node.logout(WAIT)).getMessage());
+            assertEquals(
+                    "Logout failed",
+                    assertThrows(IOException.class, () -> node.logout(WAIT)).getMessage());
             Probe.call("rejectRegistrations", false);
             node.logout(WAIT);
             NodeStatus status = await(node, s -> s.state() == NodeStatus.State.NEEDS_LOGIN);
@@ -162,7 +173,12 @@ public final class LoginTest {
             assertTrue(status.toString().contains("KEY_EXPIRED"));
             assertEquals(HOSTNAME, status.dnsName());
             assertNull(node.awaitStatus(status, Duration.ofSeconds(2)).loginUrl());
-            assertDialThrows(SocketTimeoutException.class, node, addresses.get(0).getHostAddress(), 7070, Duration.ofMillis(500));
+            assertDialThrows(
+                    SocketTimeoutException.class,
+                    node,
+                    addresses.get(0).getHostAddress(),
+                    7070,
+                    Duration.ofMillis(500));
 
             node.login();
             status = await(node, s -> s.loginUrl() != null);
@@ -176,7 +192,6 @@ public final class LoginTest {
             assertNull(status.revocation());
             assertEquals(addresses, status.addresses());
 
-            // Re-authenticating keeps the node running until the user opens the new URL.
             node.login();
             status = await(node, s -> {
                 assertEquals("Re-authentication interrupted the node", NodeStatus.State.RUNNING, s.state());
@@ -226,7 +241,7 @@ public final class LoginTest {
         Probe.call("rejectRegistrations", true);
         try (TailnetNode node = start()) {
             NodeStatus status = await(node, s -> s.error() != null);
-            assertEquals("invalid authkey", status.error()); // testcontrol's text.
+            assertEquals("invalid authkey", status.error());
             assertEquals(NodeStatus.State.NEEDS_LOGIN, status.state());
             assertNull(status.revocation());
             assertFalse(status.toString().contains("authkey"));
@@ -254,13 +269,14 @@ public final class LoginTest {
     }
 
     @Test(timeout = 30000)
-    public void refusesInvalidConfigurationAndEnvironmentAuthKeys() throws Exception {
+    public void rejectsInvalidConfigAndEnvironmentAuthKeys() throws Exception {
         StateStore state = store;
         assertThrows(IllegalArgumentException.class, () -> TailnetNode.start(CONTEXT, state, ""));
         assertThrows(IllegalArgumentException.class, () -> TailnetNode.start(CONTEXT, state, "a\0b", controlUrl));
         Probe.call("setAuthKeyEnvironment", true);
         try {
-            IOException e = assertThrows(IOException.class, () -> TailnetNode.start(CONTEXT, state, "host", controlUrl));
+            IOException e =
+                    assertThrows(IOException.class, () -> TailnetNode.start(CONTEXT, state, "host", controlUrl));
             assertTrue(Objects.requireNonNull(e.getMessage()).contains("TS_AUTHKEY"));
         } finally {
             Probe.call("setAuthKeyEnvironment", false);
@@ -275,13 +291,16 @@ public final class LoginTest {
     }
 
     private static void awaitResumed(TailnetNode node, List<InetAddress> addresses) throws IOException {
-        assertEquals(addresses, await(node, s -> {
-            assertNull("Node asked to log in again", s.loginUrl());
-            return s.state() == NodeStatus.State.RUNNING;
-        }).addresses());
+        assertEquals(
+                addresses,
+                await(node, s -> {
+                            assertNull("Node asked to log in again", s.loginUrl());
+                            return s.state() == NodeStatus.State.RUNNING;
+                        })
+                        .addresses());
     }
 
-    /// Completes the pending login in place of the user's browser. Never prints the URL, even in failures.
+    // Keep login URLs out of assertion messages.
     private void complete(NodeStatus status) {
         String url = Objects.requireNonNull(status.loginUrl());
         assertTrue("Unexpected login URL", url.startsWith(controlUrl + "/auth/"));

@@ -6,14 +6,21 @@ import org.junit.Test;
 
 public final class SecurityTest {
     @Test
-    public void loginUrlsRequireTheExpectedOriginAndTransport() {
+    public void loginUrlValidatesOriginAndTransport() {
         String control = "https://controlplane.tailscale.com";
         for (String url : new String[] {
-                "http://login.tailscale.com/a/test", "https://attacker.example/a/test",
-                "https://tailscale.com.attacker.example/a/test", "https://attacker.example/?tailscale.com",
-                "https://user:password@login.tailscale.com/a/test", "https://:443/a/test",
-                "https://login.tailscale.com/a/\ntest", "https://login.tailscale.com/a/ test",
-                "javascript:alert(1)", "intent://login.tailscale.com/a/test", "//login.tailscale.com/a/test"}) {
+            "http://login.tailscale.com/a/test",
+            "https://attacker.example/a/test",
+            "https://tailscale.com.attacker.example/a/test",
+            "https://attacker.example/?tailscale.com",
+            "https://user:password@login.tailscale.com/a/test",
+            "https://:443/a/test",
+            "https://login.tailscale.com/a/\ntest",
+            "https://login.tailscale.com/a/ test",
+            "javascript:alert(1)",
+            "intent://login.tailscale.com/a/test",
+            "//login.tailscale.com/a/test"
+        }) {
             assertEquals("rejected", Probe.call("loginURL", control + '\0' + url));
         }
         for (String url : new String[] {"https://login.tailscale.com/a/test", "https://tailscale.com/a/test"}) {
@@ -27,21 +34,21 @@ public final class SecurityTest {
     }
 
     @Test(timeout = 30000)
-    public void missedStatusUpdatesAndNewKeysEndExistingAccess() {
+    public void watchGapsAndKeyChangesRevokeAccess() {
         for (String reason : new String[] {"eof", "lag", "key"}) {
             assertEquals(reason, "ok", Probe.call("watchDisconnect", reason));
         }
     }
 
     @Test(timeout = 30000)
-    public void authenticationChangesCannotInterleave() {
+    public void authChangesAreSerialized() {
         for (String mode : new String[] {"finish", "cancel", "prefs", "start"}) {
             assertEquals(mode, "ok", Probe.call("authentication", mode));
         }
     }
 
     @Test(timeout = 30000)
-    public void localControlRetiresKeysWithoutABrowserFollowup() {
+    public void controlRetiresKeysWithoutBrowser() {
         assertEquals("ok", Probe.call("controlRotation"));
     }
 }

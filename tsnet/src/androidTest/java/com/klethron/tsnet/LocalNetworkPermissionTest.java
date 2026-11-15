@@ -22,7 +22,7 @@ import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 
-/// Socket-level error injection through the actual peer send paths, JNI and main-thread delivery.
+/// Injects socket errors through peer send paths and JNI.
 @SuppressWarnings("LockOnNonEnclosingClassLiteral") // Shares the production network registration lock.
 public final class LocalNetworkPermissionTest {
     private static final String PEER = "100.64.0.2";
@@ -34,12 +34,15 @@ public final class LocalNetworkPermissionTest {
     private boolean dismissed;
     private boolean offered;
     private final LocalNetworkPermissionHandler handler = new LocalNetworkPermissionHandler() {
-        @Override public boolean canOffer(InetAddress peer) {
+        @Override
+        public boolean canOffer(InetAddress peer) {
             assertSame(Looper.getMainLooper(), Looper.myLooper());
             policyChecks.incrementAndGet();
             return visible && !dismissed && !offered && peer.equals(InetAddresses.parseNumericAddress(selectedPeer));
         }
-        @Override public void offer(InetAddress peer) {
+
+        @Override
+        public void offer(InetAddress peer) {
             assertSame(Looper.getMainLooper(), Looper.myLooper());
             assertEquals(InetAddresses.parseNumericAddress(selectedPeer), peer);
             offered = true;
@@ -56,20 +59,26 @@ public final class LocalNetworkPermissionTest {
     @Before
     public void start() throws Exception {
         Context context = new ContextWrapper(CONTEXT) {
-            @Override public Context getApplicationContext() { return this; }
-            @Override public ApplicationInfo getApplicationInfo() {
+            @Override
+            public Context getApplicationContext() {
+                return this;
+            }
+
+            @Override
+            public ApplicationInfo getApplicationInfo() {
                 ApplicationInfo info = new ApplicationInfo(super.getApplicationInfo());
                 info.targetSdkVersion = targetSdk;
                 return info;
             }
-            @Override public int checkSelfPermission(String permission) {
+
+            @Override
+            public int checkSelfPermission(String permission) {
                 return granted ? PackageManager.PERMISSION_GRANTED : PackageManager.PERMISSION_DENIED;
             }
         };
         node = TailnetNode.start(context, new MemoryStore(), "permission", "http://127.0.0.1:1", handler);
         handle = Probe.handle(node);
-        // Ignore real reports while supplying synthetic LAN prefixes. Otherwise initial Android
-        // network delivery can correctly invalidate an offer in the middle of these fixture tests.
+        // Real network callbacks would invalidate offers based on the test's synthetic prefixes.
         networkField = TailnetNode.class.getDeclaredField("network");
         networkField.setAccessible(true);
         synchronized (TailnetNode.class) {
@@ -85,7 +94,7 @@ public final class LocalNetworkPermissionTest {
     }
 
     @Test(timeout = 30000)
-    public void directDataAndDiscoveryDenialsOfferOnMainThread() {
+    public void peerDenialsOfferOnMainThread() {
         for (String mode : List.of("data", "disco", "access")) {
             main(() -> {
                 select(PEER);
@@ -98,7 +107,7 @@ public final class LocalNetworkPermissionTest {
     }
 
     @Test(timeout = 30000)
-    public void ignoresSuccessOtherErrorsStunAndRelaySends() {
+    public void ignoresOtherErrorsAndNonPeerSends() {
         for (String mode : List.of("success", "unreachable", "stun", "relay")) {
             main(() -> {
                 select(PEER);
@@ -146,7 +155,7 @@ public final class LocalNetworkPermissionTest {
     }
 
     @Test(timeout = 30000)
-    public void fixedHandlerUsesAppStateToSuppressDuplicatesAndAllowRetries() {
+    public void appControlsDuplicatesAndRetries() {
         for (int i = 0; i < 2; i++) {
             main(() -> {
                 select(PEER);
@@ -160,7 +169,7 @@ public final class LocalNetworkPermissionTest {
     }
 
     @Test(timeout = 30000)
-    public void hiddenDismissedAndChangedSelectionPreventQueuedOffers() {
+    public void queuedOffersCheckCurrentAppState() {
         main(() -> {
             select(PEER);
             network("192.0.2.0/24");
@@ -190,7 +199,7 @@ public final class LocalNetworkPermissionTest {
     }
 
     @Test(timeout = 30000)
-    public void networkChangesAndLossCancelQueuedDelivery() {
+    public void networkChangeOrLossCancelsOffers() {
         main(() -> {
             select(PEER);
             network("192.0.2.0/24");
@@ -283,7 +292,15 @@ public final class LocalNetworkPermissionTest {
                 new IpPrefix(InetAddresses.parseNumericAddress("0.0.0.0"), 0)));
     }
 
-    private static boolean supported() { return Build.VERSION.SDK_INT >= 37; }
-    private static void main(Runnable action) { InstrumentationRegistry.getInstrumentation().runOnMainSync(action); }
-    private static void drain() { main(() -> {}); }
+    private static boolean supported() {
+        return Build.VERSION.SDK_INT >= 37;
+    }
+
+    private static void main(Runnable action) {
+        InstrumentationRegistry.getInstrumentation().runOnMainSync(action);
+    }
+
+    private static void drain() {
+        main(() -> {});
+    }
 }

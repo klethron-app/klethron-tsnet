@@ -5,7 +5,7 @@ import static com.klethron.tsnet.TestSupport.await;
 import static com.klethron.tsnet.TestSupport.deleteDirectory;
 import static com.klethron.tsnet.TestSupport.temporaryDirectory;
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertThrows;
@@ -25,13 +25,17 @@ public final class TailnetLockTest {
     private String control;
 
     @Before
-    public void startControl() { control = Probe.call("startControl", "locked"); }
+    public void startControl() {
+        control = Probe.call("startControl", "locked");
+    }
 
     @After
-    public void stopControl() { Probe.call("stopControl"); }
+    public void stopControl() {
+        Probe.call("stopControl");
+    }
 
     @Test(timeout = 60000)
-    public void restoresTrustAndFiltersUnsignedPeersAfterRestart() throws Exception {
+    public void restartPreservesTrustAndPeerFiltering() throws Exception {
         var directory = temporaryDirectory("lock-");
         var file = directory.resolve("state.db").toFile();
         AtomicReference<String> authorityKey = new AtomicReference<>();
@@ -44,7 +48,8 @@ public final class TailnetLockTest {
                 assertNotNull(disk.read(authorityKey.get()));
             }
             Probe.call("tailnetLockRestart");
-            try (SqliteStore disk = new SqliteStore(file); TailnetNode node = start(disk)) {
+            try (SqliteStore disk = new SqliteStore(file);
+                    TailnetNode node = start(disk)) {
                 await(node, s -> {
                     assertNull("Restart requested another login", s.loginUrl());
                     return s.state() == NodeStatus.State.RUNNING;
@@ -59,7 +64,7 @@ public final class TailnetLockTest {
     }
 
     @Test(timeout = 60000)
-    public void compactsAndReopensSignedHistoryThroughCallbacks() throws Exception {
+    public void compactsAndReopensStoredHistory() throws Exception {
         var directory = temporaryDirectory("compact-");
         try (SqliteStore disk = new SqliteStore(directory.resolve("state.db").toFile());
                 TailnetNode node = start(disk)) {
@@ -70,7 +75,7 @@ public final class TailnetLockTest {
     }
 
     @Test(timeout = 60000)
-    public void successfulSyncResponsesCannotRestoreAuthorityAfterProfileChanges() throws Exception {
+    public void staleSyncCannotRestoreAuthority() throws Exception {
         try (TailnetNode node = start(new MemoryStore())) {
             for (String phase : new String[] {"bootstrap", "offer", "send"}) {
                 for (String change : new String[] {"logout", "profile"}) {
@@ -91,28 +96,32 @@ public final class TailnetLockTest {
     }
 
     @Test(timeout = 60000)
-    public void authorityCallbackFailuresStopTheNode() throws Exception {
+    public void authorityStoreFailureStopsNode() throws Exception {
         for (boolean failRead : new boolean[] {true, false}) {
             AtomicBoolean failing = new AtomicBoolean();
             StateStore store = new MemoryStore() {
                 @Override
                 public byte @Nullable [] read(String key) throws IOException {
-                    if (failRead && failing.get() && key.startsWith("_tailnet-lock/")) throw new IOException("private detail");
+                    if (failRead && failing.get() && key.startsWith("_tailnet-lock/"))
+                        throw new IOException("private detail");
                     return super.read(key);
                 }
 
                 @Override
                 public void write(String key, byte @Nullable [] value) throws IOException {
-                    if (!failRead && failing.get() && key.startsWith("_tailnet-lock/")) throw new IOException("private detail");
+                    if (!failRead && failing.get() && key.startsWith("_tailnet-lock/"))
+                        throw new IOException("private detail");
                     super.write(key, value);
                 }
             };
             try (TailnetNode node = start(store)) {
                 await(node, s -> s.state() == NodeStatus.State.RUNNING);
                 failing.set(true);
-                assertFalse(probe("tailnetStore", node, "seed").equals("ok"));
-                assertEquals("State store failed; close the node before retrying",
-                        assertThrows(IOException.class, () -> node.awaitStatus(null, Duration.ZERO)).getMessage());
+                assertNotEquals("ok", probe("tailnetStore", node, "seed"));
+                assertEquals(
+                        "State store failed; close the node before retrying",
+                        assertThrows(IOException.class, () -> node.awaitStatus(null, Duration.ZERO))
+                                .getMessage());
                 node.close();
                 failing.set(false);
                 assertNull(store.read("_tailnet-lock/probe-authority"));
@@ -142,12 +151,14 @@ public final class TailnetLockTest {
             deleting.set(true);
             assertThrows(IOException.class, () -> node.logout(Duration.ofSeconds(10)));
             node.close();
-            assertTrue("Failed deletion discarded pinned trust", java.util.Arrays.equals(pinned, store.read(authorityKey.get())));
+            assertTrue(
+                    "Failed deletion discarded pinned trust",
+                    java.util.Arrays.equals(pinned, store.read(authorityKey.get())));
         }
     }
 
     @Test(timeout = 60000)
-    public void corruptSavedAuthorityStopsStartupWithoutReplacingIt() throws Exception {
+    public void startupRejectsAndPreservesCorruptAuthority() throws Exception {
         MemoryStore memory = new MemoryStore();
         AtomicReference<String> authorityKey = new AtomicReference<>();
         try (TailnetNode node = start(recordAuthorityKey(memory, authorityKey))) {
@@ -158,7 +169,8 @@ public final class TailnetLockTest {
         assertNotNull(key);
         byte[] corrupt = new byte[] {1, 2, 3};
         memory.write(key, corrupt);
-        assertEquals("State store failed; close the node before retrying",
+        assertEquals(
+                "State store failed; close the node before retrying",
                 assertThrows(IOException.class, () -> start(memory)).getMessage());
         assertTrue(java.util.Arrays.equals(corrupt, memory.read(key)));
     }
@@ -170,7 +182,9 @@ public final class TailnetLockTest {
     private static StateStore recordAuthorityKey(StateStore store, AtomicReference<String> savedKey) {
         return new StateStore() {
             @Override
-            public byte @Nullable [] read(String key) throws IOException { return store.read(key); }
+            public byte @Nullable [] read(String key) throws IOException {
+                return store.read(key);
+            }
 
             @Override
             public void write(String key, byte @Nullable [] value) throws IOException {

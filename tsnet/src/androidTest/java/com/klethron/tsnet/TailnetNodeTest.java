@@ -50,8 +50,8 @@ public final class TailnetNodeTest {
                     CompletableFuture.supplyAsync(() -> assertThrows(ClosedChannelException.class, () -> {
                         for (NodeStatus latest = first; ; ) latest = node.awaitStatus(latest, forever);
                     })),
-                    CompletableFuture.supplyAsync(() ->
-                            assertDialThrows(ClosedChannelException.class, node, "100.64.0.1", 22, forever)));
+                    CompletableFuture.supplyAsync(
+                            () -> assertDialThrows(ClosedChannelException.class, node, "100.64.0.1", 22, forever)));
             Thread.sleep(200); // Best effort: let both calls block.
             assertFalse(blocked.stream().anyMatch(CompletableFuture::isDone));
             CompletableFuture<Void> closing = CompletableFuture.runAsync(node::close);
