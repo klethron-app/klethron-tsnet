@@ -22,9 +22,11 @@ For Go, run `gofmt -w tsnet/src/main/go`; `git diff --check` catches whitespace 
 
 ## Build and test
 
-Install JDK 25 or newer, the Go version in [go.mod](tsnet/src/main/go/go.mod), and the Android SDK
+Install JDK 25, the Go version in [go.mod](tsnet/src/main/go/go.mod), and the Android SDK
 platform, build tools and NDK pinned in [libs.versions.toml](gradle/libs.versions.toml).
-CI and releases use the pinned JDK. Set `ANDROID_HOME` or `sdk.dir` in `local.properties` to your SDK.
+CI and releases use the pinned JDK. Palantir Java Format does not yet support
+[JDK 27](https://github.com/palantir/palantir-java-format/issues/1785).
+Set `ANDROID_HOME` or `sdk.dir` in `local.properties` to your SDK.
 Native builds support Linux x86_64 and macOS; only Linux has been verified.
 
 ```sh
