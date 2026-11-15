@@ -75,8 +75,8 @@ apps using files should keep them under `Context.getNoBackupFilesDir()`.
 The same callbacks persist Tailnet Lock authority history when enabled. History is compacted using
 Tailscale's retention policy and removed on logout; callers should treat all store keys as opaque.
 
-`NodeStatus` reports the device name, tailnet, user and peers (names, OS, online state, addresses and
-[Tailscale SSH](https://tailscale.com/kb/1193/tailscale-ssh) host keys).
+`NodeStatus` reports the device name, tailnet, user and peers (MagicDNS names, OS hostnames, OS,
+online state, addresses and [Tailscale SSH](https://tailscale.com/kb/1193/tailscale-ssh) host keys).
 
 `connect` returns a caller-owned, connected blocking `SocketChannel` to a tailnet IP or MagicDNS name.
 It handles the local socket bridge internally; socket addresses and options describe that bridge.

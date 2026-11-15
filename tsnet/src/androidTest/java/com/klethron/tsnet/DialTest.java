@@ -103,6 +103,7 @@ public final class DialTest {
                     s -> s.state() == NodeStatus.State.RUNNING && s.peers().size() == 1);
             NodeStatus.Peer listed = status.peers().get(0);
             assertEquals(PEER_NAME, listed.dnsName());
+            assertEquals("klethron-peer", listed.osHostname());
             assertEquals("android", listed.operatingSystem());
             assertFalse(listed.online());
             assertEquals(
@@ -123,6 +124,7 @@ public final class DialTest {
             Probe.call("addPeers");
             NodeStatus.Peer other = new NodeStatus.Peer(
                     "klethron-other.tail-scale.ts.net",
+                    "rex",
                     "linux",
                     false,
                     List.of(
@@ -133,7 +135,8 @@ public final class DialTest {
                     List.of(other, listed),
                     await(node, s -> s.peers().size() > 1).peers());
             assertEquals("true", Probe.call("setPeerOnline"));
-            NodeStatus.Peer online = new NodeStatus.Peer(PEER_NAME, "android", true, listed.addresses(), List.of());
+            NodeStatus.Peer online =
+                    new NodeStatus.Peer(PEER_NAME, "klethron-peer", "android", true, listed.addresses(), List.of());
             assertEquals(
                     List.of(other, online),
                     await(node, s -> !s.peers().contains(listed)).peers());

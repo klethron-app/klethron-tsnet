@@ -39,6 +39,8 @@ public final class NodeStatus {
     ///
     /// @param dnsName the [MagicDNS](https://tailscale.com/kb/1081/magicdns) name, such as
     ///     `host.tailnet-name.ts.net`, without a trailing dot; the first label is the machine name
+    /// @param osHostname the reported OS hostname, independent of the machine and MagicDNS names; empty if
+    ///     unknown. Limited to 255 ASCII characters, with nonprintable text replaced by question marks.
     /// @param operatingSystem the reported operating system, such as `linux` or `android`; empty if unknown
     /// @param online whether Tailscale reports the device as connected; `false` if unknown
     /// @param addresses the device's Tailscale IP addresses, IPv4 first
@@ -47,6 +49,7 @@ public final class NodeStatus {
     ///     [#addresses()] without trust-on-first-use.
     public record Peer(
             String dnsName,
+            String osHostname,
             String operatingSystem,
             boolean online,
             List<InetAddress> addresses,
@@ -87,6 +90,7 @@ public final class NodeStatus {
                     String[] peer = line.split("\t", -1);
                     return new Peer(
                             peer[0],
+                            peer[5],
                             peer[1],
                             Boolean.parseBoolean(peer[2]),
                             addresses(peer[3]),

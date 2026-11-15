@@ -179,7 +179,7 @@ func readStatus(status *ipnstate.Status) *statusRead {
 			}
 		}
 		lines = append(lines, "\n"+printable(name, 255)+"\t"+printable(peer.OS, 32)+"\t"+strconv.FormatBool(peer.Online)+
-			"\t"+addressList(peer.TailscaleIPs...)+"\t"+strings.Join(keys, ","))
+			"\t"+addressList(peer.TailscaleIPs...)+"\t"+strings.Join(keys, ",")+"\t"+printable(peer.HostName, 255))
 	}
 	slices.Sort(lines)
 	read := &statusRead{peers: strings.Join(lines, "")}

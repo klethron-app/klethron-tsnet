@@ -290,7 +290,7 @@ func addPeers(control *testcontrol.Server, _ string) string {
 		control.UpdateNode(node)
 	}
 	// IPv6 first, which the library reorders. It passes host keys through without parsing them.
-	other := &tailcfg.Hostinfo{OS: "linux", SSH_HostKeys: []string{
+	other := &tailcfg.Hostinfo{Hostname: "rex", OS: "linux", SSH_HostKeys: []string{
 		"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl\n", "ssh-rsa AAAA,invalid"}}
 	add(1, "klethron-other.tail-scale.ts.net.", other, "fd7a:115c:a1e0::101:1", "100.101.0.1")
 	add(2, "klethron-sharee.tail-scale.ts.net.", &tailcfg.Hostinfo{OS: "linux", ShareeNode: true}, "100.101.0.2")
