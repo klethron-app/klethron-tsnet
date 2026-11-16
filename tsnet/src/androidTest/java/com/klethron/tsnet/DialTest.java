@@ -7,6 +7,8 @@ import static com.klethron.tsnet.TestSupport.await;
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
@@ -24,6 +26,7 @@ import java.net.URI;
 import java.net.UnknownHostException;
 import java.nio.ByteBuffer;
 import java.nio.channels.Channels;
+import java.nio.channels.ClosedChannelException;
 import java.nio.channels.SelectionKey;
 import java.nio.channels.Selector;
 import java.nio.channels.SocketChannel;
@@ -117,6 +120,14 @@ public final class DialTest {
                             "fake-control.example.net",
                             "user-2@fake-control.example.net"),
                     Arrays.asList(status.dnsName(), status.tailnetName(), status.loginName()));
+            PeerPath path = node.peerPath(PEER_NAME);
+            assertNotNull(path);
+            assertTrue(path.toString(), path.active());
+            assertEquals(path.toString(), PeerPath.Route.DIRECT, path.route());
+            assertTrue(path.toString(), path.directAddress().startsWith("127.0.0.1:"));
+            assertNotNull(path.lastHandshake());
+            assertTrue(path.toString(), path.sentBytes() > 0 && path.receivedBytes() > 0);
+            assertNull(node.peerPath("klethron-missing.tail-scale.ts.net"));
             assertTrue(status.toString(), status.toString().endsWith(", peers=1}"));
             assertFalse(status.toString().contains("tail-scale")
                     || status.toString().contains("example.net"));
@@ -134,6 +145,10 @@ public final class DialTest {
             assertEquals(
                     List.of(other, listed),
                     await(node, s -> s.peers().size() > 1).peers());
+            PeerPath idle = node.peerPath(other.dnsName());
+            assertNotNull(idle);
+            assertEquals(idle.toString(), PeerPath.Route.NONE, idle.route());
+            assertNull(node.peerPath("klethron-sharee.tail-scale.ts.net"));
             assertEquals("true", Probe.call("setPeerOnline"));
             NodeStatus.Peer online =
                     new NodeStatus.Peer(PEER_NAME, "klethron-peer", "android", true, listed.addresses(), List.of());
@@ -160,6 +175,9 @@ public final class DialTest {
                     Arrays.asList(status.dnsName(), status.tailnetName(), status.loginName()));
             assertReset(connection);
             assertDialThrows(SocketTimeoutException.class, node, peer, 7070, Duration.ofMillis(500));
+            assertNull(node.peerPath(PEER_NAME));
+            node.close();
+            assertThrows(ClosedChannelException.class, () -> node.peerPath(PEER_NAME));
         }
     }
 

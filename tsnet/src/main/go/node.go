@@ -167,9 +167,8 @@ func (n *node) publishStatus(notify ipn.Notify) {
 func readStatus(status *ipnstate.Status) *statusRead {
 	lines := make([]string, 0, len(status.Peer))
 	for _, peer := range status.Peer {
-		name := strings.TrimSuffix(peer.DNSName, ".")
-		// Like tailscale status, hide sharees and Mullvad exit nodes.
-		if peer.ShareeNode || name == "" || strings.HasSuffix(name, ".mullvad.ts.net") || len(peer.TailscaleIPs) == 0 {
+		name, ok := listedName(peer)
+		if !ok {
 			continue
 		}
 		keys := make([]string, 0, len(peer.SSH_HostKeys))
@@ -178,7 +177,7 @@ func readStatus(status *ipnstate.Status) *statusRead {
 				keys = append(keys, key)
 			}
 		}
-		lines = append(lines, "\n"+printable(name, 255)+"\t"+printable(peer.OS, 32)+"\t"+strconv.FormatBool(peer.Online)+
+		lines = append(lines, "\n"+name+"\t"+printable(peer.OS, 32)+"\t"+strconv.FormatBool(peer.Online)+
 			"\t"+addressList(peer.TailscaleIPs...)+"\t"+strings.Join(keys, ",")+"\t"+printable(peer.HostName, 255))
 	}
 	slices.Sort(lines)
@@ -191,6 +190,40 @@ func readStatus(status *ipnstate.Status) *statusRead {
 		read.tailnet = printable(tailnet.Name, 255)
 	}
 	return read
+}
+
+// listedName returns the bounded DNS name of a peer that NodeStatus lists. Like tailscale status, it
+// hides sharees and Mullvad exit nodes.
+func listedName(peer *ipnstate.PeerStatus) (string, bool) {
+	name := strings.TrimSuffix(peer.DNSName, ".")
+	if peer.ShareeNode || name == "" || strings.HasSuffix(name, ".mullvad.ts.net") || len(peer.TailscaleIPs) == 0 {
+		return "", false
+	}
+	return printable(name, 255), true
+}
+
+// peerPath returns "active\tdirect\tpeerRelay\tderpRegion\tlastHandshakeMillis\ttx\trx" for the listed peer
+// named name, with 0 for no handshake; "" without that peer; or false once the node is closed. Paths
+// change without status notifications, so each call reads the backend.
+func (n *node) peerPath(name string) (string, bool) {
+	if n == nil || n.ctx.Err() != nil || !n.lifecycle.TryRLock() {
+		return "", false
+	}
+	defer n.lifecycle.RUnlock()
+	for _, peer := range n.server.Status().Peer {
+		if listed, ok := listedName(peer); !ok || listed != name {
+			continue
+		}
+		var handshake int64
+		if !peer.LastHandshake.IsZero() {
+			handshake = peer.LastHandshake.UnixMilli()
+		}
+		return strconv.FormatBool(peer.Active) + "\t" + printable(peer.CurAddr, 64) + "\t" +
+			printable(peer.PeerRelay, 80) + "\t" + printable(peer.Relay, 32) + "\t" +
+			strconv.FormatInt(handshake, 10) + "\t" + strconv.FormatInt(peer.TxBytes, 10) + "\t" +
+			strconv.FormatInt(peer.RxBytes, 10), true
+	}
+	return "", true
 }
 
 // publish applies notify and an optional status read. Lock backend reads against both publishers.

@@ -12,7 +12,7 @@ Requires **Android 14 (API 34)** or later. The AAR supports **arm64-v8a**, **x86
 consumers need no Go compiler or NDK.
 
 **Under development.** Local tests cover login, logout, revocation, SQLite restart and crash recovery,
-`SocketChannel` operations, IPv6, peer listing, DNS address fallback, split DNS, TLS certificate trust,
+`SocketChannel` operations, IPv6, peer listing and paths, DNS address fallback, split DNS, TLS certificate trust,
 network replacement and Tailnet Lock persistence.
 Split-DNS matching ignores ASCII letter case and preserves distinct non-ASCII label bytes.
 UDP permission recovery preserves established and connecting relay transports and queued packets.
@@ -77,6 +77,8 @@ Tailscale's retention policy and removed on logout; callers should treat all sto
 
 `NodeStatus` reports the device name, tailnet, user and peers (MagicDNS names, OS hostnames, OS,
 online state, addresses and [Tailscale SSH](https://tailscale.com/kb/1193/tailscale-ssh) host keys).
+`peerPath` reads on demand whether traffic to a peer currently goes direct, through a peer relay or
+through DERP, with its endpoint, last handshake and byte counts.
 
 `connect` returns a caller-owned, connected blocking `SocketChannel` to a tailnet IP or MagicDNS name.
 It handles the local socket bridge internally; socket addresses and options describe that bridge.

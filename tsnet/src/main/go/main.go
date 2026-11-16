@@ -72,6 +72,16 @@ func klethron_node_dial(id C.longlong, host *C.char, length C.int, port C.int, s
 	return C.int(lookupNode(id).dial(C.GoStringN(host, length), uint16(port), int(socket), time.Duration(timeout)))
 }
 
+// klethron_node_peer_path returns a peer path record, "" without that peer, or NULL after close.
+//
+//export klethron_node_peer_path
+func klethron_node_peer_path(id C.longlong, name *C.char, length C.int) *C.char {
+	if record, open := lookupNode(id).peerPath(C.GoStringN(name, length)); open {
+		return C.CString(record)
+	}
+	return nil
+}
+
 //export klethron_node_logout
 func klethron_node_logout(id C.longlong, timeout C.longlong) C.int {
 	return C.int(lookupNode(id).logout(time.Duration(timeout)))

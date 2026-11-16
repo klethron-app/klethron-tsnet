@@ -73,6 +73,16 @@ Java_com_klethron_tsnet_TailnetNode_nativeDial(JNIEnv *env, jclass type, jlong h
     return klethron_node_dial(handle, bytes, length, port, socket, timeout);
 }
 
+JNIEXPORT jstring JNICALL
+Java_com_klethron_tsnet_TailnetNode_nativePeerPath(JNIEnv *env, jclass type, jlong handle, jbyteArray name) {
+    // As for dials: Java limits names to 255 UTF-8 bytes; copy exact bytes rather than modified UTF-8.
+    char bytes[256];
+    jsize length = (*env)->GetArrayLength(env, name);
+    if (length >= (jsize) sizeof bytes) return (*env)->NewStringUTF(env, ""); // Invalid; Java checks first.
+    (*env)->GetByteArrayRegion(env, name, 0, length, (jbyte *) bytes);
+    return javaString(env, klethron_node_peer_path(handle, bytes, length));
+}
+
 JNIEXPORT jint JNICALL
 Java_com_klethron_tsnet_TailnetNode_nativeLogout(JNIEnv *env, jclass type, jlong handle, jlong timeout) {
     return klethron_node_logout(handle, timeout);

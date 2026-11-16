@@ -372,6 +372,22 @@ public final class TailnetNode implements AutoCloseable {
         }
     }
 
+    /// Reads how traffic to a peer currently travels. Paths change without [#awaitStatus] reporting a
+    /// change, so call again to refresh. Reading builds a full backend status: avoid polling it.
+    ///
+    /// @param dnsName a listed [NodeStatus.Peer#dnsName()]
+    /// @return the path, or `null` if no peer in the latest network map is listed under that name
+    /// @throws ClosedChannelException if the node is closed
+    @WorkerThread
+    public @Nullable PeerPath peerPath(String dnsName) throws IOException {
+        Store.checkNotInCallback();
+        byte[] name = dnsName.getBytes(StandardCharsets.UTF_8);
+        if (name.length > 255) return null; // Listed names are bounded.
+        String record = nativePeerPath(handle, name);
+        if (record == null) throw new ClosedChannelException();
+        return record.isEmpty() ? null : PeerPath.parse(record);
+    }
+
     /// Ends access and connections and deletes the saved login. The node stays open in
     /// [NodeStatus.State#NEEDS_LOGIN] and can [#login] again. Does nothing if already logged out.
     ///
@@ -451,6 +467,8 @@ public final class TailnetNode implements AutoCloseable {
     private static native @Nullable String nativeAwaitStatus(long handle, long afterVersion, long timeoutNanos);
 
     private static native int nativeDial(long handle, byte[] host, int port, int socket, long timeoutNanos);
+
+    private static native @Nullable String nativePeerPath(long handle, byte[] name);
 
     private static native int nativeLogout(long handle, long timeoutNanos);
 
